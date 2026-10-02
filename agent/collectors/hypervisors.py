@@ -87,24 +87,25 @@ class HypervisorCollector:
                 )
             )
             return []
-        # Dentro de una tarea: exclusiones, alcance y memoria. Sin tarea (el
-        # protocolo 1) nada de esto existe y se pregunta como siempre.
+        # Las exclusiones valen siempre, también en el protocolo 1 (spec 2.4).
+        # Dentro de una tarea, además, alcance y memoria; sin tarea se pregunta
+        # como siempre.
         key = ""
-        if tasking.task(ctx) is not None:
-            address = net.resolve(credential.host)
-            if tasking.excluded(ctx, credential.host) or (address and tasking.excluded(ctx, address)):
-                # Un servidor excluido en la máquina del agente no se toca, ni
-                # siquiera porque alguien haya escrito su credencial en la web.
-                # Se dice, para que nadie busque por qué no salen sus VMs.
-                errors.append(
-                    collector_note(
-                        "hypervisors",
-                        "excluded",
-                        f"{credential.host}: dirección excluida en este agente; no se consulta",
-                        host=credential.host,
-                    )
+        address = net.resolve(credential.host) if ctx.get("excluded") is not None or tasking.task(ctx) else ""
+        if tasking.excluded(ctx, credential.host) or (address and tasking.excluded(ctx, address)):
+            # Un servidor excluido en la máquina del agente no se toca, ni
+            # siquiera porque alguien haya escrito su credencial en la web.
+            # Se dice, para que nadie busque por qué no salen sus VMs.
+            errors.append(
+                collector_note(
+                    "hypervisors",
+                    "excluded",
+                    f"{credential.host}: dirección excluida en este agente; no se consulta",
+                    host=credential.host,
                 )
-                return []
+            )
+            return []
+        if tasking.task(ctx) is not None:
             # La clave de la memoria es la dirección, salvo que el alcance de la
             # credencial nombre al servidor por su nombre: la memoria comprueba
             # el alcance con la clave, y tiene que ser algo que el alcance cubra.

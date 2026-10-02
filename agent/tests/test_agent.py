@@ -474,3 +474,87 @@ class BatchSizeTests(unittest.TestCase):
 
     def test_nothing_still_pushes_one_empty_batch(self) -> None:
         self.assertEqual(agent_client._batched([]), [[]])
+
+
+class LegacySweepExclusionTests(unittest.TestCase):
+    """The protocol-1 loop (and ``--once`` against an old server) obeys the
+    local exclusions too: spec 2.4, «no path ever touches an excluded address»."""
+
+    def test_the_legacy_sweep_never_pings_or_probes_an_excluded_address(self) -> None:
+        from agent import __main__ as loop
+        from agent.memory import Excluded, Memory
+
+        touched: list[str] = []
+        client = mock.Mock()
+        client.heartbeat.return_value = {
+            "config": {
+                "subnets": ["10.9.0.0/29"],
+                "credentials": [{"kind": "ssh", "username": "admin", "secret": "x"}],
+                "probe_ips": ["10.9.0.2", "10.9.0.3"],
+            }
+        }
+        client.push_findings.return_value = {"created": 0, "refreshed": 0}
+
+        def ping(addresses, **kwargs):  # noqa: ANN001, ANN003
+            touched.extend(addresses)
+            return list(addresses)
+
+        def listening(ips, port, **kwargs):  # noqa: ANN001, ANN003
+            touched.extend(ips)
+            return []
+
+        def port_open(ip, port):  # noqa: ANN001
+            touched.append(ip)
+            return False
+
+        excluded = Excluded(["10.9.0.0/30"], ["10.9.0.5"])
+        with mock.patch("agent.collectors.sweep.net.sweep", side_effect=ping), \
+             mock.patch("agent.collectors.sweep.net.arp_table", return_value={}), \
+             mock.patch("agent.collectors.sweep.net.reverse_dns", return_value=""), \
+             mock.patch("agent.net.hosts_listening", side_effect=listening), \
+             mock.patch("agent.probe._port_open", side_effect=port_open), \
+             mock.patch("agent.collectors.snmp.snmp.AVAILABLE", False), \
+             mock.patch("builtins.print"):
+            loop.sweep(client, config.Config(url="http://localhost", token="t"), report=False,
+                       excluded=excluded, memory=Memory.load(None))
+
+        self.assertTrue(touched)  # el barrido sí ha corrido
+        self.assertEqual(sorted(ip for ip in set(touched) if ip in excluded), [])
+
+    def test_the_legacy_loop_hands_the_exclusions_and_the_memory_to_the_sweep(self) -> None:
+        import threading
+
+        from agent import __main__ as loop
+        from agent.memory import Excluded, Memory
+
+        runtime = mock.Mock(excluded=Excluded(["10.9.0.0/30"], []), memory=Memory.load(None))
+        stop = threading.Event()
+        seen: list[dict] = []
+
+        def fake_sweep(client, env, **kwargs):  # noqa: ANN001, ANN003
+            seen.append(kwargs)
+            stop.set()
+            return 60
+
+        with mock.patch.object(loop, "sweep", side_effect=fake_sweep), mock.patch("builtins.print"):
+            loop._legacy_loop(mock.Mock(), config.Config(url="http://localhost", token="t"), runtime, stop)
+
+        self.assertIs(seen[0].get("excluded"), runtime.excluded)
+        self.assertIs(seen[0].get("memory"), runtime.memory)
+
+    def test_an_excluded_hypervisor_is_not_asked_without_a_task_either(self) -> None:
+        from agent.collectors import hypervisors
+        from agent.memory import Excluded
+
+        client_class = mock.Mock()
+        ctx = {
+            "config": {"credentials": [{"kind": "vmware", "username": "u", "secret": "s", "host": "10.9.0.2"}]},
+            "excluded": Excluded(["10.9.0.0/30"], []),
+        }
+        with mock.patch.dict(hypervisors.CLIENTS, {"vmware": client_class}), \
+             mock.patch("agent.collectors.hypervisors.net.resolve", return_value="10.9.0.2"):
+            findings = hypervisors.HypervisorCollector().collect(ctx)
+
+        self.assertEqual(findings, [])
+        client_class.assert_not_called()
+        self.assertEqual([note.code for note in ctx["errors"]], ["excluded"])

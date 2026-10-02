@@ -280,7 +280,7 @@ La interfaz del colector no cambia: `collect(ctx) -> list[Finding]`. Claves:
 | `task` | str | el bucle | la tarea en curso. **Ausente = comportamiento de la 0.10.x** (todo de una vez): así el bucle del protocolo 1 y los tests de siempre no cambian |
 | `hosts` | list[{"ip","mac"}] | `sweep` en presencia; el bucle en las demás | los vivos |
 | `targets` | list[str] \| None | el bucle | si no es `None`, solo esas IP |
-| `memory` | `Memory` \| None | el bucle | 2.3. `None` = sin memoria (protocolo 1) |
+| `memory` | `Memory` \| None | el bucle | 2.3. `None` = sin memoria. El bucle del protocolo 1 también la pasa (y las exclusiones): sin `task`, pero con el límite de credenciales |
 | `workers` | {"ping","login","snmp"} | el bucle | cuántas conexiones a la vez (2.5). Ausente = las constantes de hoy |
 | `excluded` | `Excluded` \| None | el bucle | 2.4 |
 | `progress` | callable(step, done, total) \| None | el bucle | el colector avisa de su avance; llamarlo nunca lanza |

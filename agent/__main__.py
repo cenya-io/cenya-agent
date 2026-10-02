@@ -27,6 +27,7 @@ from agent.client import AgentClient, PushError
 from agent.collectors import all_collectors
 from agent.config import Config, from_env
 from agent.i18n import _t, _tn
+from agent.memory import Excluded, Memory
 from agent.runtime import FALLBACK, V1, V2, Runtime
 
 # Lo que imprime el bucle se lee en una consola, en `docker logs` y, con el
@@ -79,7 +80,14 @@ def _stopping(stop_event: StopSignal | None) -> bool:
     return stop_event is not None and stop_event.is_set()
 
 
-def sweep(client: AgentClient, env: Config, *, report: bool = True) -> int:
+def sweep(
+    client: AgentClient,
+    env: Config,
+    *,
+    report: bool = True,
+    excluded: Excluded | None = None,
+    memory: Memory | None = None,
+) -> int:
     """One pass over every collector. Returns how many findings were pushed.
 
     A collector that blows up must not kill the sweep: it is reported as a
@@ -88,6 +96,11 @@ def sweep(client: AgentClient, env: Config, *, report: bool = True) -> int:
     `report` escribe el fichero de estado que lee el icono de bandeja. `--once`
     lo apaga: es alguien probando a mano, y pisaría el estado del servicio que
     quizá corre a la vez en la misma máquina.
+
+    `excluded` y `memory` son los mismos que usa el protocolo 2 (spec 2.3 y
+    2.4): ningún camino toca una dirección excluida, tampoco este, y la
+    memoria es la que evita repetir credenciales fallidas contra un dominio.
+    `task` sigue sin ponerse: los colectores se comportan como en la 0.10.x.
     """
     if report:
         status.sweep_started()
@@ -95,7 +108,7 @@ def sweep(client: AgentClient, env: Config, *, report: bool = True) -> int:
     started = datetime.now(timezone.utc)
     # The shared context: the server-sent config, the environment overrides,
     # and what one collector leaves for the next (the sweep's live hosts).
-    ctx: dict = {"config": answer.get("config") or {}, "env": env}
+    ctx: dict = {"config": answer.get("config") or {}, "env": env, "excluded": excluded, "memory": memory}
     items = []
     collectors = all_collectors()
     for collector in collectors:
@@ -116,6 +129,11 @@ def sweep(client: AgentClient, env: Config, *, report: bool = True) -> int:
         ctx.setdefault("errors", []).append(
             collector_note("probe", "crashed", str(exc), detail=f"{type(exc).__name__}: {exc}")
         )
+    if memory is not None:
+        try:
+            memory.save()
+        except Exception:  # noqa: BLE001 - la memoria es prescindible
+            pass
     errors = ctx.get("errors") or []
     result = client.push_findings(
         run={
@@ -223,7 +241,7 @@ def main(argv: list[str] | None = None, stop_event: StopSignal | None = None) ->
             if runtime.negotiate() == V2:
                 runtime.once()
             else:
-                sweep(client, config, report=False)
+                sweep(client, config, report=False, excluded=runtime.excluded, memory=runtime.memory)
         except PushError as exc:
             _say(_t("[agente] %(error)s") % {"error": exc}, error=True)
             raise SystemExit(1) from exc
@@ -265,7 +283,7 @@ def _legacy_loop(client: AgentClient, config: Config, runtime: Runtime, stop_eve
     last_try = time.monotonic()
     while not _stopping(stop_event):
         try:
-            interval = sweep(client, config) or interval
+            interval = sweep(client, config, excluded=runtime.excluded, memory=runtime.memory) or interval
         except PushError as exc:
             # A network cut or a revoked token is not a reason to die: sleep
             # and try again. The server keeps the state; the agent just knocks.

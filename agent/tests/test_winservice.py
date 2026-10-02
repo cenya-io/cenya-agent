@@ -120,7 +120,7 @@ class MainStopTests(unittest.TestCase):
 
         event = threading.Event()
 
-        def sweep_then_stop(client, config):
+        def sweep_then_stop(client, config, **kwargs):
             event.set()  # alguien pulsa «Detener» mientras barre
             return 900
 
@@ -135,7 +135,7 @@ class MainStopTests(unittest.TestCase):
 
         event = threading.Event()
 
-        def fail_then_stop(client, config):
+        def fail_then_stop(client, config, **kwargs):
             event.set()
             raise PushError("servidor caído")
 
