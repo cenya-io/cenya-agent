@@ -46,6 +46,11 @@ common = dict(
         "agent.winservice",
         "agent.tray",
         "agent.netbox_export",
+        "agent.goodbye",
+        # Los permisos de la carpeta de estado (agent/store.py) los lee y
+        # escribe pywin32 si está, importado dentro de una función.
+        "win32security",
+        "win32api",
         "win32serviceutil",
         "win32service",
         "servicemanager",
