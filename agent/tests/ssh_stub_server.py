@@ -133,11 +133,25 @@ class _Transport:
 
 
 class StubSshServer:
-    """Accepts password ``expected`` for any user; echoes ``output`` to an exec."""
+    """Accepts password ``expected`` for any user; echoes ``output`` to an exec.
 
-    def __init__(self, *, expected: bytes | None = None, output: bytes = b"hello-from-stub\n") -> None:
+    ``methods`` is what it offers, in order: ``password`` and/or
+    ``keyboard-interactive`` (one prompt, "Password: "), which is what Cisco
+    IOS, a PAM Linux or a FortiGate offer. Every request is recorded in
+    ``attempts``, including the ``none`` probe a client sends first to learn
+    the methods (it carries no secret and is not a failed login).
+    """
+
+    def __init__(
+        self,
+        *,
+        expected: bytes | None = None,
+        output: bytes = b"hello-from-stub\n",
+        methods: tuple[str, ...] = ("password",),
+    ) -> None:
         self.expected = expected
         self.output = output
+        self.methods = methods
         self.attempts: list[Attempt] = []
         self.errors: list[str] = []
         self._host_key = ed25519.Ed25519PrivateKey.generate()
@@ -260,13 +274,27 @@ class StubSshServer:
             method = reader.string().decode()
             attempt = Attempt(username=username, method=method)
             self.attempts.append(attempt)
-            if method == "password":
+            if method == "password" and method in self.methods:
                 reader.byte()  # "change password" flag
                 attempt.password = reader.string()
-                if self.expected is not None and attempt.password == self.expected:
-                    transport.send(bytes([52]))
-                    return
-            transport.send(bytes([51]) + _name_list("password") + bytes([0]))
+            elif method == "keyboard-interactive" and method in self.methods:
+                # USERAUTH_INFO_REQUEST: nombre, instrucción, idioma, un prompt sin eco.
+                transport.send(
+                    bytes([60]) + _string(b"") + _string(b"") + _string(b"")
+                    + struct.pack(">I", 1) + _string(b"Password: ") + bytes([0])
+                )
+                reply = _Reader(transport.receive())
+                if reply.byte() != 61:
+                    raise ConnectionError("expected USERAUTH_INFO_RESPONSE")
+                attempt.password = reply.string() if reply.uint32() else b""
+            if attempt.password is not None and self.expected is not None and attempt.password == self.expected:
+                transport.send(bytes([52]))
+                return
+            transport.send(bytes([51]) + _name_list(*self.methods) + bytes([0]))
+
+    def failed_logins(self) -> list[Attempt]:
+        """What a lockout policy counts: every attempt that carried a secret and failed."""
+        return [a for a in self.attempts if a.password is not None and a.password != self.expected]
 
     def _channel(self, transport: _Transport) -> None:
         remote_channel = 0

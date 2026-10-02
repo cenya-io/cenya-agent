@@ -163,6 +163,17 @@ class Answer:
     error: str = ""
 
 
+#: Los dos métodos con los que se entrega una contraseña. Uno por intento.
+PASSWORD = "password"
+KEYBOARD_INTERACTIVE = "keyboard-interactive"
+
+_METHOD_SWITCHES = {PASSWORD: "PasswordAuthentication", KEYBOARD_INTERACTIVE: "KbdInteractiveAuthentication"}
+
+#: «Permission denied (publickey,keyboard-interactive).»: los métodos que el
+#: servidor ofrece, en la línea con la que `ssh` se rinde.
+_DENIED_RE = re.compile(r"Permission denied \(([^)]*)\)")
+
+
 def argv_for(
     *,
     host: str,
@@ -172,6 +183,7 @@ def argv_for(
     with_password: bool = False,
     askpass: bool = False,
     command: str = "",
+    method: str = PASSWORD,
 ) -> list[str]:
     """La orden completa, montada aparte para poder mirarla en un test.
 
@@ -181,6 +193,13 @@ def argv_for(
     estando, que es lo que impide que un prompt inesperado cuelgue el barrido.
     ``askpass`` dice cómo se entrega: por el mecanismo de OpenSSH (el entorno lo
     pone `run`), o, sin él, anteponiendo `sshpass`.
+
+    **Con contraseña, un solo método por intento** (`method`). Un Cisco IOS, un
+    Linux con PAM o un FortiGate ofrecen ``keyboard-interactive`` y
+    ``password``; `ssh` probaba los dos y el askpass contestaba a los dos: dos
+    inicios de sesión fallidos por cada contraseña equivocada, y con
+    ``login block-for ... attempts 3`` dos credenciales malas bloqueaban el
+    equipo. Así que todo lo demás se apaga explícitamente.
     """
     options = [
         "-o",
@@ -189,14 +208,24 @@ def argv_for(
         "StrictHostKeyChecking=accept-new",
     ]
     if with_password:
+        if method not in _METHOD_SWITCHES:
+            raise ValueError(f"método de contraseña desconocido: {method}")
         options += [
             "-o",
             "BatchMode=no",
             "-o",
             "NumberOfPasswordPrompts=1",
             "-o",
+            f"PreferredAuthentications={method}",
+            "-o",
             "PubkeyAuthentication=no",
+            "-o",
+            "GSSAPIAuthentication=no",
+            "-o",
+            "HostbasedAuthentication=no",
         ]
+        for name, switch in _METHOD_SWITCHES.items():
+            options += ["-o", f"{switch}={'yes' if name == method else 'no'}"]
     else:
         options += ["-o", "BatchMode=yes"]
     if key_file:
@@ -261,6 +290,29 @@ def run(
         # `ssh` lee la respuesta del askpass hasta el fin de línea: una
         # contraseña con uno llegaría cortada y fallaría sin explicación.
         return Answer(connected=False, error="la contraseña contiene un salto de línea y no se puede entregar")
+    answer, stderr = _attempt(host, username, port, key_file, command, secret, mode, PASSWORD)
+    if mode and not answer.connected:
+        # Un solo reintento, y solo si el servidor ha dicho que `password` no
+        # lo ofrece: entonces el primer intento no llegó a gastar nada, y el
+        # mismo secreto va por `keyboard-interactive`, solo.
+        offered = offered_methods(stderr)
+        if offered is not None and PASSWORD not in offered and KEYBOARD_INTERACTIVE in offered:
+            answer, _ = _attempt(host, username, port, key_file, command, secret, mode, KEYBOARD_INTERACTIVE)
+    return answer
+
+
+def offered_methods(stderr: str) -> tuple[str, ...] | None:
+    """Los métodos de «Permission denied (…)», o `None` si `ssh` no se rindió así."""
+    match = _DENIED_RE.search(stderr or "")
+    if match is None:
+        return None
+    return tuple(part.strip() for part in match.group(1).split(",") if part.strip())
+
+
+def _attempt(
+    host: str, username: str, port: int, key_file: str, command: str, secret: str, mode: str, method: str
+) -> tuple[Answer, str]:
+    """Una ejecución de `ssh`: lo que pasó, y su error estándar entero."""
     argv = argv_for(
         host=host,
         username=username,
@@ -269,6 +321,7 @@ def run(
         with_password=bool(mode),
         askpass=mode == "askpass",
         command=command,
+        method=method,
     )
     try:
         result = subprocess.run(
@@ -280,12 +333,25 @@ def run(
             env=environment_for(secret, mode),
         )
     except subprocess.TimeoutExpired:
-        return Answer(connected=False, error="tiempo de espera agotado")
+        return Answer(connected=False, error="tiempo de espera agotado"), ""
     except OSError as exc:
-        return Answer(connected=False, error=str(exc))
+        return Answer(connected=False, error=str(exc)), ""
+    stderr = result.stderr or ""
     if result.returncode == SSH_FAILURE_CODE:
-        # La primera línea basta: `ssh` explica el motivo ahí y el resto son
-        # avisos de la clave del host que no aportan nada al informe.
-        first = (result.stderr or "").strip().splitlines()
-        return Answer(connected=False, error=first[0] if first else "conexión rechazada")
-    return Answer(connected=True, output=result.stdout or "", error=(result.stderr or "").strip())
+        return Answer(connected=False, error=_reason(stderr)), stderr
+    return Answer(connected=True, output=result.stdout or "", error=stderr.strip()), stderr
+
+
+def _reason(stderr: str) -> str:
+    """El motivo con el que `ssh` se rindió, en una línea.
+
+    La primera que no es un aviso: `ssh` explica el motivo ahí, y lo de
+    después son avisos de la clave del host que no aportan nada. Un OpenSSH 10
+    abre además con «** WARNING: connection is not using a post-quantum key
+    exchange», que tampoco explica nada.
+    """
+    lines = [line.strip() for line in stderr.strip().splitlines() if line.strip()]
+    meaningful = [line for line in lines if not line.startswith(("**", "Warning:", "@"))]
+    if meaningful:
+        return meaningful[0]
+    return lines[0] if lines else "conexión rechazada"

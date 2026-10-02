@@ -528,6 +528,77 @@ class RunTests(unittest.TestCase):
         # Solo la primera línea: el resto son avisos que no explican nada.
         self.assertEqual(answer.error, "root@10.0.0.5: Permission denied (publickey).")
 
+    def test_a_password_run_uses_exactly_one_authentication_method(self) -> None:
+        """Con `keyboard-interactive` y `password` ofrecidos, `ssh` probaba los
+        dos: dos inicios fallidos por contraseña equivocada."""
+        argv = ssh.argv_for(host="h", username="u", with_password=True, askpass=True)
+        options = [argv[i + 1] for i, part in enumerate(argv) if part == "-o"]
+
+        self.assertIn("PreferredAuthentications=password", options)
+        for off in (
+            "PubkeyAuthentication=no",
+            "KbdInteractiveAuthentication=no",
+            "GSSAPIAuthentication=no",
+            "HostbasedAuthentication=no",
+        ):
+            self.assertIn(off, options)
+        self.assertIn("PasswordAuthentication=yes", options)
+        self.assertIn("NumberOfPasswordPrompts=1", options)
+
+    def test_the_keyboard_interactive_run_turns_password_off(self) -> None:
+        argv = ssh.argv_for(host="h", username="u", with_password=True, askpass=True, method="keyboard-interactive")
+        options = [argv[i + 1] for i, part in enumerate(argv) if part == "-o"]
+
+        self.assertIn("PreferredAuthentications=keyboard-interactive", options)
+        self.assertIn("KbdInteractiveAuthentication=yes", options)
+        self.assertIn("PasswordAuthentication=no", options)
+
+    def _runs(self, stderrs: list[str]) -> list[list[str]]:
+        calls: list[list[str]] = []
+
+        def fake_run(argv: list[str], **kwargs: Any) -> Any:
+            calls.append(argv)
+            return subprocess.CompletedProcess(args=argv, returncode=255, stdout="", stderr=stderrs[len(calls) - 1])
+
+        with mock.patch("agent.ssh.ASKPASS_AVAILABLE", True), mock.patch("agent.ssh.ASKPASS", "askpass"), \
+             mock.patch("agent.ssh.subprocess.run", fake_run):
+            answer = ssh.run(host="10.0.0.5", username="admin", secret="mala", command="show version")
+        self.assertFalse(answer.connected)
+        return calls
+
+    def test_a_refused_password_is_not_retried(self) -> None:
+        calls = self._runs(["admin@10.0.0.5: Permission denied (publickey,keyboard-interactive,password).\n"])
+
+        self.assertEqual(len(calls), 1)
+
+    def test_without_password_on_offer_it_retries_once_by_keyboard_interactive(self) -> None:
+        calls = self._runs([
+            "** WARNING: connection is not using a post-quantum key exchange algorithm.\n"
+            "admin@10.0.0.5: Permission denied (publickey,keyboard-interactive).\n",
+            "admin@10.0.0.5: Permission denied (publickey,keyboard-interactive).\n",
+        ])
+
+        self.assertEqual(len(calls), 2)
+        self.assertIn("PreferredAuthentications=keyboard-interactive", calls[1])
+
+    def test_a_connection_failure_is_not_retried(self) -> None:
+        calls = self._runs(["ssh: connect to host 10.0.0.5 port 22: Connection refused\n"])
+
+        self.assertEqual(len(calls), 1)
+
+    def test_the_reason_skips_the_post_quantum_warning(self) -> None:
+        completed = subprocess.CompletedProcess(
+            args=[],
+            returncode=ssh.SSH_FAILURE_CODE,
+            stdout="",
+            stderr="** WARNING: connection is not using a post-quantum key exchange algorithm.\n"
+            "root@10.0.0.5: Permission denied (password).\n",
+        )
+
+        answer, _ = self._run(completed)
+
+        self.assertEqual(answer.error, "root@10.0.0.5: Permission denied (password).")
+
     def test_a_remote_command_that_failed_still_counts_as_getting_in(self) -> None:
         """«No me dejó entrar» y «entré y ese comando no existe ahí» son cosas
         distintas: confundirlas hace probar credenciales de más contra un

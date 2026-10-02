@@ -153,6 +153,44 @@ class RealSshPasswordLoginTests(unittest.TestCase):
         self.assertEqual([a for a in self.server.attempts if a.method == "password"], [])
 
 
+class OneFailedLoginPerWrongPasswordTests(RealSshPasswordLoginTests):
+    """A server that offers keyboard-interactive *and* password (Cisco IOS, a PAM
+    Linux, FortiGate). Before 0.11.1 ``ssh`` tried both and the helper answered
+    both prompts: two failed logins per wrong credential, and two wrong
+    credentials against ``login block-for ... attempts 3`` locked the device."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        super().setUpClass()
+        cls.server.methods = ("keyboard-interactive", "password")
+
+    def test_a_wrong_password_costs_exactly_one_failed_login(self) -> None:
+        answer = self._login("the-one-we-have", expected="the-one-it-wants")
+
+        self.assertFalse(answer.connected)
+        self.assertEqual(len(self.server.failed_logins()), 1, self.server.attempts)
+        self.assertEqual(self.server.failed_logins()[0].method, "password")
+
+    def test_the_right_password_still_gets_in_by_password(self) -> None:
+        answer = self._login("correct horse")
+
+        self.assertTrue(answer.connected, answer.error)
+        self.assertEqual([a.method for a in self.server.attempts if a.password is not None], ["password"])
+
+    def test_without_password_it_retries_once_by_keyboard_interactive(self) -> None:
+        self.server.methods = ("publickey", "keyboard-interactive")
+        self.addCleanup(setattr, self.server, "methods", ("keyboard-interactive", "password"))
+
+        wrong = self._login("the-one-we-have", expected="the-one-it-wants")
+        failures = self.server.failed_logins()
+        self.server.attempts.clear()
+        right = self._login("correct horse")
+
+        self.assertFalse(wrong.connected)
+        self.assertEqual([a.method for a in failures], ["keyboard-interactive"])
+        self.assertTrue(right.connected, right.error)
+
+
 class AskpassHelperRealProcessTests(unittest.TestCase):
     """The helper as a process, which is how ``ssh`` runs it."""
 
