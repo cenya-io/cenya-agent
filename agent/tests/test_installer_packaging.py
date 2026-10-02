@@ -332,5 +332,36 @@ class InstallerSpeaksFiveLanguagesTests(unittest.TestCase):
                 self.assertTrue((PACKAGING / script).read_bytes().startswith(b"\xef\xbb\xbf"))
 
 
+class PascalCommentTests(unittest.TestCase):
+    """Un comentario `{ ... }` de Pascal termina en la PRIMERA llave que cierra.
+
+    Con otra llave dentro --una constante de Inno, una expresión regular con
+    un cuantificador--, el comentario acaba ahí y lo que sigue se compila como
+    código: «'BEGIN' expected», y solo se ve al construir el instalador en CI.
+    Pasó con tres comentarios a la vez.
+    """
+
+    def test_no_code_comment_has_a_brace_inside(self) -> None:
+        script = (Path(__file__).resolve().parents[1] / "packaging" / "cenya-agent.iss").read_text(encoding="utf-8")
+        start = script.index("[Code]")
+        code, first_line = script[start:], script[:start].count("\n") + 1
+        nested: list[int] = []
+        position = 0
+        while position < len(code):
+            if code[position] == "'":
+                position = code.index("'", position + 1) + 1
+            elif code.startswith("//", position):
+                end = code.find("\n", position)
+                position = end if end > 0 else len(code)
+            elif code[position] == "{":
+                end = code.index("}", position)
+                if "{" in code[position + 1 : end]:
+                    nested.append(first_line + code[:position].count("\n"))
+                position = end + 1
+            else:
+                position += 1
+        self.assertEqual(nested, [], "comentarios con una llave dentro, en estas líneas del .iss")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -287,7 +287,7 @@ begin
   Result := StateDir + '\previous';
 end;
 
-{ /UPDATE: un interruptor sin valor, así que no sirve {param:...}. }
+{ /UPDATE: un interruptor sin valor, así que no sirve la constante «param». }
 function IsUpdateMode: Boolean;
 var
   I: Integer;
@@ -368,7 +368,8 @@ end;
 
 { La cadena de conexión del nombre del instalador (contrato, sección 2):
   Cenya-Agent-Setup-X.Y.Z_<base32>.exe, quizá con el « (1)» que añade el
-  navegador. Lo mismo que _([a-z2-7]{16,})( \(\d+\))?\.exe$. '' si no hay. }
+  navegador: un guion bajo, 16 o más caracteres de base32 y el .exe del final.
+  '' si no hay. }
 function InstallerNameConnection: String;
 var
   Name, Payload, Decoded: String;
@@ -431,7 +432,8 @@ begin
     Result := Trim(ConnectionPage.Values[0]);
 end;
 
-{ /CA=, o el campo de la página. Ruta completa: el agente corre en {app}. }
+{ /CA=, o el campo de la página. Ruta completa: el agente corre en la carpeta
+  del programa. }
 function ChosenCa: String;
 begin
   Result := Trim(ExpandConstant('{param:CA|}'));
