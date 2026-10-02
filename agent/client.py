@@ -28,6 +28,7 @@ import urllib.request
 from typing import Any
 
 from agent.i18n import _t, accept_language
+from agent.logs import scrub
 
 #: Lo que se enseña de una respuesta de error que no es la del servidor (un
 #: proxy, un portal cautivo): el principio, que suele bastar para reconocerla.
@@ -130,6 +131,34 @@ PROXY_NONE = "none"
 PROXY_MANUAL = "manual"
 
 
+def proxy_url_is_valid(url: str) -> bool:
+    """Si `url` es algo que `urllib` sabrá usar como proxy.
+
+    ``http://[usuario:clave@]servidor:puerto`` o solo ``servidor:puerto``. Una
+    errata como ``https:/admin:S3cret@proxy:8080`` hacía que `urllib` lanzara
+    un `ValueError` **con la URL dentro**, contraseña incluida, que acababa en
+    el registro, en `status.json` y en el Visor de eventos.
+    """
+    url = (url or "").strip()
+    if not url or any(char.isspace() for char in url):
+        return False
+    if "://" in url:
+        parts = urllib.parse.urlsplit(url)
+        try:
+            parts.port  # noqa: B018 - un puerto que no es un número lanza aquí
+        except ValueError:
+            return False
+        return bool(parts.scheme) and bool(parts.hostname)
+    return "/" not in url
+
+
+def _proxy_problem() -> str:
+    return _t(
+        "La dirección del proxy no es válida: revisa el ajuste «proxy» (settings.json o CENYA_PROXY). "
+        "No se muestra aquí porque puede llevar una contraseña."
+    )
+
+
 def _proxy_handler(proxy: tuple[str, str] | None) -> urllib.request.ProxyHandler | None:
     """El manejador de proxy para ese modo, o `None` para el del sistema."""
     if not proxy:
@@ -207,6 +236,11 @@ class AgentClient:
         self.token = token
         #: `(modo, url)` de `agent/settings.py`; `None` es el proxy del sistema.
         #: La URL puede llevar usuario y contraseña: no se escribe en ningún sitio.
+        #: Un proxy manual mal escrito no se usa ni se nombra: cada petición
+        #: falla con una frase que no lo cita (`_proxy_problem`).
+        self._bad_proxy = bool(proxy and proxy[0] == PROXY_MANUAL and not proxy_url_is_valid(proxy[1]))
+        if self._bad_proxy:
+            proxy = (PROXY_NONE, "")
         self._proxy = proxy
         self._opener = _opener_for(ca_bundle, proxy) if proxy else _opener_for(ca_bundle)
         # Only without a CA of the company's own. With one, that is the answer
@@ -335,6 +369,8 @@ class AgentClient:
         return self._post("/api/agent/v2/goodbye/", {"reason": reason})
 
     def _post(self, path: str, payload: dict[str, Any], *, authenticated: bool = True) -> dict[str, Any]:
+        if self._bad_proxy:
+            raise PushError(_proxy_problem())
         headers = {"Content-Type": "application/json"}
         if authenticated:
             headers["Authorization"] = f"Bearer {self.token}"
@@ -361,7 +397,13 @@ class AgentClient:
                 status=exc.code,
             ) from exc
         except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
-            raise PushError(_t("No se pudo hablar con el servidor: %(error)s") % {"error": exc}) from exc
+            raise PushError(_t("No se pudo hablar con el servidor: %(error)s") % {"error": scrub(str(exc))}) from exc
+        except ValueError as exc:
+            # `urllib` mete en el texto la URL que no entiende, y si es la del
+            # proxy lleva su contraseña: no se repite, ni siquiera tapada.
+            if self._proxy and self._proxy[0] == PROXY_MANUAL:
+                raise PushError(_proxy_problem()) from None
+            raise PushError(_t("No se pudo hablar con el servidor: %(error)s") % {"error": scrub(str(exc))}) from None
         if not isinstance(answer, dict):
             # Un proxy o un portal cautivo puede devolver 200 con cualquier
             # cosa. Sin esto, el `answer.get(...)` de arriba lanza

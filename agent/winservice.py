@@ -45,7 +45,7 @@ import servicemanager
 import win32service
 import win32serviceutil
 
-from agent import status
+from agent import logs, status
 from agent import store as enrollment_store
 from agent.__main__ import main as agent_main
 from agent.__main__ import unexpected_error
@@ -74,7 +74,9 @@ class _EventLogStream:
     """
 
     def __init__(self, log: Callable[[str], None]) -> None:
-        self._log = log
+        # Tapado al salir (`logs.scrub`): el Visor de eventos lo lee cualquier
+        # administrador, y es donde acaba cualquier `print` o traza suelta.
+        self._log = lambda line: log(logs.scrub(line))
         self._pending = ""
 
     def write(self, text: str) -> int:

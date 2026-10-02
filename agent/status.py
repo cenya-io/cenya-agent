@@ -38,7 +38,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
-from agent import store
+from agent import logs, store
 from agent.i18n import _t, _tn
 
 ENV_VAR = "CENYA_STATUS_FILE"
@@ -96,12 +96,25 @@ _WRITE_LOCK = threading.Lock()
 
 
 def write(**fields: Any) -> None:
-    """Funde `fields` con lo que había y lo guarda de golpe. Nunca lanza."""
+    """Funde `fields` con lo que había y lo guarda de golpe. Nunca lanza.
+
+    Todo texto pasa antes por `logs.scrub`: este fichero lo lee cualquier
+    usuario de la máquina (es el del icono), y un error puede traer dentro un
+    `usuario:clave@` o un `Bearer`.
+    """
     target = path()
     if target is None:
         return
     with _WRITE_LOCK:
-        _write(target, fields)
+        _write(target, {key: _scrubbed(value) for key, value in fields.items()})
+
+
+def _scrubbed(value: Any) -> Any:
+    if isinstance(value, str):
+        return logs.scrub(value)
+    if isinstance(value, list):
+        return [_scrubbed(item) for item in value]
+    return value
 
 
 def _write(target: Path, fields: dict[str, Any]) -> None:

@@ -36,6 +36,10 @@ LOGGER_NAME = "cenya.agent"
 
 _BEARER = re.compile(r"(Bearer\s+)\S+", re.IGNORECASE)
 _URL_CREDENTIALS = re.compile(r"(\w+://)[^/@\s:]+:[^/@\s]+@")
+#: `usuario:clave@` también sin `://` delante: una URL mal escrita
+#: (``https:/admin:S3cret@proxy:8080``) la trae así, y `urllib` la repite
+#: entera en su error. La clave puede llevar barras; el usuario, no.
+_BARE_CREDENTIALS = re.compile(r"(^|[\s'\"(=,;/\\])[^\s'\"@/:\\]+:(?!//)[^\s'\"@]+@")
 
 _lock = threading.Lock()
 _configured_for: Path | None = None
@@ -48,7 +52,8 @@ def path(environ: Mapping[str, str] | None = None) -> Path:
 def scrub(text: str) -> str:
     """Lo que nunca puede acabar en el registro, tapado por si alguien lo pasó."""
     text = _BEARER.sub(r"\1***", text)
-    return _URL_CREDENTIALS.sub(r"\1***@", text)
+    text = _URL_CREDENTIALS.sub(r"\1***@", text)
+    return _BARE_CREDENTIALS.sub(r"\1***@", text)
 
 
 def _logger() -> logging.Logger:

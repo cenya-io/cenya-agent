@@ -273,6 +273,66 @@ class ProxyTests(unittest.TestCase):
         fallback.assert_called_once_with(("none", ""))
 
 
+#: La errata que encontró la revisión: una barra de menos. `urllib` lanzaba
+#: `ValueError("proxy URL with no authority: '<esta URL>'")`, con la clave.
+MISTYPED_PROXY = "https:/admin:S3cret@proxy:8080"
+
+
+class ProxySecretTests(unittest.TestCase):
+    """A mistyped proxy URL never reaches the log, the status file or the Event Log."""
+
+    def test_a_mistyped_proxy_is_a_push_error_that_does_not_name_it(self) -> None:
+        client = AgentClient("https://portal.example", "cya_x", proxy=("manual", MISTYPED_PROXY))
+
+        with self.assertRaises(agent_client.PushError) as raised:
+            client.checkin({"protocol": 2})
+
+        text = str(raised.exception)
+        self.assertNotIn("S3cret", text)
+        self.assertNotIn("admin", text)
+        self.assertIn("proxy", text)
+
+    def test_urllibs_own_error_is_not_repeated_either(self) -> None:
+        # Por si alguna URL pasa la comprobación y urllib la rechaza después.
+        client = AgentClient("https://portal.example", "cya_x", proxy=("manual", "http://proxy:3128"))
+        boom = ValueError(f"proxy URL with no authority: {MISTYPED_PROXY!r}")
+        with mock.patch.object(client, "_opener") as opener:
+            opener.open.side_effect = boom
+            with self.assertRaises(agent_client.PushError) as raised:
+                client.heartbeat(version="0.11.0", hostname="pc")
+        self.assertNotIn("S3cret", str(raised.exception))
+        self.assertIsNone(raised.exception.__cause__)
+
+    def test_valid_and_invalid_proxy_urls(self) -> None:
+        for url in ("http://proxy:3128", "http://ana:clave@proxy:3128", "proxy.local:3128", "https://[::1]:8443"):
+            self.assertTrue(agent_client.proxy_url_is_valid(url), url)
+        for url in (MISTYPED_PROXY, "", "http://", "http://proxy:puerto", "proxy /x", "https:/proxy:8080"):
+            self.assertFalse(agent_client.proxy_url_is_valid(url), url)
+
+    def test_the_scrubber_masks_a_password_even_without_a_scheme(self) -> None:
+        message = f"Error inesperado: ValueError: proxy URL with no authority: {MISTYPED_PROXY!r}"
+        self.assertNotIn("S3cret", logs.scrub(message))
+        self.assertEqual(logs.scrub("admin:pa/ss@proxy:3128"), "***@proxy:3128")
+        self.assertEqual(logs.scrub("usuario ana@empresa.es a las 12:30"), "usuario ana@empresa.es a las 12:30")
+
+    def test_the_status_file_never_keeps_it(self) -> None:
+        from agent import status
+
+        target = Path(tempfile.mkdtemp(prefix="cenya-status-scrub-")) / "status.json"
+        with mock.patch.dict(os.environ, {status.ENV_VAR: str(target)}):
+            status.failed(f"Error inesperado: ValueError: proxy URL with no authority: {MISTYPED_PROXY!r}")
+            status.task_finished(task="presence", created=0, refreshed=0, errors=[MISTYPED_PROXY], next_in=None)
+        self.assertNotIn("S3cret", target.read_text(encoding="utf-8"))
+
+    def test_what_the_agent_prints_never_keeps_it(self) -> None:
+        from agent import __main__ as loop
+
+        with mock.patch("builtins.print") as printed, mock.patch.object(loop.logs, "error") as logged:
+            loop._say(f"[agente] {MISTYPED_PROXY}", error=True)
+        self.assertNotIn("S3cret", str(printed.call_args))
+        self.assertNotIn("S3cret", str(logged.call_args))
+
+
 class LogTests(unittest.TestCase):
     def setUp(self) -> None:
         self.env = {"CENYA_STATE_DIR": tempfile.mkdtemp(prefix="cenya-logs-")}

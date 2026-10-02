@@ -48,7 +48,13 @@ def _sweep_line(created: int, refreshed: int, batches: int) -> str:
 
 
 def _say(text: str, *, error: bool = False) -> None:
-    """Una línea para una persona: a la consola (o al Visor de eventos) y al registro."""
+    """Una línea para una persona: a la consola (o al Visor de eventos) y al registro.
+
+    Tapada antes de salir por cualquiera de los dos: el Visor de eventos lo
+    lee cualquier administrador, y un error de `urllib` puede traer dentro la
+    URL de un proxy con su contraseña.
+    """
+    text = logs.scrub(str(text))
     if error:
         print(text, file=sys.stderr, flush=True)
         logs.error(text)
