@@ -466,6 +466,7 @@ class RunTests(unittest.TestCase):
             return completed
 
         with mock.patch("agent.ssh.SSHPASS_AVAILABLE", sshpass), \
+             mock.patch("agent.ssh.ASKPASS_AVAILABLE", False), \
              mock.patch("agent.ssh.subprocess.run", fake_run):
             answer = ssh.run(host="10.0.0.5", username="root", secret=secret, command="uname -sr")
         return answer, captured
@@ -567,7 +568,7 @@ class SshCollectorTests(unittest.TestCase):
             return ssh.Answer(connected=bool(output), output=output)
 
         with mock.patch("agent.collectors.ssh.ssh.AVAILABLE", True), \
-             mock.patch("agent.collectors.ssh.ssh.SSHPASS_AVAILABLE", True), \
+             mock.patch("agent.collectors.ssh.ssh.PASSWORD_AUTH_AVAILABLE", True), \
              mock.patch("agent.collectors.ssh.net.hosts_listening", return_value=reachable), \
              mock.patch("agent.collectors.ssh.ssh.run", fake_run):
             return SshCollector().collect(ctx)
@@ -602,7 +603,7 @@ class SshCollectorTests(unittest.TestCase):
         forma de saber que le falta un programa del sistema."""
         ctx = self._ctx(config={"credentials": [{"kind": "ssh", "username": "root", "secret": "x"}]})
         with mock.patch("agent.collectors.ssh.ssh.AVAILABLE", True), \
-             mock.patch("agent.collectors.ssh.ssh.SSHPASS_AVAILABLE", False), \
+             mock.patch("agent.collectors.ssh.ssh.PASSWORD_AUTH_AVAILABLE", False), \
              mock.patch("agent.collectors.ssh.net.hosts_listening", return_value=[]):
             SshCollector().collect(ctx)
 
@@ -611,7 +612,7 @@ class SshCollectorTests(unittest.TestCase):
     def test_the_secret_never_reaches_the_error_lines(self) -> None:
         ctx = self._ctx(config={"credentials": [{"kind": "ssh", "username": "root", "secret": "ultrasecreta"}]})
         with mock.patch("agent.collectors.ssh.ssh.AVAILABLE", True), \
-             mock.patch("agent.collectors.ssh.ssh.SSHPASS_AVAILABLE", False), \
+             mock.patch("agent.collectors.ssh.ssh.PASSWORD_AUTH_AVAILABLE", False), \
              mock.patch("agent.collectors.ssh.net.hosts_listening", return_value=[]):
             SshCollector().collect(ctx)
 
@@ -620,7 +621,7 @@ class SshCollectorTests(unittest.TestCase):
     def test_a_sweep_that_found_nobody_is_not_an_error(self) -> None:
         ctx = self._ctx(hosts=[])
         with mock.patch("agent.collectors.ssh.ssh.AVAILABLE", True), \
-             mock.patch("agent.collectors.ssh.ssh.SSHPASS_AVAILABLE", True):
+             mock.patch("agent.collectors.ssh.ssh.PASSWORD_AUTH_AVAILABLE", True):
             self.assertEqual(SshCollector().collect(ctx), [])
 
         self.assertEqual(ctx.get("errors", []), [])
@@ -751,7 +752,7 @@ class ConfigCaptureTests(unittest.TestCase):
             return ssh.Answer(connected=True, output=IOS_RECHAZA_EL_COMANDO_DE_LINUX)
 
         with mock.patch("agent.collectors.ssh.ssh.AVAILABLE", True), \
-             mock.patch("agent.collectors.ssh.ssh.SSHPASS_AVAILABLE", True), \
+             mock.patch("agent.collectors.ssh.ssh.PASSWORD_AUTH_AVAILABLE", True), \
              mock.patch("agent.collectors.ssh.net.hosts_listening", return_value=["192.168.1.2"]), \
              mock.patch("agent.collectors.ssh.ssh.run", fake_run):
             return SshCollector().collect(ctx)
@@ -802,7 +803,7 @@ class ConfigCaptureTests(unittest.TestCase):
 
         ctx = self._ctx()
         with mock.patch("agent.collectors.ssh.ssh.AVAILABLE", True), \
-             mock.patch("agent.collectors.ssh.ssh.SSHPASS_AVAILABLE", True), \
+             mock.patch("agent.collectors.ssh.ssh.PASSWORD_AUTH_AVAILABLE", True), \
              mock.patch("agent.collectors.ssh.net.hosts_listening", return_value=["192.168.1.2"]), \
              mock.patch("agent.collectors.ssh.ssh.run", fake_run):
             findings = SshCollector().collect(ctx)

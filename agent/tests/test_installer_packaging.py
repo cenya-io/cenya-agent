@@ -146,6 +146,7 @@ class PackagingAgreesWithTheCodeTests(unittest.TestCase):
             "entry_agent.py": "agent.__main__",
             "entry_service.py": "agent.winservice",
             "entry_tray.py": "agent.tray",
+            "entry_askpass.py": "agent.askpass",
         }
         spec = (PACKAGING / "cenya-agent.spec").read_text(encoding="utf-8")
         for script, module in targets.items():
@@ -161,6 +162,8 @@ class PackagingAgreesWithTheCodeTests(unittest.TestCase):
         self.assertIn('"agent/translations"', spec)
 
     def test_the_installer_ships_every_executable_and_the_tray_starts_at_logon(self) -> None:
+        # El askpass no se nombra en el .iss: `Source: {#SourceDir}\*` copia la
+        # carpeta entera, y lo que importa es que el spec lo construya.
         for exe in ("cenya-agent.exe", "cenya-agent-service.exe", "cenya-agent-tray.exe"):
             with self.subTest(exe=exe):
                 self.assertIn(exe, ISS)

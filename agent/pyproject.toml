@@ -16,6 +16,13 @@
 # BSD-2-Clause, pywinrm MIT, requests_ntlm ISC. paramiko (LGPL) stays out; the
 # SSH collector shells out to the system's ssh binary instead.
 #
+# What the Windows installer bundles (not a Python dependency; packaging/build.ps1
+# downloads it, pinned by SHA-256): Win32-OpenSSH, the PowerShell team's port of
+# OpenSSH -- BSD-style licences (the OpenSSH licence collection: BSD-2/3-Clause,
+# ISC, public domain) -- with its LibreSSL libcrypto, ISC/OpenSSL-style. Both
+# are permissive and compatible with this package's Apache-2.0; their LICENSE.txt
+# and NOTICE.txt travel in the installed openssh\ folder.
+#
 # pywin32 (extra "windows") declares "PSF" but is a patchwork by component,
 # checked against the licence files of 312: win32/, com/ and win32comext/ --
 # where win32serviceutil, win32service, servicemanager and win32security live,
@@ -60,6 +67,9 @@ completo = [
 cenya-agent = "agent.__main__:main"
 # install | update | start | stop | remove | debug. Solo Windows, con [windows].
 cenya-agent-service = "agent.winservice:main"
+# El programa que OpenSSH ejecuta cuando pide una contraseña (SSH_ASKPASS): es
+# lo que sustituye a `sshpass`, que no existe en Windows. Lo usa agent/ssh.py.
+cenya-agent-askpass = "agent.askpass:main"
 
 [project.gui-scripts]
 # El icono de bandeja. `gui-scripts` y no `scripts`: arranca sin ventana de
