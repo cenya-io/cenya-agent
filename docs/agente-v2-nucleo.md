@@ -389,3 +389,129 @@ en cada checkin que sale bien. Nunca contiene credenciales: solo resultados.
 
 `status.json` se sigue escribiendo como hoy (el icono actual tiene que seguir
 funcionando hasta la fase 5), con el paso y la tarea en curso.
+
+---
+
+## 3. Credenciales selladas (fase 3)
+
+El servidor guarda cada secreto **cerrado para un agente concreto** y no puede
+abrirlo. Protege de una fuga de la base de datos o de una copia de seguridad,
+y de que quien opera el servidor lea las contraseñas. **No** protege de un
+servidor manipulado a propósito (sirve la página donde se teclean y entrega
+las claves públicas); eso se dice tal cual en el contrato de encargo.
+
+### 3.1 El sobre
+
+Cifrado híbrido con lo que traen todos los navegadores (WebCrypto) y
+`cryptography` en el agente:
+
+1. Clave AES-256 aleatoria `K` y `iv` de 12 bytes aleatorios.
+2. `ct` = AES-256-GCM(`K`, `iv`, texto, AAD), con la etiqueta de 16 bytes al
+   final (como la devuelven WebCrypto y `AESGCM`).
+3. `ek` = RSA-OAEP(SHA-256, MGF1-SHA-256, sin etiqueta) de `K` con la clave
+   pública del agente (la de 1.1).
+
+```json
+{"v": 1, "alg": "RSA-OAEP-256+A256GCM", "ek": "<base64>", "iv": "<base64>", "ct": "<base64>"}
+```
+
+Base64 estándar con relleno. El **texto** es JSON UTF-8 con solo los campos
+secretos: `{"secret": "…", "priv_secret": "…"}` (una comunidad SNMP v2c va en
+`secret`). La **AAD** ata el sobre a su dueño y a su credencial, para que no se
+pueda cambiar de sitio:
+
+```
+cenya-seal-v1|<uuid del agente>|<id de la credencial>
+```
+
+Para lo que no es una credencial guardada (el token de NetBox de 3.4) el
+tercer campo es el `id` del encargo.
+
+Un sobre que no abre (clave distinta, AAD distinta, dato tocado) **no es un
+error del barrido**: esa credencial no se usa y se anota
+(`credentials` / `sealed_unreadable`, con `count`).
+
+### 3.2 `config` con credenciales selladas
+
+Sustituye a `communities` y a los secretos en claro de 1.4:
+
+```json
+"credentials": [
+  {"id": "<uuid>", "kind": "ssh", "name": "Switches Aruba", "username": "admin",
+   "host": "", "port": 0, "key_file": "",
+   "auth_protocol": "", "priv_protocol": "",
+   "scope": {"subnets": ["10.0.0.0/24"], "hosts": []},
+   "sealed": { … sobre de 3.1 para ESTE agente … }}
+]
+```
+
+- `kind` nuevo: `snmp` (una comunidad v2c; `username` vacío).
+- Una credencial sin sobre para este agente viaja sin `sealed`: el agente la
+  ignora y la cuenta en `sealed_unreadable`.
+- Mientras un perfil tenga secretos sin sellar (servidor sin migrar), `secret`
+  y `communities` siguen llegando como en 1.4 y el agente los usa. Un agente
+  0.11 entiende las dos formas.
+- El agente informa de lo que funcionó en `stats` de `results`:
+  `"credentials_ok": {"<id>": <nº de equipos>}`.
+
+### 3.3 Encargos nuevos
+
+| `kind` | `params` | Qué hace el agente | `result` |
+|---|---|---|---|
+| `test_credential` | `{"credential_id": "<uuid>", "ip": "10.0.0.5"}` | Prueba **esa** credencial contra esa IP (para un hipervisor, contra su servidor; `ip` puede faltar) | `{"ok": true, "line": {código y parámetros, como un informe de sondeo}}` |
+| `reseal` | `{"agent": "<uuid del agente nuevo>", "public_key": "<PEM>", "credential_ids": ["…"]}` | Abre sus sobres de esas credenciales y los cierra para la otra clave (AAD con el uuid del agente nuevo) | `{"envelopes": {"<id>": {sobre}}, "missing": ["<id>"]}` |
+| `netbox_export` | `{"url": "https://netbox…", "verify_tls": true, "sealed_token": {sobre}}` | Lee ese NetBox (`agent/netbox_export.py`) y sube el resultado a 3.4 | `{"import": "<uuid>", "summary": {"devices": 214, …}}` |
+
+- `test_credential` no consulta ni altera el límite de rondas de la memoria
+  (lo pide una persona), pero apunta un acierto.
+- Ninguna respuesta cita un secreto, tampoco en un error.
+- `netbox_export` informa de su avance en `activity` (paso = colección).
+
+### 3.4 `POST /api/agent/v2/netbox-bundle/`
+
+El cuerpo es el JSON del exportador (el mismo fichero de hoy), con
+`Content-Type: application/json` y la cabecera `X-Cenya-Order: <id>` cuando
+viene de un encargo. Tope de 50 MB. Respuesta
+`{"ok": true, "import": "<uuid>"}`. El servidor lo valida con el mismo lector
+que la subida a mano y lo deja como lectura pendiente; no importa nada hasta
+que una persona lo confirma.
+
+---
+
+## 4. Canal local (fase 5)
+
+Entre el servicio y la aplicación de escritorio, en la misma máquina. **No es
+un puerto de red.**
+
+- Windows: *named pipe* `\.\pipe\CenyaAgent`. Linux: socket Unix
+  `<carpeta de estado>/agent.sock`.
+- Lo sirve el servicio. Un mensaje por línea, JSON UTF-8:
+  petición `{"id": 1, "op": "status", "args": {}}` → respuesta
+  `{"id": 1, "ok": true, "data": {…}}` o
+  `{"id": 1, "ok": false, "error": "<código>", "message": "<frase>"}`.
+- **Leer** puede cualquier usuario local; **actuar**, solo un administrador
+  (Windows: el servicio suplanta al cliente del pipe y comprueba que su token
+  pertenece al grupo Administradores, elevado; Linux: `SO_PEERCRED`, uid 0 o
+  el del servicio). Sin permiso: `error: "forbidden"`.
+
+| `op` | Tipo | Qué hace |
+|---|---|---|
+| `status` | leer | conexión, tarea en curso y progreso, agenda, pausa, versión, cola |
+| `log` | leer | últimas líneas del registro (`args.lines`, `args.after`) |
+| `about` | leer | la presentación de 1.5 |
+| `settings.get` | leer | ajustes locales, sin secretos |
+| `run` | actuar | `args.task`: ejecuta ya esa tarea |
+| `pause` / `resume` | actuar | `args.until` (ISO) o `args.seconds` |
+| `settings.set` | actuar | cambia ajustes locales (2.6) y los aplica sin reiniciar |
+| `probe` | actuar | `args.ip`: sondeo dirigido, devuelve el informe |
+| `test_connection` | actuar | nombre, puerto, certificado y token, paso a paso |
+| `connect` | actuar | `args.connection` (cadena o código + portal): enrola o cambia de portal |
+| `disconnect` | actuar | se despide del servidor (1.7) y borra el enrolado |
+| `netbox.export` | actuar | `args.url`, `args.token`, `args.verify_tls`, `args.send`: lee un NetBox; con `send` lo sube (3.4), sin él lo guarda en `args.path` |
+| `support_bundle` | actuar | escribe el paquete de soporte en `args.path`, sin secretos |
+| `check_update` | actuar | pregunta por la versión vigente |
+
+Un secreto que llega por este canal (el token de NetBox) se usa y se olvida:
+no se guarda, no se registra, no vuelve en ninguna respuesta. Las operaciones
+largas (`netbox.export`, `probe`) contestan al terminar; su avance se lee con
+`status`.
