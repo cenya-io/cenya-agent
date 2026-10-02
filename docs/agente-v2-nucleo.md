@@ -239,6 +239,12 @@ servidor funde, no sustituye.
 `{"reason": "uninstall"}`. El servidor marca el agente como desinstalado y su
 token deja de valer. Respuesta `{"ok": true}`.
 
+En el agente lo manda `cenya-agent goodbye` (lo llamará el desinstalador),
+que después borra `enrollment.json` e `identity.key` de la carpeta de estado.
+**Los borra aunque el servidor no conteste**, sale con 0 y dice qué ha pasado
+(si no se pudo avisar, el agente seguirá en Ajustes → Agentes hasta que se
+borre allí).
+
 ### 1.8 Compatibilidad
 
 - **Agente 2 contra servidor 1**: `v2/checkin` contesta 404 **y** el latido

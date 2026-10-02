@@ -575,6 +575,21 @@ def save(enrollment: Enrollment, environ: Mapping[str, str] | None = None) -> Pa
     return target
 
 
+def remove(environ: Mapping[str, str] | None = None) -> list[Path]:
+    """Delete the enrolment and the identity key (`cenya-agent goodbye`). Returns what went.
+
+    Nunca lanza: lo que no se pudo borrar simplemente no está en la lista.
+    """
+    removed: list[Path] = []
+    for target in (path(environ), state_dir(environ) / IDENTITY_FILE):
+        try:
+            target.unlink()
+        except OSError:
+            continue
+        removed.append(target)
+    return removed
+
+
 # --- Asegurar la carpeta al arrancar -------------------------------------------
 
 

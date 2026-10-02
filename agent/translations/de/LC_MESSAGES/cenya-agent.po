@@ -5,7 +5,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: cenya-agent 0.9.1\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-02 21:10+0200\n"
+"POT-Creation-Date: 2026-10-02 21:17+0200\n"
 "PO-Revision-Date: 2026-09-14 17:00+0200\n"
 "Last-Translator: NetInventory\n"
 "Language-Team: German\n"
@@ -46,31 +46,31 @@ msgstr "[Agent] Scan gesendet in %(batches)s: %(created)s, %(refreshed)s"
 msgid "[agente] Barrido enviado: %(created)s, %(refreshed)s"
 msgstr "[Agent] Scan gesendet: %(created)s, %(refreshed)s"
 
-#: agent/__main__.py:68 agent/control.py:511 agent/runtime.py:458
+#: agent/__main__.py:68 agent/control.py:594 agent/runtime.py:468
 #, python-format
 msgid "Error inesperado: %(error)s"
 msgstr "Unerwarteter Fehler: %(error)s"
 
-#: agent/__main__.py:252 agent/__main__.py:296 agent/__main__.py:303
-#: agent/control.py:499 agent/runtime.py:254
+#: agent/__main__.py:266 agent/__main__.py:310 agent/__main__.py:317
+#: agent/control.py:582 agent/runtime.py:264
 #, python-format
 msgid "[agente] %(error)s"
 msgstr "[Agent] %(error)s"
 
-#: agent/__main__.py:266
+#: agent/__main__.py:280
 #, python-format
 msgid "[agente] Conectado a %(url)s con el protocolo 2."
 msgstr "[Agent] Mit %(url)s über Protokoll 2 verbunden."
 
-#: agent/__main__.py:270
+#: agent/__main__.py:284
 msgid "[agente] El servidor solo habla el protocolo 1: se sigue con el bucle de siempre."
 msgstr "[Agent] Der Server spricht nur Protokoll 1: Es geht mit der gewohnten Schleife weiter."
 
-#: agent/__main__.py:272
+#: agent/__main__.py:286
 msgid "[agente] Detenido."
 msgstr "[Agent] Angehalten."
 
-#: agent/__main__.py:287
+#: agent/__main__.py:301
 #, python-format
 msgid "[agente] Empujando a %(url)s cada ~%(seconds)d s."
 msgstr "[Agent] Sendet an %(url)s alle ~%(seconds)d s."
@@ -111,30 +111,30 @@ msgstr "Dieser Agent ist nicht registriert. Unter Einstellungen → Agenten eine
 msgid "La cadena de conexión no es válida: debe parecerse a cenya://portal.midominio.com/XXXX-XXXX-XXXX. Cópiala entera de Ajustes → Agentes."
 msgstr "Die Verbindungszeichenfolge ist ungültig: Sie muss etwa so aussehen: cenya://portal.meinefirma.de/XXXX-XXXX-XXXX. Vollständig aus Einstellungen → Agenten kopieren."
 
-#: agent/control.py:303
+#: agent/control.py:355
 #, python-format
 msgid "El servidor ha rechazado este agente (%(error)s): no barre ni usa ninguna credencial hasta que lo acepte de nuevo, y le pregunta cada %(minutes)d minutos. Si se revocó, hay que enrolarlo otra vez."
 msgstr "Der Server hat diesen Agenten abgelehnt (%(error)s): Er scannt nicht und verwendet keine Zugangsdaten, bis der Server ihn wieder akzeptiert, und fragt alle %(minutes)d Minuten nach. Wurde er widerrufen, muss er erneut registriert werden."
 
-#: agent/control.py:309
+#: agent/control.py:361
 #, python-format
 msgid "La instalación de Cenya está en solo lectura (%(error)s): el agente no empieza ninguna tarea hasta que el servidor vuelva a aceptar resultados."
 msgstr "Die Cenya-Installation ist schreibgeschützt (%(error)s): Der Agent startet keine Aufgabe, bis der Server wieder Ergebnisse annimmt."
 
-#: agent/control.py:320
+#: agent/control.py:372
 msgid "[agente] El servidor vuelve a aceptar a este agente."
 msgstr "[Agent] Der Server akzeptiert diesen Agenten wieder."
 
-#: agent/control.py:353
+#: agent/control.py:409
 msgid "[agente] Configuración nueva recibida."
 msgstr "[Agent] Neue Konfiguration empfangen."
 
-#: agent/control.py:359
+#: agent/control.py:415
 #, python-format
 msgid "[agente] Hay una versión nueva del agente: %(version)s."
 msgstr "[Agent] Eine neue Version des Agenten ist verfügbar: %(version)s."
 
-#: agent/control.py:387
+#: agent/control.py:443
 #, python-format
 msgid "[agente] Encargo recibido: %(kind)s."
 msgstr "[Agent] Auftrag erhalten: %(kind)s."
@@ -183,6 +183,26 @@ msgstr "Das Token ist geschützt unter %(path)s gespeichert; es muss nicht kopie
 #: agent/enroll.py:140
 msgid "Para dejarlo funcionando, ejecuta: cenya-agent"
 msgstr "Damit er dauerhaft läuft, ausführen: cenya-agent"
+
+#: agent/goodbye.py:51
+#, python-format
+msgid "No se pudo avisar al servidor (%(error)s). El enrolamiento de este equipo se borra igualmente; el agente seguirá apareciendo en Ajustes → Agentes hasta que se borre allí."
+msgstr "Der Server konnte nicht benachrichtigt werden (%(error)s). Die Registrierung dieses Rechners wird trotzdem gelöscht; der Agent erscheint weiterhin unter Einstellungen → Agenten, bis er dort gelöscht wird."
+
+#: agent/goodbye.py:58
+#, python-format
+msgid "Se ha avisado al servidor (%(url)s): este agente queda dado de baja."
+msgstr "Der Server (%(url)s) wurde benachrichtigt: Dieser Agent ist jetzt abgemeldet."
+
+#: agent/goodbye.py:61
+#, python-format
+msgid "Borrado: %(path)s"
+msgstr "Gelöscht: %(path)s"
+
+#: agent/goodbye.py:63
+#, python-format
+msgid "No había enrolamiento que borrar en %(path)s."
+msgstr "In %(path)s gab es keine Registrierung zu löschen."
 
 #: agent/installer_text.py:35
 msgid "Hace falta un PowerShell de administrador: instalar un servicio lo exige Windows."
@@ -349,7 +369,7 @@ msgstr "Lade sie in Cenya hoch: Einstellungen → Importieren → «NetBox, aus 
 msgid "[agente] Tarea %(task)s enviada: %(created)s, %(refreshed)s"
 msgstr "[Agent] Aufgabe %(task)s gesendet: %(created)s, %(refreshed)s"
 
-#: agent/runtime.py:446
+#: agent/runtime.py:456
 #, python-format
 msgid "[agente] Tarea %(task)s guardada en la cola local: se enviará cuando el servidor conteste."
 msgstr "[Agent] Aufgabe %(task)s in der lokalen Warteschlange gespeichert: Sie wird gesendet, sobald der Server antwortet."
@@ -472,17 +492,17 @@ msgstr "Nächster Scan gegen %(clock)s."
 msgid "No se pudo guardar el enrolamiento de forma segura en %(path)s: %(error)s"
 msgstr "Die Registrierung konnte nicht sicher unter %(path)s gespeichert werden: %(error)s"
 
-#: agent/store.py:600
+#: agent/store.py:615
 #, python-format
 msgid "[agente] La carpeta %(path)s no estaba protegida: se ha apartado sin usarlo lo que otro usuario pudo dejar en ella (%(names)s), y ya queda protegida."
 msgstr "[Agent] Der Ordner %(path)s war nicht geschützt: Was ein anderer Benutzer darin hinterlassen haben könnte, wurde ungenutzt beiseitegelegt (%(names)s), und der Ordner ist jetzt geschützt."
 
-#: agent/store.py:629
+#: agent/store.py:644
 #, python-format
 msgid "No se pudo apartar %(path)s, que no es de fiar: %(error)s"
 msgstr "%(path)s ist nicht vertrauenswürdig und konnte nicht beiseitegelegt werden: %(error)s"
 
-#: agent/store.py:654
+#: agent/store.py:669
 #, python-format
 msgid "La carpeta %(path)s no está protegida y no se puede proteger (%(error)s): el agente no lee ni guarda en ella su token ni sus credenciales. Ejecútalo como administrador o como servicio."
 msgstr "Der Ordner %(path)s ist nicht geschützt und kann nicht geschützt werden (%(error)s): Der Agent liest und speichert dort weder sein Token noch seine Zugangsdaten. Führen Sie ihn als Administrator oder als Dienst aus."

@@ -210,6 +210,12 @@ def main(argv: list[str] | None = None, stop_event: StopSignal | None = None) ->
     args = argv if argv is not None else sys.argv[1:]
     if args[:1] == ["enroll"]:
         raise SystemExit(enroll.run(args[1:]))
+    if args[:1] == ["goodbye"]:
+        # Se despide del servidor (spec 1.7) y borra el enrolamiento; aunque
+        # el servidor no conteste. Lo llamará el desinstalador.
+        from agent import goodbye
+
+        raise SystemExit(goodbye.run(args[1:]))
     if args[:1] == ["selftest"]:
         from agent import selftest
 
