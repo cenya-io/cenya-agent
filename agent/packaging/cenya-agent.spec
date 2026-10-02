@@ -47,6 +47,16 @@ common = dict(
         "agent.tray",
         "agent.netbox_export",
         "agent.goodbye",
+        # El canal local (spec 4): `localclient` lo importa `main` dentro de
+        # una función, y el pipe usa pywin32 también importado al vuelo.
+        "agent.localapi",
+        "agent.localclient",
+        "agent.localops",
+        "agent.localpipe",
+        "win32pipe",
+        "win32file",
+        "win32event",
+        "pywintypes",
         # Los permisos de la carpeta de estado (agent/store.py) los lee y
         # escribe pywin32 si está, importado dentro de una función.
         "win32security",

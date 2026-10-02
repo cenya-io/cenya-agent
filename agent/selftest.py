@@ -36,6 +36,12 @@ RUNTIME_MODULES = (
     "about",
     "control",
     "identity",
+    # El canal local (spec 4): sin él la aplicación de escritorio y los
+    # comandos `status`, `pause`... no tienen con quién hablar.
+    "localapi",
+    "localclient",
+    "localops",
+    "localpipe",
     "logs",
     "outbox",
     "runtime",
