@@ -13,3 +13,6 @@ requests_ntlm>=1.2   # ISC — autenticación NTLM para pywinrm; sin esto solo q
 # BSD-3-Clause en lo que se usa (win32/, com/); su único trozo LGPL es adodbapi,
 # que no se importa. Solo Windows: el servicio real (agent/winservice.py).
 pywin32>=306; sys_platform == "win32"
+# Apache-2.0 OR BSD-3-Clause — la clave RSA del agente (agent/identity.py): sin
+# ella no hay clave y el servidor sigue mandando las credenciales como siempre.
+cryptography>=42

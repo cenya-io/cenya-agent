@@ -4,7 +4,7 @@
 ; termina con el servicio instalado, el icono de bandeja y el agente enrolado.
 ; Para desplegar en masa (un MSP con muchas máquinas), en silencio:
 ;
-;   Cenya-Agent-Setup-0.10.2.exe /VERYSILENT /CONNECTION=cenya://portal/XXXX-XXXX-XXXX
+;   Cenya-Agent-Setup-0.11.0.exe /VERYSILENT /CONNECTION=cenya://portal/XXXX-XXXX-XXXX
 ;
 ; Otros parámetros: /TASKS="!tray" (sin icono de bandeja, para un servidor en el
 ; que nadie inicia sesión) y /DIR="D:\Cenya". Un equipo ya enrolado (una
@@ -14,7 +14,7 @@
 ;   cenya-agent enroll <cadena> --force
 ;
 ; Se construye con `agent/packaging/build.ps1`, que ejecuta antes PyInstaller:
-;   iscc /DAppVersion=0.10.2 /DSourceDir=..\dist\cenya-agent cenya-agent.iss
+;   iscc /DAppVersion=0.11.0 /DSourceDir=..\dist\cenya-agent cenya-agent.iss
 ;
 ; Códigos de salida en silencio (además de los de Inno, 0 a 8): 21 si el agente
 ; se instaló pero no pudo enrolarse (cadena caducada o ya usada, portal

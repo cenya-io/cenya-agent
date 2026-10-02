@@ -35,7 +35,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cenya-agent"
-version = "0.10.2"
+version = "0.11.0"
 description = "El agente de descubrimiento de NetInventory: barre la red y propone, sin guardar estado y solo con HTTPS saliente."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -54,13 +54,20 @@ winrm = ["pywinrm>=0.4,<1", "requests_ntlm>=1.2"]
 # file level, unmodified and compatible with this package's Apache-2.0) is the
 # agent's second opinion when Python on Windows distrusts a good certificate
 # because of what the system store keeps (agent/client.py::AgentClient._open).
-windows = ["pywin32>=306; sys_platform == 'win32'", "certifi>=2024.2.2"]
+#
+# `cryptography` (Apache-2.0 OR BSD-3-Clause, either at our choice; no
+# copyleft) gives the agent its RSA key pair (agent/identity.py): the public
+# half goes to the server at enrolment so that, from phase 3, credentials can
+# be sealed for this agent only. Optional like the rest: without it there is
+# no key and the agent says `sealed_credentials: false`.
+windows = ["pywin32>=306; sys_platform == 'win32'", "certifi>=2024.2.2", "cryptography>=42"]
 completo = [
     "pysnmp>=7.1,<8",
     "pywinrm>=0.4,<1",
     "requests_ntlm>=1.2",
     "pywin32>=306; sys_platform == 'win32'",
     "certifi>=2024.2.2",
+    "cryptography>=42",
 ]
 
 [project.scripts]
