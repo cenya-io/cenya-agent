@@ -6,6 +6,7 @@ import agent.tests  # noqa: F401 - aísla el fichero de estado y la carpeta del 
 
 import tempfile
 import threading
+import time
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -201,6 +202,36 @@ class OrderTests(ControlTestCase):
         self.assertEqual(answers["p-2"]["status"], "failed")
         self.assertEqual(answers["p-2"]["notes"][0]["code"], "excluded")
         self.assertEqual(answers["p-3"]["notes"][0]["code"], "bad_address")
+
+    def test_at_most_two_probes_at_once_and_never_two_on_the_same_ip(self) -> None:
+        guard = threading.Lock()
+        running: list[str] = []
+        peak = [0]
+        same_ip_overlap: list[str] = []
+
+        def slow_probe(ip: str) -> dict:
+            with guard:
+                if ip in running:
+                    same_ip_overlap.append(ip)
+                running.append(ip)
+                peak[0] = max(peak[0], len(running))
+            time.sleep(0.05)
+            with guard:
+                running.remove(ip)
+            return {"ip": ip}
+
+        self.hooks.probe = slow_probe
+        ctl = self.control()
+        ips = ["10.0.0.1", "10.0.0.2", "10.0.0.3", "10.0.0.4", "10.0.0.5", "10.0.0.5", "10.0.0.5"]
+        ctl.apply({"orders": [{"id": f"p-{n}", "kind": "probe", "params": {"ip": ip}} for n, ip in enumerate(ips)]})
+        self.wait_probes(ctl)
+
+        self.assertLessEqual(peak[0], 2)
+        self.assertEqual(control.MAX_PROBES, 2)
+        self.assertEqual(same_ip_overlap, [])
+        # Todos esperan su turno y todos se contestan.
+        self.assertEqual(sorted(order_id for order_id, _ in self.client.order_answers), sorted(f"p-{n}" for n in range(7)))
+        self.assertEqual(ctl._probe_ip_locks, {})
 
     def test_a_probe_that_crashes_is_answered_failed(self) -> None:
         self.hooks.probe = lambda ip: 1 / 0

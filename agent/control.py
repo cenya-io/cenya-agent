@@ -66,6 +66,9 @@ _REFUSALS = {401: REFUSED_UNAUTHORIZED, 402: REFUSED_READ_ONLY}
 #: arregla en la web el agente vuelve solo, y mientras tanto no martillea.
 REJECTED_CHECKIN_SECONDS = 300
 
+#: «Analizar» a la vez, como mucho. Los demás esperan su turno (y se contestan).
+MAX_PROBES = 2
+
 KIND_RUN_TASK = "run_task"
 KIND_PROBE = "probe"
 
@@ -210,6 +213,12 @@ class Control:
         self.gone = False
         #: Los hilos de «Analizar» en curso (para que los tests puedan esperarlos).
         self.probe_threads: list[threading.Thread] = []
+        #: Cuántos sondeos a la vez, y uno solo por IP: cada sondeo prueba todas
+        #: las credenciales contra su equipo, y diez a la vez (o dos contra el
+        #: mismo) son justo los intentos de más que la memoria evita.
+        self._probe_slots = threading.BoundedSemaphore(MAX_PROBES)
+        self._probe_ip_locks: dict[str, list] = {}
+        self._probe_ip_guard = threading.Lock()
 
     # --- El checkin ----------------------------------------------------------------
 
@@ -420,8 +429,35 @@ class Control:
         self.probe_threads = [t for t in self.probe_threads if t.is_alive()] + [thread]
         thread.start()
 
+    def _ip_lock(self, ip: str, take: bool) -> threading.Lock:
+        """El cerrojo de esa IP, con su cuenta de quién lo espera: se olvida al soltarlo el último."""
+        with self._probe_ip_guard:
+            entry = self._probe_ip_locks.get(ip)
+            if take:
+                if entry is None:
+                    entry = self._probe_ip_locks[ip] = [threading.Lock(), 0]
+                entry[1] += 1
+            else:
+                entry[1] -= 1
+                if entry[1] == 0:
+                    del self._probe_ip_locks[ip]
+            return entry[0]
+
     def _probe(self, order_id: str, ip: str) -> None:
-        """«Analizar», en su propio hilo: sin esperar a la cola de tareas."""
+        """«Analizar», en su propio hilo: sin esperar a la cola de tareas.
+
+        Espera su turno: primero el de su IP (nunca dos contra el mismo
+        equipo), luego uno de los `MAX_PROBES` huecos. Siempre en ese orden,
+        así que no hay abrazo mortal.
+        """
+        ip_lock = self._ip_lock(ip, take=True)
+        try:
+            with ip_lock, self._probe_slots:
+                self._probe_now(order_id, ip)
+        finally:
+            self._ip_lock(ip, take=False)
+
+    def _probe_now(self, order_id: str, ip: str) -> None:
         try:
             report = self.hooks.probe(ip)
         except Exception as exc:  # noqa: BLE001

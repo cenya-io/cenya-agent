@@ -261,8 +261,9 @@ token deja de valer. Respuesta `{"ok": true}`.
 | `hypervisors` | `hypervisors` | Los servidores de sus credenciales |
 
 - Las tareas programadas van **de una en una** (una cola). Un encargo `probe`
-  corre en su propio hilo, sin esperar a la cola. Un `run_task` entra el
-  primero en la cola.
+  corre en su propio hilo, sin esperar a la cola, pero **como mucho dos a la
+  vez y nunca dos contra la misma IP**: los demás esperan su turno (y se
+  contestan igual). Un `run_task` entra el primero en la cola.
 - `inventory`, `configs` y `ups` necesitan los vivos: usan los de la última
   presencia si tiene menos de dos periodos de presencia; si no, se lanza antes
   una presencia (que empuja su propio resultado).
