@@ -107,8 +107,17 @@ def parse_moment(value: object) -> datetime | None:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
-def is_permanent(exc: Exception) -> bool:
-    return isinstance(exc, PushError) and exc.status in PERMANENT_STATUSES
+#: Para un resultado, un 404 no es «nunca»: es la misma puerta que contesta
+#: 404 a mitad de un despliegue (spec 1.8), y tirar el resultado de una tarea
+#: por eso perdía un inventario. Para la respuesta a un encargo sí lo es: el
+#: encargo caducó o no es de este agente (spec 1.3).
+RESULT_PERMANENT_STATUSES = PERMANENT_STATUSES - {404}
+
+
+def is_permanent(exc: Exception, kind: str = KIND_ORDER) -> bool:
+    """Si el servidor nunca aceptará ese envío (`kind`: resultado o encargo)."""
+    statuses = PERMANENT_STATUSES if kind == KIND_ORDER else RESULT_PERMANENT_STATUSES
+    return isinstance(exc, PushError) and exc.status in statuses
 
 
 class Shared:

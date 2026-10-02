@@ -102,6 +102,29 @@ class OrderAndDuplicatesTests(OutboxTestCase):
         self.assertEqual((note.code, note.params["reason"]), ("outbox_dropped", "rejected"))
         self.assertEqual(box.take_notes(), [])
 
+    def test_a_404_on_results_is_transient_and_keeps_the_result(self) -> None:
+        """Un 404 de `v2/results` es la misma puerta a mitad de un despliegue:
+        antes se tiraba el resultado entero de la tarea."""
+        box = self.box()
+        box.put_result(part("r", 1))
+
+        def send(entry) -> None:  # noqa: ANN001
+            raise PushError("404", status=404)
+
+        self.assertEqual(box.drain(send, is_permanent=is_permanent), 0)
+        self.assertEqual(box.count(), 1)
+        self.assertEqual(box.take_notes(), [])
+
+    def test_a_404_on_an_order_answer_is_permanent(self) -> None:
+        box = self.box()
+        box.put_order_answer("o-viejo", {"status": "done"})
+
+        def send(entry) -> None:  # noqa: ANN001
+            raise PushError("404", status=404)
+
+        box.drain(send, is_permanent=is_permanent)
+        self.assertEqual(box.count(), 0)
+
     def test_order_ids_waiting_are_known(self) -> None:
         box = self.box()
         box.put_order_answer("o-1", {"status": "done"})

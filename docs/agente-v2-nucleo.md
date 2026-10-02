@@ -427,6 +427,10 @@ Las variables `CENYA_*` mandan sobre `settings.json`.
 Cola (`outbox/`): tope de 50 MB y de 24 h; lo que no cabe o caduca se tira
 empezando por lo más viejo, y se anota (`outbox_dropped`). Se vacía en orden
 en cada checkin que sale bien. Nunca contiene credenciales: solo resultados.
+Lo que el servidor no aceptará nunca (400, 409, 410, 413, 422) se tira con su
+nota; un 404 de `v2/results` es pasajero (la misma puerta a mitad de un
+despliegue, 1.8) y el resultado se queda en la cola; un 404 al contestar un
+encargo sí es definitivo (caducó, o no es de este agente).
 
 ### 2.7 Estado para el icono de bandeja
 

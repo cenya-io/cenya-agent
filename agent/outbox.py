@@ -173,13 +173,15 @@ class Outbox:
         self,
         send: Callable[[Entry], object],
         *,
-        is_permanent: Callable[[Exception], bool] = lambda exc: False,
+        is_permanent: Callable[[Exception, str], bool] = lambda exc, kind: False,
     ) -> int:
         """Envía en orden; para en el primer fallo pasajero. Devuelve cuántos salieron.
 
         Un fallo «permanente» (el servidor dice que eso nunca lo aceptará: un
         400, un encargo que ya no existe) se tira con su nota en vez de tapar
-        la cola para siempre.
+        la cola para siempre. `is_permanent` recibe el error y la clase del
+        envío (`KIND_RESULT` o `KIND_ORDER`): un 404 no significa lo mismo
+        para los dos.
         """
         sent = 0
         with self._lock:
@@ -189,7 +191,7 @@ class Outbox:
             try:
                 send(entry)
             except Exception as exc:  # noqa: BLE001
-                if is_permanent(exc):
+                if is_permanent(exc, entry.kind):
                     with self._lock:
                         self._remove(entry.path)
                         self._drop_note(1, "rejected")
