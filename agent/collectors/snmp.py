@@ -16,6 +16,14 @@ from agent.collectors.base import Finding
 from agent.notes import collector_note
 
 
+def _has_sealed_communities(ctx: dict) -> bool:
+    """Si el servidor manda comunidades como credenciales `snmp` (spec 3.2), legibles o no."""
+    return any(
+        isinstance(item, dict) and str(item.get("kind") or "").strip().lower() == creds.SNMP
+        for item in creds.raw_list(ctx)
+    )
+
+
 def _communities(ctx: dict) -> list[str]:
     server = (ctx.get("config") or {}).get("communities") or []
     if server:
@@ -23,6 +31,11 @@ def _communities(ctx: dict) -> list[str]:
     env = ctx.get("env")
     if env and env.communities:
         return list(env.communities)
+    if _has_sealed_communities(ctx):
+        # Alguien escribió sus comunidades: «public» era solo el valor de quien
+        # no había dicho nada. Si las suyas no abren, probar «public» en su
+        # lugar no es lo que pidió.
+        return []
     return ["public"]
 
 
@@ -34,21 +47,25 @@ def _auths(ctx: dict) -> list:
     one packet. The other way round, a device with both would always answer to
     the community and the v3 user nobody typed for fun would never be used.
     """
-    return list(creds.for_kind(ctx, creds.SNMPV3)) + _communities(ctx)
+    return [as_auth(credential) for credential in snmp_credentials(ctx)]
 
 
 def snmp_credentials(ctx: dict) -> list[creds.Credential]:
     """Lo mismo que ``_auths``, todo como credenciales: así la memoria recuerda
-    una comunidad igual que un usuario v3. La comunidad se identifica por su
-    número en la lista (`community-1`...), nunca por su valor."""
-    return list(creds.for_kind(ctx, creds.SNMPV3)) + [
-        creds.community(value, index) for index, value in enumerate(_communities(ctx), start=1)
-    ]
+    una comunidad igual que un usuario v3. La comunidad de la lista vieja se
+    identifica por su número (`community-1`...), nunca por su valor; la que
+    llega como credencial `snmp`, por su `id`. Las selladas van delante de las
+    de la lista: son las que alguien escribió en la pantalla nueva."""
+    return (
+        list(creds.for_kind(ctx, creds.SNMPV3))
+        + list(creds.for_kind(ctx, creds.SNMP))
+        + [creds.community(value, index) for index, value in enumerate(_communities(ctx), start=1)]
+    )
 
 
 def as_auth(credential: creds.Credential) -> snmp.Auth:
     """De credencial a lo que entiende `agent.snmp`: una comunidad es su texto."""
-    return credential.secret if credential.kind == creds.COMMUNITY else credential
+    return credential.secret if credential.kind in (creds.COMMUNITY, creds.SNMP) else credential
 
 
 def _device_mac(data: dict) -> str:

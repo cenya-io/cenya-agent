@@ -124,6 +124,108 @@ def _remember(ctx: dict, ip: str, protocol: str, credential: creds.Credential) -
     tasking.settle(ctx, ip, "", protocol, credential, attempted=True, full=False)
 
 
+# --- Un intento con una credencial (lo comparten «Analizar» y «Probar credencial») ---
+
+
+def _snmp_answers(ip: str, ctx: dict, credential: creds.Credential) -> bool:
+    """¿Contesta ese equipo por SNMP con esa credencial? Si sí, a la memoria."""
+    if snmp.query_hosts([ip], [as_auth(credential)]):
+        _remember(ctx, ip, "snmp", credential)
+        return True
+    return False
+
+
+def _ssh_logs_in(ip: str, ctx: dict, credential: creds.Credential) -> bool:
+    answer = ssh.run(
+        host=ip,
+        username=credential.username,
+        secret=credential.secret,
+        port=credential.port,
+        key_file=credential.key_file,
+        command="true",
+    )
+    if answer.connected:
+        _remember(ctx, ip, "ssh", credential)
+        return True
+    return False
+
+
+def _winrm_logs_in(ip: str, ctx: dict, credential: creds.Credential, open_port: int) -> tuple[bool, str]:
+    answer = winrm.query(
+        host=ip,
+        username=credential.username,
+        secret=credential.secret,
+        port=credential.port or open_port,
+        ca_file=creds.ca_file_for(ctx, credential),
+    )
+    if answer.connected:
+        _remember(ctx, ip, "winrm", credential)
+        return True, ""
+    return False, answer.error or ""
+
+
+#: Las clases que se prueban contra una IP, y con qué protocolo del informe.
+TESTABLE = {
+    creds.SNMP: "snmp",
+    creds.SNMPV3: "snmp",
+    creds.SSH: "ssh",
+    creds.WINRM: "winrm",
+}
+
+
+def test_line(ip: str, ctx: dict, credential: creds.Credential) -> tuple[bool, Note]:
+    """Una credencial concreta contra una IP: ``(entró, línea)``. Nunca lanza.
+
+    El encargo `test_credential` (spec 3.3): lo pide una persona, así que ni
+    mira ni toca el veto de 24 h de la memoria, pero un acierto sí se apunta.
+    La línea es la de un informe de «Analizar», con los mismos códigos, y no
+    cita nunca el secreto: una comunidad no se nombra, un usuario sí.
+    """
+    protocol = TESTABLE.get(credential.kind, credential.kind)
+    try:
+        if protocol == "snmp":
+            if not snmp.AVAILABLE:
+                return False, probe_note("snmp", "missing_library", "sin pysnmp en el agente")
+            if not _snmp_answers(ip, ctx, credential):
+                return False, probe_note("snmp", "silent", "no contesta: SNMP apagado, o comunidad/usuario equivocados")
+            if credential.kind == creds.SNMPV3:
+                return True, probe_note(
+                    "snmp", "answers_v3_user", f"contesta con el usuario v3 «{credential.username}»",
+                    username=credential.username,
+                )
+            return True, probe_note("snmp", "answers", "contesta con esa comunidad")
+        if protocol == "ssh":
+            if not _port_open(ip, SSH_PORT):
+                return False, probe_note("ssh", "closed", "puerto 22 cerrado", port=SSH_PORT)
+            if _ssh_logs_in(ip, ctx, credential):
+                return True, probe_note(
+                    "ssh", "logged_in", f"puerto abierto; entró con «{credential.username}»", username=credential.username
+                )
+            return False, probe_note("ssh", "none_worked", "puerto abierto; ninguna credencial entró")
+        if protocol == "winrm":
+            open_port = next(
+                (port for port in (winrm.DEFAULT_PORT, winrm.DEFAULT_TLS_PORT) if _port_open(ip, port)), 0
+            )
+            if not open_port:
+                ports = f"{winrm.DEFAULT_PORT}/{winrm.DEFAULT_TLS_PORT}"
+                return False, probe_note("winrm", "closed", f"puertos {ports} cerrados", ports=ports)
+            connected, _error = _winrm_logs_in(ip, ctx, credential, open_port)
+            if connected:
+                return True, probe_note(
+                    "winrm", "logged_in", f"puerto {open_port} abierto; entró con «{credential.username}»",
+                    port=open_port, username=credential.username,
+                )
+            # Sin el detalle del error: lo escribe el equipo remoto y no se
+            # sabe qué repite de lo que se le mandó.
+            return False, probe_note("winrm", "none_worked", f"puerto {open_port} abierto; ninguna credencial entró",
+                                     port=open_port)
+    except Exception as exc:  # noqa: BLE001 - una prueba que revienta es una línea, no un hilo muerto
+        return False, probe_note(
+            protocol, "check_failed", f"no se pudo comprobar ({type(exc).__name__})", error=type(exc).__name__
+        )
+    return False, probe_note(protocol, "unsupported", "esta clase de credencial no se prueba contra una IP")
+
+
 def _snmp_line(ip: str, ctx: dict) -> Note:
     if not snmp.AVAILABLE:
         return probe_note("snmp", "missing_library", "sin pysnmp en el agente (pip install -r agent/requirements.txt)")
@@ -134,8 +236,7 @@ def _snmp_line(ip: str, ctx: dict) -> Note:
         if not credential.covers(ip):
             continue
         auth = as_auth(credential)
-        if snmp.query_hosts([ip], [auth]):
-            _remember(ctx, ip, "snmp", credential)
+        if _snmp_answers(ip, ctx, credential):
             text = f"contesta con {_auth_label(auth, index)}"
             if isinstance(auth, str):
                 # El número, nunca la comunidad: es un secreto.
@@ -153,16 +254,7 @@ def _ssh_line(ip: str, ctx: dict) -> Note:
     for credential in credentials:
         if not credential.covers(ip):
             continue
-        answer = ssh.run(
-            host=ip,
-            username=credential.username,
-            secret=credential.secret,
-            port=credential.port,
-            key_file=credential.key_file,
-            command="true",
-        )
-        if answer.connected:
-            _remember(ctx, ip, "ssh", credential)
+        if _ssh_logs_in(ip, ctx, credential):
             return probe_note(
                 "ssh", "logged_in", f"puerto abierto; entró con «{credential.username}»", username=credential.username
             )
@@ -190,15 +282,8 @@ def _winrm_line(ip: str, ctx: dict) -> Note:
     for credential in credentials:
         if not credential.covers(ip):
             continue
-        answer = winrm.query(
-            host=ip,
-            username=credential.username,
-            secret=credential.secret,
-            port=credential.port or open_port,
-            ca_file=creds.ca_file_for(ctx, credential),
-        )
-        if answer.connected:
-            _remember(ctx, ip, "winrm", credential)
+        connected, error = _winrm_logs_in(ip, ctx, credential, open_port)
+        if connected:
             return probe_note(
                 "winrm",
                 "logged_in",
@@ -206,7 +291,7 @@ def _winrm_line(ip: str, ctx: dict) -> Note:
                 port=open_port,
                 username=credential.username,
             )
-        last_error = answer.error
+        last_error = creds.scrub(error, credential)
     detail = f" ({last_error[:80]})" if last_error else ""
     return probe_note(
         "winrm",
