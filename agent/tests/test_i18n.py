@@ -35,7 +35,8 @@ PLACEHOLDER = re.compile(r"%\((\w+)\)[sdif]")
 def marked_in_code() -> set[str | tuple[str, str]]:
     """Todo lo que el código pasa a `_t`/`_tn`, leído del código mismo."""
     found: set[str | tuple[str, str]] = set()
-    for path in AGENT_DIR.glob("*.py"):
+    # También la aplicación de escritorio (agent/app): sus textos son del mismo dominio.
+    for path in [*AGENT_DIR.glob("*.py"), *(AGENT_DIR / "app").glob("*.py")]:
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
