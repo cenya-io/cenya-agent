@@ -10,6 +10,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 
 from agent import net
+from agent.collectors import tasking
 from agent.collectors.base import Finding
 from agent.notes import collector_note
 from agent.collectors import register
@@ -40,11 +41,18 @@ class SweepCollector:
             )
             return []
 
-        alive = net.sweep(net.expand_subnets(subnets))
+        addresses = net.expand_subnets(subnets)
+        # Una dirección excluida no recibe ni el ping: es la promesa que se le
+        # hace a quien la excluyó, no una cortesía.
+        addresses = [ip for ip in addresses if not tasking.excluded(ctx, ip)]
+        progress = tasking.Progress(ctx, self.name, len(addresses))
+        ping_workers = tasking.workers(ctx, "ping", net.SWEEP_WORKERS)
+        alive = net.sweep(addresses, workers=ping_workers, on_done=progress.tick)
         arp = net.arp_table()
 
-        # Reverse lookups can block; run them concurrently with a hard cap.
-        with ThreadPoolExecutor(max_workers=20) as pool:
+        # Reverse lookups can block; run them concurrently with a hard cap
+        # (which the task's gentleness can only lower).
+        with ThreadPoolExecutor(max_workers=max(1, min(20, ping_workers))) as pool:
             hostnames = list(pool.map(net.reverse_dns, alive))
 
         hosts = []

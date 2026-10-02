@@ -20,7 +20,7 @@ from typing import Any
 
 from agent import credentials as creds
 from agent import net, winrm
-from agent.collectors import register
+from agent.collectors import register, tasking
 from agent.collectors.base import Finding
 from agent.notes import collector_note
 
@@ -67,6 +67,14 @@ def interrogate(host: str, port: int, credentials: list[creds.Credential], ctx: 
     política de bloqueo de la cuenta, y un barrido cada quince minutos contra
     cien equipos bloquea al usuario antes de la primera hora.
     """
+    return interrogate_with(host, port, credentials, ctx)[0]
+
+
+def interrogate_with(
+    host: str, port: int, credentials: list[creds.Credential], ctx: dict
+) -> tuple[dict[str, Any], creds.Credential | None]:
+    """``interrogate``, y además con qué credencial se entró: la memoria la
+    recuerda para empezar por ella la próxima vez."""
     for credential in credentials:
         answer = winrm.query(
             host=host,
@@ -76,8 +84,8 @@ def interrogate(host: str, port: int, credentials: list[creds.Credential], ctx: 
             ca_file=creds.ca_file_for(ctx, credential),
         )
         if answer.connected:
-            return answer.data or {}
-    return {}
+            return answer.data or {}, credential
+    return {}, None
 
 
 @register
@@ -110,7 +118,9 @@ class WinrmCollector:
         hosts = ctx["hosts"] or []
         if not hosts:
             return []
-        by_ip = {host["ip"]: host.get("mac", "") for host in hosts if host.get("ip")}
+        by_ip = {
+            host["ip"]: host.get("mac", "") for host in hosts if host.get("ip") and tasking.wanted(ctx, host["ip"])
+        }
 
         # Qué puerto tiene abierto cada uno. Se mira antes de autenticarse por lo
         # mismo que en SSH: intentar entrar en los ciento veinte equipos que
@@ -130,7 +140,7 @@ class WinrmCollector:
         for port in ports:
             if not pending:
                 break
-            listening = set(net.hosts_listening(pending, port))
+            listening = set(net.hosts_listening(pending, port, **tasking.listen_options(ctx)))
             targets.extend((ip, port) for ip in pending if ip in listening)
             pending = [ip for ip in pending if ip not in listening]
         if not targets:
@@ -146,13 +156,25 @@ class WinrmCollector:
             """
             return [c for c in credentials if (c.port or port) == port]
 
-        with ThreadPoolExecutor(max_workers=WORKERS) as pool:
-            answers = list(
-                pool.map(
-                    lambda target: interrogate(target[0], target[1], usable(target[1]), ctx),
-                    targets,
-                )
-            )
+        progress = tasking.Progress(ctx, self.name, len(targets))
+
+        def visit(target: tuple[str, int]) -> dict[str, Any]:
+            """Un equipo: qué credenciales tocan (alcance y memoria), y entrar."""
+            ip, port = target
+            try:
+                order, full = tasking.plan(ctx, ip, by_ip[ip], "winrm", usable(port))
+                if not order:
+                    # La memoria dice que hoy no toca: ni un intento contra un
+                    # dominio que cuenta los fallos.
+                    return {}
+                data, credential = interrogate_with(ip, port, order, ctx)
+                tasking.settle(ctx, ip, by_ip[ip], "winrm", credential, attempted=True, full=full)
+                return data
+            finally:
+                progress.tick()
+
+        with ThreadPoolExecutor(max_workers=tasking.workers(ctx, "login", WORKERS)) as pool:
+            answers = list(pool.map(visit, targets))
 
         findings: list[Finding] = []
         for (ip, _port), data in zip(targets, answers):
