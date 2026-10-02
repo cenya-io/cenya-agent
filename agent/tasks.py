@@ -15,7 +15,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from agent.collectors import all_collectors
+from agent import credentials as creds
+from agent.collectors import all_collectors, tasking
 from agent.notes import Note, collector_note
 from agent.scheduler import CONFIGS, HYPERVISORS, INVENTORY, PRESENCE, UPS
 
@@ -97,7 +98,33 @@ def run_task(name: str, ctx: dict) -> tuple[list[dict[str, Any]], list[Note | st
                 collector_note(collector.name, "crashed", str(exc), detail=f"{type(exc).__name__}: {exc}")
             )
     progress("", len(collectors), len(collectors))
+    sealed_note(ctx)
     stats: dict[str, Any] = {"collectors": len(collectors), "items": len(items), "crashed": crashed}
     if name == PRESENCE:
         stats["hosts_alive"] = len(ctx.get("hosts") or [])
+    worked = tasking.credentials_ok(ctx)
+    if worked:
+        stats["credentials_ok"] = worked
     return items, list(ctx["errors"]), stats
+
+
+def sealed_note(ctx: dict) -> None:
+    """Una sola nota por ejecución con las credenciales selladas que no se pudieron usar.
+
+    Un sobre que no abre no es un error del barrido (spec 3.1): esa credencial
+    no se usa y se dice cuántas fueron, sin nombrarlas -- el servidor sabe
+    cuáles mandó y la web puede ofrecer volver a teclearlas.
+    """
+    opener = ctx.get(creds.CTX_KEY)
+    if not isinstance(opener, creds.Unsealer):
+        return
+    count = opener.unreadable
+    if count:
+        ctx.setdefault("errors", []).append(
+            collector_note(
+                "credentials",
+                "sealed_unreadable",
+                f"{count} credencial(es) sellada(s) no se pueden abrir en este agente; no se usan",
+                count=count,
+            )
+        )

@@ -83,6 +83,10 @@ class Enrollment:
     url: str
     token: str
     name: str = ""
+    #: El `uuid` que el servidor dio al enrolar. Es la mitad de la AAD de cada
+    #: credencial sellada (spec 3.1): sin él no abre ninguna. Un enrolamiento
+    #: 0.10.x no lo tiene, y lo trae el checkin (`agent` en la respuesta).
+    uuid: str = ""
 
 
 def state_dir(environ: Mapping[str, str] | None = None) -> Path:
@@ -112,7 +116,10 @@ def load(environ: Mapping[str, str] | None = None) -> Enrollment | None:
     url, token = data.get("url"), data.get("token")
     if not isinstance(url, str) or not isinstance(token, str) or not url or not token:
         return None
-    return Enrollment(url=url, token=token, name=str(data.get("name") or ""))
+    agent_uuid = data.get("uuid")
+    return Enrollment(
+        url=url, token=token, name=str(data.get("name") or ""), uuid=agent_uuid if isinstance(agent_uuid, str) else ""
+    )
 
 
 def untrusted_enrollment(environ: Mapping[str, str] | None = None) -> bool:
@@ -565,7 +572,11 @@ def save(enrollment: Enrollment, environ: Mapping[str, str] | None = None) -> Pa
     target = path(environ)
     try:
         write_protected(
-            target, json.dumps({"url": enrollment.url, "token": enrollment.token, "name": enrollment.name})
+            target,
+            json.dumps(
+                {"url": enrollment.url, "token": enrollment.token, "name": enrollment.name}
+                | ({"uuid": enrollment.uuid} if enrollment.uuid else {})
+            ),
         )
     except OSError as exc:
         raise StoreError(

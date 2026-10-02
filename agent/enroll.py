@@ -64,7 +64,13 @@ def redeem(raw_connection: str, environ: Mapping[str, str], *, ca_bundle: str = 
     token = answer.get("token")
     if not isinstance(token, str) or not token:
         raise SystemExit(_t("El servidor no devolvió ningún token. ¿Es la dirección de un portal de Cenya?"))
-    saved = store.Enrollment(url=target.url, token=token, name=str(answer.get("name") or ""))
+    agent_uuid = answer.get("uuid")
+    saved = store.Enrollment(
+        url=target.url,
+        token=token,
+        name=str(answer.get("name") or ""),
+        uuid=agent_uuid.strip() if isinstance(agent_uuid, str) else "",
+    )
     try:
         store.save(saved, environ)
     except store.StoreError as exc:

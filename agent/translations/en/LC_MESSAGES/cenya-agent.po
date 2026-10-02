@@ -5,7 +5,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: cenya-agent 0.9.1\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-02 21:17+0200\n"
+"POT-Creation-Date: 2026-10-02 21:46+0200\n"
 "PO-Revision-Date: 2026-09-14 17:00+0200\n"
 "Last-Translator: NetInventory\n"
 "Language-Team: English\n"
@@ -15,14 +15,14 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
-#: agent/__main__.py:41 agent/runtime.py:88 agent/status.py:437
+#: agent/__main__.py:41 agent/runtime.py:89 agent/status.py:437
 #, python-format
 msgid "%(n)d hallazgo nuevo"
 msgid_plural "%(n)d hallazgos nuevos"
 msgstr[0] "%(n)d new finding"
 msgstr[1] "%(n)d new findings"
 
-#: agent/__main__.py:42 agent/runtime.py:89 agent/status.py:439
+#: agent/__main__.py:42 agent/runtime.py:90 agent/status.py:439
 #, python-format
 msgid "%(n)d ya conocido."
 msgid_plural "%(n)d ya conocidos."
@@ -46,13 +46,13 @@ msgstr "[agent] Sweep sent in %(batches)s: %(created)s, %(refreshed)s"
 msgid "[agente] Barrido enviado: %(created)s, %(refreshed)s"
 msgstr "[agent] Sweep sent: %(created)s, %(refreshed)s"
 
-#: agent/__main__.py:68 agent/control.py:594 agent/runtime.py:468
+#: agent/__main__.py:68 agent/control.py:680 agent/runtime.py:540
 #, python-format
 msgid "Error inesperado: %(error)s"
 msgstr "Unexpected error: %(error)s"
 
 #: agent/__main__.py:266 agent/__main__.py:310 agent/__main__.py:317
-#: agent/control.py:582 agent/runtime.py:264
+#: agent/control.py:656 agent/runtime.py:334
 #, python-format
 msgid "[agente] %(error)s"
 msgstr "[agent] %(error)s"
@@ -75,21 +75,26 @@ msgstr "[agent] Stopped."
 msgid "[agente] Empujando a %(url)s cada ~%(seconds)d s."
 msgstr "[agent] Pushing to %(url)s every ~%(seconds)d s."
 
-#: agent/client.py:157
+#: agent/client.py:167
 msgid "La dirección del proxy no es válida: revisa el ajuste «proxy» (settings.json o CENYA_PROXY). No se muestra aquí porque puede llevar una contraseña."
 msgstr "The proxy address is not valid: check the «proxy» setting (settings.json or CENYA_PROXY). It is not shown here because it may contain a password."
 
-#: agent/client.py:396
+#: agent/client.py:394
+#, python-format
+msgid "Lo leído de NetBox ocupa %(mb)s MB y el servidor admite %(max)s MB como mucho."
+msgstr "What was read from NetBox takes %(mb)s MB and the server accepts %(max)s MB at most."
+
+#: agent/client.py:440
 #, python-format
 msgid "El servidor respondió %(code)s: %(detail)s"
 msgstr "The server answered %(code)s: %(detail)s"
 
-#: agent/client.py:400 agent/client.py:406
+#: agent/client.py:444 agent/client.py:450
 #, python-format
 msgid "No se pudo hablar con el servidor: %(error)s"
 msgstr "Couldn't reach the server: %(error)s"
 
-#: agent/client.py:411
+#: agent/client.py:455
 msgid "El servidor respondió algo que no es un objeto JSON."
 msgstr "The server answered with something that isn't a JSON object."
 
@@ -111,30 +116,30 @@ msgstr "This agent is not enrolled. In Settings → Agents, generate a connectio
 msgid "La cadena de conexión no es válida: debe parecerse a cenya://portal.midominio.com/XXXX-XXXX-XXXX. Cópiala entera de Ajustes → Agentes."
 msgstr "The connection string is not valid: it should look like cenya://portal.mycompany.com/XXXX-XXXX-XXXX. Copy it whole from Settings → Agents."
 
-#: agent/control.py:355
+#: agent/control.py:369
 #, python-format
 msgid "El servidor ha rechazado este agente (%(error)s): no barre ni usa ninguna credencial hasta que lo acepte de nuevo, y le pregunta cada %(minutes)d minutos. Si se revocó, hay que enrolarlo otra vez."
 msgstr "The server has rejected this agent (%(error)s): it will not scan or use any credential until the server accepts it again, and it asks every %(minutes)d minutes. If it was revoked, it has to be enrolled again."
 
-#: agent/control.py:361
+#: agent/control.py:375
 #, python-format
 msgid "La instalación de Cenya está en solo lectura (%(error)s): el agente no empieza ninguna tarea hasta que el servidor vuelva a aceptar resultados."
 msgstr "The Cenya installation is read-only (%(error)s): the agent will not start any task until the server accepts results again."
 
-#: agent/control.py:372
+#: agent/control.py:386
 msgid "[agente] El servidor vuelve a aceptar a este agente."
 msgstr "[agent] The server accepts this agent again."
 
-#: agent/control.py:409
+#: agent/control.py:426
 msgid "[agente] Configuración nueva recibida."
 msgstr "[agent] New configuration received."
 
-#: agent/control.py:415
+#: agent/control.py:432
 #, python-format
 msgid "[agente] Hay una versión nueva del agente: %(version)s."
 msgstr "[agent] A new version of the agent is available: %(version)s."
 
-#: agent/control.py:443
+#: agent/control.py:460
 #, python-format
 msgid "[agente] Encargo recibido: %(kind)s."
 msgstr "[agent] Order received: %(kind)s."
@@ -143,44 +148,44 @@ msgstr "[agent] Order received: %(kind)s."
 msgid "El servidor no devolvió ningún token. ¿Es la dirección de un portal de Cenya?"
 msgstr "The server returned no token. Is that the address of a Cenya portal?"
 
-#: agent/enroll.py:74
+#: agent/enroll.py:80
 #, python-format
 msgid "%(error)s El código ya se ha usado: genera otra cadena en Ajustes → Agentes."
 msgstr "%(error)s The code has already been used: generate another string in Settings → Agents."
 
-#: agent/enroll.py:88
+#: agent/enroll.py:94
 #, python-format
 msgid "[agente] Enrolado como «%(name)s» en %(url)s."
 msgstr "[agent] Enrolled as «%(name)s» at %(url)s."
 
-#: agent/enroll.py:117
+#: agent/enroll.py:123
 #, python-format
 msgid "Este equipo ya está enrolado como «%(name)s» en %(url)s. Para enrolarlo de nuevo, añade --force."
 msgstr "This machine is already enrolled as «%(name)s» at %(url)s. To enrol it again, add --force."
 
-#: agent/enroll.py:125
+#: agent/enroll.py:131
 msgid "Cadena de conexión (la de Ajustes → Agentes): "
 msgstr "Connection string (the one in Settings → Agents): "
 
-#: agent/enroll.py:128
+#: agent/enroll.py:134
 msgid "Falta la cadena de conexión: cenya-agent enroll cenya://portal.midominio.com/XXXX-XXXX-XXXX"
 msgstr "The connection string is missing: cenya-agent enroll cenya://portal.mycompany.com/XXXX-XXXX-XXXX"
 
-#: agent/enroll.py:136
+#: agent/enroll.py:142
 msgid "El enrolamiento ha fallado."
 msgstr "Enrolment failed."
 
-#: agent/enroll.py:138
+#: agent/enroll.py:144
 #, python-format
 msgid "Agente «%(name)s» enrolado en %(url)s."
 msgstr "Agent «%(name)s» enrolled at %(url)s."
 
-#: agent/enroll.py:139
+#: agent/enroll.py:145
 #, python-format
 msgid "El token queda guardado de forma protegida en %(path)s; no hace falta copiarlo."
 msgstr "The token is saved in protected form at %(path)s; there is nothing to copy."
 
-#: agent/enroll.py:140
+#: agent/enroll.py:146
 msgid "Para dejarlo funcionando, ejecuta: cenya-agent"
 msgstr "To leave it running, run: cenya-agent"
 
@@ -364,12 +369,12 @@ msgstr[1] "Exported %(n)d objects to %(path)s."
 msgid "Súbelo en Cenya: Ajustes → Importar → «NetBox, desde un fichero»."
 msgstr "Upload it in Cenya: Settings → Import → «NetBox, from a file»."
 
-#: agent/runtime.py:86
+#: agent/runtime.py:87
 #, python-format
 msgid "[agente] Tarea %(task)s enviada: %(created)s, %(refreshed)s"
 msgstr "[agent] Task %(task)s sent: %(created)s, %(refreshed)s"
 
-#: agent/runtime.py:456
+#: agent/runtime.py:528
 #, python-format
 msgid "[agente] Tarea %(task)s guardada en la cola local: se enviará cuando el servidor conteste."
 msgstr "[agent] Task %(task)s saved in the local queue: it will be sent when the server answers."
@@ -487,22 +492,22 @@ msgstr "No sweep has finished yet."
 msgid "Próximo barrido hacia las %(clock)s."
 msgstr "Next sweep around %(clock)s."
 
-#: agent/store.py:572
+#: agent/store.py:583
 #, python-format
 msgid "No se pudo guardar el enrolamiento de forma segura en %(path)s: %(error)s"
 msgstr "The enrolment could not be saved securely at %(path)s: %(error)s"
 
-#: agent/store.py:615
+#: agent/store.py:626
 #, python-format
 msgid "[agente] La carpeta %(path)s no estaba protegida: se ha apartado sin usarlo lo que otro usuario pudo dejar en ella (%(names)s), y ya queda protegida."
 msgstr "[agent] The folder %(path)s was not protected: what another user could have left in it has been set aside unused (%(names)s), and it is now protected."
 
-#: agent/store.py:644
+#: agent/store.py:655
 #, python-format
 msgid "No se pudo apartar %(path)s, que no es de fiar: %(error)s"
 msgstr "Could not set aside %(path)s, which cannot be trusted: %(error)s"
 
-#: agent/store.py:669
+#: agent/store.py:680
 #, python-format
 msgid "La carpeta %(path)s no está protegida y no se puede proteger (%(error)s): el agente no lee ni guarda en ella su token ni sus credenciales. Ejecútalo como administrador o como servicio."
 msgstr "The folder %(path)s is not protected and cannot be protected (%(error)s): the agent will not read or keep its token or credentials there. Run it as an administrator or as a service."

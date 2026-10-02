@@ -177,6 +177,8 @@ def settle(
     full: bool,
 ) -> None:
     """Apunta cómo fue: la credencial que entró, o una ronda entera fallida."""
+    if credential is not None:
+        note_ok(ctx, credential, ip or mac)
     mem = memory(ctx)
     if mem is None:
         return
@@ -270,6 +272,34 @@ def note_suspended(ctx: dict, collector: str, credential: creds.Credential) -> N
             failures=failures,
         )
     )
+
+
+#: La clave de `ctx` con lo que entró en esta ejecución: ``{id: {equipos}}``.
+CREDENTIALS_OK = "credentials_ok"
+
+
+def note_ok(ctx: dict, credential: creds.Credential, host: str) -> None:
+    """Esa credencial entró en ese equipo: para `stats.credentials_ok` (spec 3.2).
+
+    Solo las que traen `id` del servidor: de una derivada (o de una comunidad
+    de la lista vieja) el servidor no sabría qué hacer. Un equipo cuenta una
+    vez aunque dos colectores entren con la misma. Se llama desde los hilos de
+    un colector: `setdefault` y `set.add` son atómicos con el GIL.
+    """
+    if not credential.from_server or not host:
+        return
+    try:
+        ctx.setdefault(CREDENTIALS_OK, {}).setdefault(credential.ident, set()).add(host)
+    except Exception:  # noqa: BLE001 - una cifra no tumba un colector
+        pass
+
+
+def credentials_ok(ctx: dict) -> dict[str, int]:
+    """``{id: nº de equipos}`` de esta ejecución."""
+    found = ctx.get(CREDENTIALS_OK)
+    if not isinstance(found, dict):
+        return {}
+    return {ident: len(hosts) for ident, hosts in found.items() if hosts}
 
 
 def flag(ctx: dict, ip: str, mac: str, **flags: Any) -> None:

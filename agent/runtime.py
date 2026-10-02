@@ -28,7 +28,8 @@ from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 from typing import Any
 
-from agent import __version__, about, logs, notes, outbox, probe, status, store, tasks
+from agent import __version__, about, logs, notes, orders, outbox, probe, status, store, tasks
+from agent import credentials as creds
 from agent import settings as local_settings
 from agent.client import AgentClient, PushError, result_parts
 from agent.config import Config
@@ -124,6 +125,10 @@ class Runtime:
         base = store.state_dir(environ)
         self.settings = local_settings.load(environ)
         self.shared = Shared()
+        # El uuid del enrolamiento, si lo guardó (0.11 en adelante); si no, lo
+        # trae el checkin. Sin él no abre ninguna credencial sellada.
+        enrolled = store.load(environ)
+        self.shared.agent_uuid = enrolled.uuid if enrolled is not None else ""
         self.scheduler = Scheduler()
         #: Guarda la cola y los vivos: los tocan los dos hilos.
         self._lock = threading.Lock()
@@ -155,6 +160,9 @@ class Runtime:
                 probe=self._probe,
                 excluded=self._is_excluded,
                 rejected=self._rejected,
+                test_credential=self._test_credential,
+                reseal=self._reseal,
+                netbox_export=self._netbox_export,
             ),
             clock=clock,
             report=report,
@@ -211,6 +219,68 @@ class Runtime:
             raise RuntimeError("el servidor ha rechazado a este agente")
         config, _ = self.shared.config_snapshot()
         return probe.report_for(ip, self._base_ctx(config))
+
+    # --- Los encargos de las credenciales selladas (spec 3.3) -------------------------
+
+    def _order_ctx(self) -> dict[str, Any] | None:
+        """El `ctx` de un encargo, o `None` si el servidor ha rechazado al agente.
+
+        Con un 401 la configuración ya se olvidó, pero un encargo que esperaba
+        su turno desde antes no puede usar ni lo poco que le quedara.
+        """
+        if self.shared.refused():
+            return None
+        config, _ = self.shared.config_snapshot()
+        return self._base_ctx(config)
+
+    @staticmethod
+    def _rejected_outcome(kind: str) -> tuple[str, dict[str, Any], list[notes.Note]]:
+        return orders.FAILED, {}, [
+            collector_note(kind, "agent_refused", "el servidor no acepta ahora a este agente; no se hace nada")
+        ]
+
+    def _test_credential(self, order_id: str, params: dict[str, Any]) -> tuple[str, dict[str, Any], list[notes.Note]]:
+        ctx = self._order_ctx()
+        if ctx is None:
+            return self._rejected_outcome("test_credential")
+        return orders.test_credential(params, ctx)
+
+    def _reseal(self, order_id: str, params: dict[str, Any]) -> tuple[str, dict[str, Any], list[notes.Note]]:
+        ctx = self._order_ctx()
+        if ctx is None:
+            return self._rejected_outcome("reseal")
+        return orders.reseal(params, ctx, agent_uuid=self._agent_uuid(), environ=self._environ)
+
+    def _netbox_export(self, order_id: str, params: dict[str, Any]) -> tuple[str, dict[str, Any], list[notes.Note]]:
+        ctx = self._order_ctx()
+        if ctx is None:
+            return self._rejected_outcome("netbox")
+        started = self._clock().isoformat()
+        mine = {"task": "netbox_export", "order_id": order_id, "run_id": order_id, "step": "", "done": 0,
+                "total": 0, "started_at": started}
+
+        def progress(step: str, done: int, total: int) -> None:
+            # La actividad es una sola: si mientras tanto empezó una tarea, la
+            # suya manda y esta deja de escribir.
+            with self.shared.lock:
+                if self.shared.activity is None:
+                    self.shared.activity = dict(mine)
+                if self.shared.activity.get("order_id") == order_id:
+                    self.shared.activity.update(step=step, done=done, total=total)
+
+        try:
+            return orders.netbox_export(
+                order_id, params, ctx, agent_uuid=self._agent_uuid(), upload=self.client.upload_netbox_bundle,
+                progress=progress, environ=self._environ,
+            )
+        finally:
+            with self.shared.lock:
+                if self.shared.activity is not None and self.shared.activity.get("order_id") == order_id:
+                    self.shared.activity = None
+
+    def _agent_uuid(self) -> str:
+        with self.shared.lock:
+            return self.shared.agent_uuid
 
     # --- Negociar ------------------------------------------------------------------
 
@@ -318,6 +388,8 @@ class Runtime:
             "workers": tasks.workers_for(config.get("gentleness"), self.settings.gentleness_cap),
             "excluded": self.excluded,
             "errors": [],
+            # Los sobres de esta ejecución se abren aquí y mueren con el `ctx`.
+            creds.CTX_KEY: creds.Unsealer(self._agent_uuid(), self._environ),
         }
 
     def build_ctx(self, job: Job, config: dict[str, Any]) -> dict[str, Any]:

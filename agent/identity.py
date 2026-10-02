@@ -68,6 +68,22 @@ def _public_pem(key) -> str:  # noqa: ANN001
     )
 
 
+def public_pem(key) -> str:  # noqa: ANN001
+    """The PEM (SubjectPublicKeyInfo) of a private key's public half."""
+    return _public_pem(key)
+
+
+def private_key(environ: Mapping[str, str] | None = None):  # noqa: ANN201 - tipo de una librería opcional
+    """The private key on disk, or `None` -- never creates one.
+
+    Solo para abrir sobres (`agent/sealing.py`). Quien la pide la usa y la
+    suelta: no se guarda en ningún objeto que viva más que la operación.
+    """
+    if not available():
+        return None
+    return _load_private(path(environ))
+
+
 def public_key(environ: Mapping[str, str] | None = None) -> str:
     """The public key already on disk (PEM), or "" -- never creates one.
 
