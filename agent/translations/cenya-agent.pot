@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-01 19:12+0200\n"
+"POT-Creation-Date: 2026-10-02 20:22+0200\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -18,67 +18,77 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=INTEGER; plural=EXPRESSION;\n"
 
-#: agent/__main__.py:32 agent/status.py:359
+#: agent/__main__.py:40 agent/runtime.py:89 agent/status.py:419
 #, python-format
 msgid "%(n)d hallazgo nuevo"
 msgid_plural "%(n)d hallazgos nuevos"
 msgstr[0] ""
 msgstr[1] ""
 
-#: agent/__main__.py:33 agent/status.py:361
+#: agent/__main__.py:41 agent/runtime.py:90 agent/status.py:421
 #, python-format
 msgid "%(n)d ya conocido."
 msgid_plural "%(n)d ya conocidos."
 msgstr[0] ""
 msgstr[1] ""
 
-#: agent/__main__.py:36
+#: agent/__main__.py:44
 #, python-format
 msgid "%(n)d envío"
 msgid_plural "%(n)d envíos"
 msgstr[0] ""
 msgstr[1] ""
 
-#: agent/__main__.py:37
+#: agent/__main__.py:45
 #, python-format
 msgid "[agente] Barrido enviado en %(batches)s: %(created)s, %(refreshed)s"
 msgstr ""
 
-#: agent/__main__.py:38
+#: agent/__main__.py:46
 #, python-format
 msgid "[agente] Barrido enviado: %(created)s, %(refreshed)s"
 msgstr ""
 
-#: agent/__main__.py:43
+#: agent/__main__.py:61 agent/control.py:435 agent/runtime.py:441
 #, python-format
 msgid "Error inesperado: %(error)s"
 msgstr ""
 
-#: agent/__main__.py:189 agent/__main__.py:205 agent/__main__.py:212
+#: agent/__main__.py:217 agent/__main__.py:261 agent/__main__.py:268
+#: agent/control.py:423 agent/runtime.py:243
 #, python-format
 msgid "[agente] %(error)s"
 msgstr ""
 
-#: agent/__main__.py:195
+#: agent/__main__.py:231
+#, python-format
+msgid "[agente] Conectado a %(url)s con el protocolo 2."
+msgstr ""
+
+#: agent/__main__.py:235
+msgid "[agente] El servidor solo habla el protocolo 1: se sigue con el bucle de siempre."
+msgstr ""
+
+#: agent/__main__.py:237
+msgid "[agente] Detenido."
+msgstr ""
+
+#: agent/__main__.py:252
 #, python-format
 msgid "[agente] Empujando a %(url)s cada ~%(seconds)d s."
 msgstr ""
 
-#: agent/__main__.py:215
-msgid "[agente] Detenido."
-msgstr ""
-
-#: agent/client.py:174
+#: agent/client.py:360
 #, python-format
 msgid "El servidor respondió %(code)s: %(detail)s"
 msgstr ""
 
-#: agent/client.py:177
+#: agent/client.py:364
 #, python-format
 msgid "No se pudo hablar con el servidor: %(error)s"
 msgstr ""
 
-#: agent/client.py:182
+#: agent/client.py:369
 msgid "El servidor respondió algo que no es un objeto JSON."
 msgstr ""
 
@@ -95,48 +105,62 @@ msgstr ""
 msgid "La cadena de conexión no es válida: debe parecerse a cenya://portal.midominio.com/XXXX-XXXX-XXXX. Cópiala entera de Ajustes → Agentes."
 msgstr ""
 
-#: agent/enroll.py:49
+#: agent/control.py:279
+msgid "[agente] Configuración nueva recibida."
+msgstr ""
+
+#: agent/control.py:285
+#, python-format
+msgid "[agente] Hay una versión nueva del agente: %(version)s."
+msgstr ""
+
+#: agent/control.py:313
+#, python-format
+msgid "[agente] Encargo recibido: %(kind)s."
+msgstr ""
+
+#: agent/enroll.py:66
 msgid "El servidor no devolvió ningún token. ¿Es la dirección de un portal de Cenya?"
 msgstr ""
 
-#: agent/enroll.py:57
+#: agent/enroll.py:74
 #, python-format
 msgid "%(error)s El código ya se ha usado: genera otra cadena en Ajustes → Agentes."
 msgstr ""
 
-#: agent/enroll.py:71
+#: agent/enroll.py:88
 #, python-format
 msgid "[agente] Enrolado como «%(name)s» en %(url)s."
 msgstr ""
 
-#: agent/enroll.py:90
+#: agent/enroll.py:107
 #, python-format
 msgid "Este equipo ya está enrolado como «%(name)s» en %(url)s. Para enrolarlo de nuevo, añade --force."
 msgstr ""
 
-#: agent/enroll.py:98
+#: agent/enroll.py:115
 msgid "Cadena de conexión (la de Ajustes → Agentes): "
 msgstr ""
 
-#: agent/enroll.py:101
+#: agent/enroll.py:118
 msgid "Falta la cadena de conexión: cenya-agent enroll cenya://portal.midominio.com/XXXX-XXXX-XXXX"
 msgstr ""
 
-#: agent/enroll.py:109
+#: agent/enroll.py:126
 msgid "El enrolamiento ha fallado."
 msgstr ""
 
-#: agent/enroll.py:111
+#: agent/enroll.py:128
 #, python-format
 msgid "Agente «%(name)s» enrolado en %(url)s."
 msgstr ""
 
-#: agent/enroll.py:112
+#: agent/enroll.py:129
 #, python-format
 msgid "El token queda guardado de forma protegida en %(path)s; no hace falta copiarlo."
 msgstr ""
 
-#: agent/enroll.py:113
+#: agent/enroll.py:130
 msgid "Para dejarlo funcionando, ejecuta: cenya-agent"
 msgstr ""
 
@@ -300,120 +324,130 @@ msgstr[1] ""
 msgid "Súbelo en Cenya: Ajustes → Importar → «NetBox, desde un fichero»."
 msgstr ""
 
-#: agent/status.py:237
+#: agent/runtime.py:87
+#, python-format
+msgid "[agente] Tarea %(task)s enviada: %(created)s, %(refreshed)s"
+msgstr ""
+
+#: agent/runtime.py:429
+#, python-format
+msgid "[agente] Tarea %(task)s guardada en la cola local: se enviará cuando el servidor conteste."
+msgstr ""
+
+#: agent/status.py:297
 msgid "hace menos de un minuto"
 msgstr ""
 
-#: agent/status.py:240
+#: agent/status.py:300
 #, python-format
 msgid "hace %(n)d minuto"
 msgid_plural "hace %(n)d minutos"
 msgstr[0] ""
 msgstr[1] ""
 
-#: agent/status.py:243
+#: agent/status.py:303
 #, python-format
 msgid "hace %(n)d hora"
 msgid_plural "hace %(n)d horas"
 msgstr[0] ""
 msgstr[1] ""
 
-#: agent/status.py:245
+#: agent/status.py:305
 #, python-format
 msgid "hace %(n)d día"
 msgid_plural "hace %(n)d días"
 msgstr[0] ""
 msgstr[1] ""
 
-#: agent/status.py:261 agent/status.py:276
+#: agent/status.py:321 agent/status.py:336
 msgid "Agente detenido"
 msgstr ""
 
-#: agent/status.py:261
+#: agent/status.py:321
 msgid "El servicio está detenido y no hay datos de su última ejecución."
 msgstr ""
 
-#: agent/status.py:263
+#: agent/status.py:323
 msgid "Servicio no instalado"
 msgstr ""
 
-#: agent/status.py:263
+#: agent/status.py:323
 msgid "El servicio del agente no está instalado en este equipo."
 msgstr ""
 
-#: agent/status.py:264
+#: agent/status.py:324
 msgid "Sin datos del agente"
 msgstr ""
 
-#: agent/status.py:264
+#: agent/status.py:324
 msgid "No se encuentra el fichero de estado: el agente no ha arrancado nunca aquí, o no se puede leer."
 msgstr ""
 
-#: agent/status.py:275
+#: agent/status.py:335
 msgid "Agente detenido por un error"
 msgstr ""
 
-#: agent/status.py:280
+#: agent/status.py:340
 msgid "hace un tiempo desconocido"
 msgstr ""
 
-#: agent/status.py:283
+#: agent/status.py:343
 msgid "Sin noticias del agente"
 msgstr ""
 
-#: agent/status.py:285
+#: agent/status.py:345
 #, python-format
 msgid "La última noticia del agente es de %(ago)s: puede haberse detenido, o el fichero de estado ya no se actualiza."
 msgstr ""
 
-#: agent/status.py:295
+#: agent/status.py:355
 msgid "No puede hablar con el servidor"
 msgstr ""
 
-#: agent/status.py:301
+#: agent/status.py:361
 msgid "Barriendo la red"
 msgstr ""
 
-#: agent/status.py:302
+#: agent/status.py:362
 #, python-format
 msgid "Paso actual: %(step)s"
 msgstr ""
 
-#: agent/status.py:305
+#: agent/status.py:365
 msgid "Arrancando"
 msgstr ""
 
-#: agent/status.py:306
+#: agent/status.py:366
 msgid "En marcha"
 msgstr ""
 
-#: agent/status.py:314
+#: agent/status.py:374
 #, python-format
 msgid "Cenya Agent: %(headline)s"
 msgstr ""
 
-#: agent/status.py:356
+#: agent/status.py:416
 #, python-format
 msgid "Último barrido: %(clock)s (%(ago)s)."
 msgstr ""
 
-#: agent/status.py:369
+#: agent/status.py:429
 #, python-format
 msgid "Salió parcial, con %(n)d aviso (detalle en Ajustes → Agentes)."
 msgid_plural "Salió parcial, con %(n)d avisos (detalle en Ajustes → Agentes)."
 msgstr[0] ""
 msgstr[1] ""
 
-#: agent/status.py:376
+#: agent/status.py:436
 msgid "Todavía no ha terminado ningún barrido."
 msgstr ""
 
-#: agent/status.py:379
+#: agent/status.py:439
 #, python-format
 msgid "Próximo barrido hacia las %(clock)s."
 msgstr ""
 
-#: agent/store.py:119
+#: agent/store.py:132
 #, python-format
 msgid "No se pudo guardar el enrolamiento de forma segura en %(path)s: %(error)s"
 msgstr ""

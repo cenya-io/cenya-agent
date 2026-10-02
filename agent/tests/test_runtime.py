@@ -304,7 +304,7 @@ class RunJobTests(RuntimeTestCase):
         self.alive = [("192.0.2.1", "aa:aa:aa:aa:aa:01"), ("192.0.2.2", "aa:aa:aa:aa:aa:02")]
         with serving(Server()) as url:
             runtime = self.runtime(url)
-            runtime.excluded = rt._Excluded([], ["192.0.2.2"])
+            runtime.excluded = rt.Excluded([], ["192.0.2.2"])
             runtime.negotiate()
             runtime.run_job(Job("presence"))
             runtime.run_job(Job("inventory"))
@@ -317,10 +317,6 @@ class RunJobTests(RuntimeTestCase):
             runtime.negotiate()
         self.assertEqual(runtime.memory.etags, ["e1"])
         self.assertEqual(runtime.scheduler.every("inventory"), 0)
-
-    def test_without_the_memory_module_the_runtime_still_works(self) -> None:
-        with mock.patch.dict("sys.modules", {"agent.memory": None}):
-            self.assertIsNone(rt._load_memory(None))
 
 
 class LoopTests(RuntimeTestCase):

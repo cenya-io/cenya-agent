@@ -15,13 +15,12 @@ finishes (cutting an SNMP walk in half saves nothing), nothing new starts, and
 waiting stops at once.
 
 What the agent learns between tasks -- the live hosts of the last presence --
-lives here, in memory; what must survive a restart is in `agent.memory` (when
-that module is present) and in the outbox.
+lives here, in memory; what must survive a restart is in `agent.memory` and in
+the outbox.
 """
 
 from __future__ import annotations
 
-import ipaddress
 import threading
 import time
 import uuid
@@ -35,6 +34,7 @@ from agent.client import AgentClient, PushError, result_parts
 from agent.config import Config
 from agent.control import Control, Hooks, Shared
 from agent.i18n import _t, _tn
+from agent.memory import Excluded, Memory
 from agent.notes import collector_note
 from agent.scheduler import PRESENCE, Job, Scheduler, effective_pause, is_paused
 
@@ -65,58 +65,20 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _load_memory(path: Any) -> Any:
-    """La memoria del agente (spec 2.3), si el módulo está; `None` si no.
-
-    Prescindible por diseño: sin ella el agente funciona como sin pasado, que
-    es como funcionaba la 0.10.
-    """
+def _load_memory(path: Any) -> Memory | None:
+    """La memoria del agente (spec 2.3). `Memory.load` no lanza: un fichero
+    roto es una memoria vacía. El `None` queda para lo que no se puede prever:
+    prescindible por diseño, sin ella el agente funciona como sin pasado."""
     try:
-        from agent import memory as memory_module
-    except ImportError:
-        return None
-    try:
-        return memory_module.Memory.load(path)
+        return Memory.load(path)
     except Exception:  # noqa: BLE001
         return None
 
 
-class _Excluded:
-    """Respaldo de `agent.memory.Excluded` mientras ese módulo no esté: misma forma."""
-
-    def __init__(self, subnets: tuple[str, ...] | list[str], addresses: tuple[str, ...] | list[str]) -> None:
-        self._networks = []
-        for subnet in subnets:
-            try:
-                self._networks.append(ipaddress.ip_network(subnet, strict=False))
-            except ValueError:
-                continue
-        self._addresses = set()
-        for address in addresses:
-            try:
-                self._addresses.add(ipaddress.ip_address(address))
-            except ValueError:
-                continue
-
-    def __contains__(self, ip: object) -> bool:
-        try:
-            address = ipaddress.ip_address(str(ip))
-        except ValueError:
-            return False
-        return address in self._addresses or any(address in network for network in self._networks)
-
-
-def _excluded_for(settings: local_settings.Settings) -> Any:
+def _excluded_for(settings: local_settings.Settings) -> Excluded | None:
     if not settings.excluded_subnets and not settings.excluded_addresses:
         return None
-    try:
-        from agent.memory import Excluded
-    except ImportError:
-        return _Excluded(settings.excluded_subnets, settings.excluded_addresses)
-    try:
-        return Excluded(list(settings.excluded_subnets), list(settings.excluded_addresses))
-    except Exception:  # noqa: BLE001
-        return _Excluded(settings.excluded_subnets, settings.excluded_addresses)
+    return Excluded(list(settings.excluded_subnets), list(settings.excluded_addresses))
 
 
 def task_line(task: str, created: int, refreshed: int) -> str:
