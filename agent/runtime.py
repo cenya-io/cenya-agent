@@ -37,7 +37,7 @@ from agent.control import REFUSED_UNAUTHORIZED, Control, Hooks, Shared
 from agent.i18n import _t, _tn
 from agent.memory import Excluded, Memory
 from agent.notes import collector_note
-from agent.scheduler import PRESENCE, Job, Scheduler, effective_pause, is_paused
+from agent.scheduler import PRESENCE, TRIGGER_ORDER, Job, Scheduler, effective_pause, is_paused
 
 MEMORY_FILE = "memory.json"
 
@@ -104,6 +104,34 @@ class _NeverSet:
         return self._event.wait(timeout)
 
 
+class _CheckinRecorder:
+    """The client as the control channel sees it, noting how each check-in went.
+
+    Para el canal local (`status`, `test_connection`): cuándo fue el último
+    checkin, si salió bien y, si no, qué dijo el servidor. Todo lo demás pasa
+    tal cual al cliente de verdad.
+    """
+
+    def __init__(self, client: AgentClient, note: Callable[[bool, int | None, str], None]) -> None:
+        self._client = client
+        self._note = note
+
+    def checkin(self, body: dict[str, Any]) -> dict[str, Any]:
+        try:
+            answer = self._client.checkin(body)
+        except PushError as exc:
+            self._note(False, exc.status, str(exc))
+            raise
+        except Exception as exc:
+            self._note(False, None, type(exc).__name__)
+            raise
+        self._note(True, None, "")
+        return answer
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._client, name)
+
+
 class Runtime:
     def __init__(
         self,
@@ -147,8 +175,10 @@ class Runtime:
         self._about: tuple[float, dict[str, Any]] | None = None
         self._step_written = 0.0
         self.tick = TICK_SECONDS
+        #: Cómo fue el último checkin (`_CheckinRecorder`), bajo `_lock`.
+        self.last_checkin: dict[str, Any] = {}
         self.control = Control(
-            client,
+            _CheckinRecorder(client, self._note_checkin),  # type: ignore[arg-type]
             self.shared,
             self.outbox,
             Hooks(
@@ -281,6 +311,74 @@ class Runtime:
     def _agent_uuid(self) -> str:
         with self.shared.lock:
             return self.shared.agent_uuid
+
+    # --- Lo que pide el canal local (agent.localops) ----------------------------------
+
+    def _note_checkin(self, ok: bool, status_code: int | None, error: str) -> None:
+        with self._lock:
+            self.last_checkin = {
+                "at": self._clock().isoformat(),
+                "ok": ok,
+                "status": status_code,
+                "error": logs.scrub(error),
+            }
+
+    def snapshot(self) -> dict[str, Any]:
+        """What the agent is doing now, for the local channel's `status`. Nothing secret."""
+        now = self._clock()
+        with self.shared.lock:
+            refusal = self.shared.refusal
+            server_pause = self.shared.server_paused_until
+            update = dict(self.shared.update) if isinstance(self.shared.update, dict) else None
+            has_config = self.shared.has_config
+            checkin_seconds = self.shared.checkin_seconds
+        activity = self.shared.activity_snapshot()
+        local_pause = self._local_pause()
+        until = effective_pause(local_pause, server_pause)
+        paused = is_paused(now, until)
+        with self._lock:
+            schedule = self.scheduler.view(now)
+            queued = [{"task": job.task, "trigger": job.trigger} for job in self.scheduler.queued]
+            last = dict(self.last_checkin)
+        return {
+            "state": "running" if activity is not None else ("paused" if paused else "idle"),
+            "activity": activity,
+            "schedule": schedule,
+            "queued": queued,
+            "pause": {
+                "local": local_pause.isoformat() if local_pause else None,
+                "server": server_pause.isoformat() if server_pause else None,
+                "until": until.isoformat() if paused and until else None,
+            },
+            "refusal": refusal,
+            "has_config": has_config,
+            "checkin_seconds": checkin_seconds,
+            "last_checkin": last,
+            "outbox": self.outbox.count(),
+            "update": update,
+        }
+
+    def queue_local(self, task: str) -> None:
+        """«Ejecutar ahora» desde esta máquina: como un encargo, el primero de la cola."""
+        self._queue_order(Job(task, TRIGGER_ORDER))
+        self.shared.wake.set()
+
+    def apply_settings(self, settings: local_settings.Settings) -> None:
+        """Ajustes locales nuevos, sin reiniciar: exclusiones, suavidad, `about`."""
+        self.settings = settings
+        self.excluded = _excluded_for(settings)
+        self._about = None
+        self.shared.wake.set()
+
+    def probe_now(self, ip: str) -> dict[str, Any]:
+        """«Analizar» pedido en esta máquina, con los mismos turnos que los encargos (spec 2.1)."""
+        control = self.control
+        ip_lock = control._ip_lock(ip, take=True)
+        try:
+            with ip_lock, control._probe_slots:
+                return self._probe(ip)
+        finally:
+            control._ip_lock(ip, take=False)
 
     # --- Negociar ------------------------------------------------------------------
 

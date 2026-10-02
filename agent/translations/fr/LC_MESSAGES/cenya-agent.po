@@ -5,7 +5,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: cenya-agent 0.9.1\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-02 21:46+0200\n"
+"POT-Creation-Date: 2026-10-02 23:05+0200\n"
 "PO-Revision-Date: 2026-09-14 17:00+0200\n"
 "Last-Translator: NetInventory\n"
 "Language-Team: French\n"
@@ -46,31 +46,31 @@ msgstr "[agent] Balayage envoyé en %(batches)s : %(created)s, %(refreshed)s"
 msgid "[agente] Barrido enviado: %(created)s, %(refreshed)s"
 msgstr "[agent] Balayage envoyé : %(created)s, %(refreshed)s"
 
-#: agent/__main__.py:68 agent/control.py:680 agent/runtime.py:540
+#: agent/__main__.py:68 agent/control.py:680 agent/runtime.py:638
 #, python-format
 msgid "Error inesperado: %(error)s"
 msgstr "Erreur inattendue : %(error)s"
 
-#: agent/__main__.py:266 agent/__main__.py:310 agent/__main__.py:317
-#: agent/control.py:656 agent/runtime.py:334
+#: agent/__main__.py:273 agent/__main__.py:371 agent/__main__.py:378
+#: agent/control.py:656 agent/runtime.py:432
 #, python-format
 msgid "[agente] %(error)s"
 msgstr "[agent] %(error)s"
 
-#: agent/__main__.py:280
+#: agent/__main__.py:311
+msgid "[agente] Detenido."
+msgstr "[agent] Arrêté."
+
+#: agent/__main__.py:343
 #, python-format
 msgid "[agente] Conectado a %(url)s con el protocolo 2."
 msgstr "[agent] Connecté à %(url)s avec le protocole 2."
 
-#: agent/__main__.py:284
+#: agent/__main__.py:347
 msgid "[agente] El servidor solo habla el protocolo 1: se sigue con el bucle de siempre."
 msgstr "[agent] Le serveur ne parle que le protocole 1 : on continue avec la boucle habituelle."
 
-#: agent/__main__.py:286
-msgid "[agente] Detenido."
-msgstr "[agent] Arrêté."
-
-#: agent/__main__.py:301
+#: agent/__main__.py:362
 #, python-format
 msgid "[agente] Empujando a %(url)s cada ~%(seconds)d s."
 msgstr "[agent] Envoi vers %(url)s toutes les ~%(seconds)d s."
@@ -79,22 +79,22 @@ msgstr "[agent] Envoi vers %(url)s toutes les ~%(seconds)d s."
 msgid "La dirección del proxy no es válida: revisa el ajuste «proxy» (settings.json o CENYA_PROXY). No se muestra aquí porque puede llevar una contraseña."
 msgstr "L'adresse du proxy n'est pas valide : vérifiez le paramètre « proxy » (settings.json ou CENYA_PROXY). Elle n'est pas affichée ici car elle peut contenir un mot de passe."
 
-#: agent/client.py:394
+#: agent/client.py:404
 #, python-format
 msgid "Lo leído de NetBox ocupa %(mb)s MB y el servidor admite %(max)s MB como mucho."
 msgstr "Les données lues dans NetBox occupent %(mb)s Mo et le serveur accepte %(max)s Mo au maximum."
 
-#: agent/client.py:440
+#: agent/client.py:450
 #, python-format
 msgid "El servidor respondió %(code)s: %(detail)s"
 msgstr "Le serveur a répondu %(code)s : %(detail)s"
 
-#: agent/client.py:444 agent/client.py:450
+#: agent/client.py:454 agent/client.py:460
 #, python-format
 msgid "No se pudo hablar con el servidor: %(error)s"
 msgstr "Impossible de joindre le serveur : %(error)s"
 
-#: agent/client.py:455
+#: agent/client.py:465
 msgid "El servidor respondió algo que no es un objeto JSON."
 msgstr "Le serveur a répondu autre chose qu'un objet JSON."
 
@@ -144,52 +144,52 @@ msgstr "[agent] Une nouvelle version de l'agent est disponible : %(version)s."
 msgid "[agente] Encargo recibido: %(kind)s."
 msgstr "[agent] Demande reçue : %(kind)s."
 
-#: agent/enroll.py:66
+#: agent/enroll.py:71
 msgid "El servidor no devolvió ningún token. ¿Es la dirección de un portal de Cenya?"
 msgstr "Le serveur n'a renvoyé aucun jeton. Est-ce bien l'adresse d'un portail Cenya ?"
 
-#: agent/enroll.py:80
+#: agent/enroll.py:87
 #, python-format
 msgid "%(error)s El código ya se ha usado: genera otra cadena en Ajustes → Agentes."
 msgstr "%(error)s Le code a déjà été utilisé : générer une autre chaîne dans Paramètres → Agents."
 
-#: agent/enroll.py:94
+#: agent/enroll.py:101
 #, python-format
 msgid "[agente] Enrolado como «%(name)s» en %(url)s."
 msgstr "[agent] Enrôlé sous «%(name)s» sur %(url)s."
 
-#: agent/enroll.py:123
+#: agent/enroll.py:130
 #, python-format
 msgid "Este equipo ya está enrolado como «%(name)s» en %(url)s. Para enrolarlo de nuevo, añade --force."
 msgstr "Cette machine est déjà enrôlée sous «%(name)s» sur %(url)s. Pour la réenrôler, ajouter --force."
 
-#: agent/enroll.py:131
+#: agent/enroll.py:138
 msgid "Cadena de conexión (la de Ajustes → Agentes): "
 msgstr "Chaîne de connexion (celle de Paramètres → Agents) : "
 
-#: agent/enroll.py:134
+#: agent/enroll.py:141
 msgid "Falta la cadena de conexión: cenya-agent enroll cenya://portal.midominio.com/XXXX-XXXX-XXXX"
 msgstr "La chaîne de connexion est manquante : cenya-agent enroll cenya://portail.monentreprise.fr/XXXX-XXXX-XXXX"
 
-#: agent/enroll.py:142
+#: agent/enroll.py:149 agent/localops.py:862
 msgid "El enrolamiento ha fallado."
 msgstr "L'enrôlement a échoué."
 
-#: agent/enroll.py:144
+#: agent/enroll.py:151
 #, python-format
 msgid "Agente «%(name)s» enrolado en %(url)s."
 msgstr "Agent «%(name)s» enrôlé sur %(url)s."
 
-#: agent/enroll.py:145
+#: agent/enroll.py:152
 #, python-format
 msgid "El token queda guardado de forma protegida en %(path)s; no hace falta copiarlo."
 msgstr "Le jeton est conservé de façon protégée dans %(path)s ; inutile de le copier."
 
-#: agent/enroll.py:146
+#: agent/enroll.py:153
 msgid "Para dejarlo funcionando, ejecuta: cenya-agent"
 msgstr "Pour le laisser fonctionner, exécuter : cenya-agent"
 
-#: agent/goodbye.py:51
+#: agent/goodbye.py:51 agent/localops.py:896
 #, python-format
 msgid "No se pudo avisar al servidor (%(error)s). El enrolamiento de este equipo se borra igualmente; el agente seguirá apareciendo en Ajustes → Agentes hasta que se borre allí."
 msgstr "Impossible de prévenir le serveur (%(error)s). L'enrôlement de cette machine est tout de même supprimé ; l'agent restera visible dans Paramètres → Agents jusqu'à ce qu'il y soit supprimé."
@@ -280,6 +280,609 @@ msgstr "L'icône de la zone de notification apparaîtra à l'ouverture de sessio
 msgid "Windows lo guarda al principio en el desplegable ^ de la barra de tareas: arrástralo fuera para tenerlo siempre a la vista."
 msgstr "Windows la range d'abord dans le menu ^ de la barre des tâches : la faire glisser hors de ce menu pour la garder visible."
 
+#: agent/localapi.py:153
+msgid "La respuesta es demasiado grande para el canal local."
+msgstr "La réponse est trop grande pour le canal local."
+
+#: agent/localapi.py:173
+msgid "La petición no es JSON válido."
+msgstr "La requête n'est pas du JSON valide."
+
+#: agent/localapi.py:175
+msgid "La petición tiene que ser un objeto JSON."
+msgstr "La requête doit être un objet JSON."
+
+#: agent/localapi.py:178
+msgid "El campo «id» tiene que ser un número o un texto."
+msgstr "Le champ « id » doit être un nombre ou un texte."
+
+#: agent/localapi.py:181
+msgid "Falta el campo «op»."
+msgstr "Le champ « op » manque."
+
+#: agent/localapi.py:186
+msgid "El campo «args» tiene que ser un objeto."
+msgstr "Le champ « args » doit être un objet."
+
+#: agent/localapi.py:212
+#, python-format
+msgid "Operación desconocida: %(op)s"
+msgstr "Opération inconnue : %(op)s"
+
+#: agent/localapi.py:214
+msgid "Esta operación solo la puede hacer un administrador."
+msgstr "Seul un administrateur peut effectuer cette opération."
+
+#: agent/localapi.py:217
+msgid "Este agente no sabe hacer todavía esa operación."
+msgstr "Cet agent ne sait pas encore faire cette opération."
+
+#: agent/localapi.py:225
+#, python-format
+msgid "[canal local] Fallo inesperado en %(op)s: %(type)s"
+msgstr "[canal local] Échec inattendu dans %(op)s : %(type)s"
+
+#: agent/localapi.py:226
+#, python-format
+msgid "Error inesperado en el agente (%(type)s)."
+msgstr "Erreur inattendue dans l'agent (%(type)s)."
+
+#: agent/localapi.py:371 agent/localpipe.py:399 agent/localpipe.py:593
+msgid "Hay demasiadas conexiones abiertas con el agente."
+msgstr "Trop de connexions sont ouvertes avec l'agent."
+
+#: agent/localapi.py:376
+msgid "La petición es demasiado grande."
+msgstr "La requête est trop grande."
+
+#: agent/localclient.py:91
+msgid "El servicio contestó algo que no se entiende."
+msgstr "Le service a répondu quelque chose d'incompréhensible."
+
+#: agent/localclient.py:110
+msgid "El servicio cerró la conexión."
+msgstr "Le service a fermé la connexion."
+
+#: agent/localclient.py:113
+msgid "La respuesta del servicio es demasiado grande."
+msgstr "La réponse du service est trop grande."
+
+#: agent/localclient.py:136
+msgid "Esta instalación no puede hablar con el servicio: falta pywin32."
+msgstr "Cette installation ne peut pas parler au service : pywin32 manque."
+
+#: agent/localclient.py:139
+msgid "El canal del agente lo ha abierto otro programa, no el servicio de Cenya: no se le envía nada. Reinicia el servicio y avisa a quien administre este equipo."
+msgstr "Le canal de l'agent a été ouvert par un autre programme, pas par le service Cenya : rien ne lui est envoyé. Redémarre le service et préviens l'administrateur de cet ordinateur."
+
+#: agent/localclient.py:143
+msgid "Esta cuenta no tiene permiso para hablar con el servicio del agente."
+msgstr "Ce compte n'a pas le droit de parler au service de l'agent."
+
+#: agent/localclient.py:144
+msgid "El servicio del agente no está en marcha en este equipo."
+msgstr "Le service de l'agent ne tourne pas sur cet ordinateur."
+
+#: agent/localclient.py:149
+msgid "Esto solo lo puede hacer un administrador: abre la consola con «Ejecutar como administrador»."
+msgstr "Seul un administrateur peut faire cela : ouvre la console avec « Exécuter en tant qu'administrateur »."
+
+#: agent/localclient.py:150
+msgid "Esto solo lo puede hacer root o la cuenta con la que corre el agente."
+msgstr "Seul root ou le compte sous lequel tourne l'agent peut faire cela."
+
+#: agent/localclient.py:155
+#, python-format
+msgid "Cenya Agent %(version)s"
+msgstr "Cenya Agent %(version)s"
+
+#: agent/localclient.py:157
+msgid "No está conectado a ningún portal: cenya-agent connect <cadena>"
+msgstr "Connecté à aucun portail : cenya-agent connect <chaîne>"
+
+#: agent/localclient.py:161
+#, python-format
+msgid "Conectado como «%(name)s» a %(portal)s (protocolo %(protocol)s)."
+msgstr "Connecté en tant que « %(name)s » à %(portal)s (protocole %(protocol)s)."
+
+#: agent/localclient.py:167
+#, python-format
+msgid "Conexión: correcta (último contacto a las %(clock)s)."
+msgstr "Connexion : correcte (dernier contact à %(clock)s)."
+
+#: agent/localclient.py:169
+#, python-format
+msgid "Conexión: falla (%(error)s)."
+msgstr "Connexion : en échec (%(error)s)."
+
+#: agent/localclient.py:171
+msgid "Conexión: el servidor ha rechazado a este agente; hay que conectarlo de nuevo."
+msgstr "Connexion : le serveur a refusé cet agent ; il faut le reconnecter."
+
+#: agent/localclient.py:173
+msgid "Conexión: la instalación de Cenya está en solo lectura."
+msgstr "Connexion : l'installation Cenya est en lecture seule."
+
+#: agent/localclient.py:175
+msgid "Conexión: todavía sin noticias del servidor."
+msgstr "Connexion : pas encore de nouvelles du serveur."
+
+#: agent/localclient.py:184
+#, python-format
+msgid "Ahora: trabajando en %(task)s%(progress)s."
+msgstr "Maintenant : travaille sur %(task)s%(progress)s."
+
+#: agent/localclient.py:186
+#, python-format
+msgid "Ahora: en pausa hasta las %(clock)s."
+msgstr "Maintenant : en pause jusqu'à %(clock)s."
+
+#: agent/localclient.py:188
+msgid "Ahora: esperando a la siguiente tarea."
+msgstr "Maintenant : en attente de la prochaine tâche."
+
+#: agent/localclient.py:191
+msgid "Tareas:"
+msgstr "Tâches :"
+
+#: agent/localclient.py:195
+#, python-format
+msgid "%(task)s: cada %(every)s, última %(last)s (%(status)s), próxima %(next)s"
+msgstr "%(task)s : toutes les %(every)s, dernière %(last)s (%(status)s), prochaine %(next)s"
+
+#: agent/localclient.py:206
+#, python-format
+msgid "%(n)d envío pendiente en la cola local."
+msgid_plural "%(n)d envíos pendientes en la cola local."
+msgstr[0] "%(n)d envoi en attente dans la file locale."
+msgstr[1] "%(n)d envois en attente dans la file locale."
+
+#: agent/localclient.py:209
+#, python-format
+msgid "Hay una versión nueva del agente: %(version)s."
+msgstr "Une nouvelle version de l'agent est disponible : %(version)s."
+
+#: agent/localclient.py:213
+#, python-format
+msgid "Exportando NetBox: %(step)s (%(done)s de %(total)s)."
+msgstr "Export de NetBox : %(step)s (%(done)s sur %(total)s)."
+
+#: agent/localclient.py:222
+#, python-format
+msgid "%(n)d hora"
+msgid_plural "%(n)d horas"
+msgstr[0] "%(n)d heure"
+msgstr[1] "%(n)d heures"
+
+#: agent/localclient.py:225
+#, python-format
+msgid "%(n)d minuto"
+msgid_plural "%(n)d minutos"
+msgstr[0] "%(n)d minute"
+msgstr[1] "%(n)d minutes"
+
+#: agent/localclient.py:226
+#, python-format
+msgid "%(n)d segundo"
+msgid_plural "%(n)d segundos"
+msgstr[0] "%(n)d seconde"
+msgstr[1] "%(n)d secondes"
+
+#: agent/localclient.py:230 agent/localclient.py:429
+msgid "[bien]"
+msgstr "[ok]"
+
+#: agent/localclient.py:230 agent/localclient.py:429
+msgid "[falla]"
+msgstr "[échec]"
+
+#: agent/localclient.py:239
+msgid "Uso: cenya-agent status | run <tarea> | pause [--hours N] | resume | logs [-n N] [-f] | doctor | connect <cadena> | disconnect"
+msgstr "Usage : cenya-agent status | run <tâche> | pause [--hours N] | resume | logs [-n N] [-f] | doctor | connect <chaîne> | disconnect"
+
+#: agent/localclient.py:287
+msgid "El servicio no ha contestado a tiempo."
+msgstr "Le service n'a pas répondu à temps."
+
+#: agent/localclient.py:290
+msgid "Se ha perdido la conexión con el servicio."
+msgstr "La connexion avec le service a été perdue."
+
+#: agent/localclient.py:313
+#, python-format
+msgid "Tarea %(task)s en cola: empieza en cuanto termine la que está en curso."
+msgstr "Tâche %(task)s en file : elle démarre dès que celle en cours se termine."
+
+#: agent/localclient.py:315
+msgid "Antes tiene que llegar la configuración del servidor."
+msgstr "La configuration du serveur doit d'abord arriver."
+
+#: agent/localclient.py:317
+msgid "La instalación de Cenya está en solo lectura: la tarea espera a que vuelva a aceptar resultados."
+msgstr "L'installation Cenya est en lecture seule : la tâche attend que les résultats soient de nouveau acceptés."
+
+#: agent/localclient.py:336
+#, python-format
+msgid "Agente en pausa hasta las %(clock)s. La tarea en curso, si hay una, termina."
+msgstr "Agent en pause jusqu'à %(clock)s. La tâche en cours, s'il y en a une, se termine."
+
+#: agent/localclient.py:345
+msgid "Pausa local levantada."
+msgstr "Pause locale levée."
+
+#: agent/localclient.py:348
+#, python-format
+msgid "Sigue en pausa hasta las %(clock)s: esa pausa se puso desde la web y se quita allí."
+msgstr "Toujours en pause jusqu'à %(clock)s : cette pause a été mise depuis le web et se lève là-bas."
+
+#: agent/localclient.py:401
+#, python-format
+msgid "Tampoco se puede leer el registro (%(path)s) desde esta cuenta."
+msgstr "Le journal (%(path)s) n'est pas lisible non plus depuis ce compte."
+
+#: agent/localclient.py:403
+#, python-format
+msgid "Registro leído directamente de %(path)s:"
+msgstr "Journal lu directement depuis %(path)s :"
+
+#: agent/localclient.py:421
+msgid "Se prueba la conexión desde esta consola, sin el servicio."
+msgstr "Test de la connexion depuis cette console, sans le service."
+
+#: agent/localclient.py:423
+msgid "Conexión con el portal:"
+msgstr "Connexion au portail :"
+
+#: agent/localclient.py:428
+msgid "Esta instalación:"
+msgstr "Cette installation :"
+
+#: agent/localclient.py:430
+msgid "completa (colectores, librerías y traducciones)."
+msgstr "complète (collecteurs, bibliothèques et traductions)."
+
+#: agent/localclient.py:430
+msgid "incompleta: detalle con cenya-agent selftest."
+msgstr "incomplète : détails avec cenya-agent selftest."
+
+#: agent/localclient.py:468
+msgid "Falta la cadena de conexión: cenya-agent connect cenya://portal.midominio.com/XXXX-XXXX-XXXX"
+msgstr "La chaîne de connexion manque : cenya-agent connect cenya://portail.mondomaine.fr/XXXX-XXXX-XXXX"
+
+#: agent/localclient.py:476
+msgid "Se enrola desde esta consola; después arranca el servicio."
+msgstr "Enrôlement depuis cette console ; démarre ensuite le service."
+
+#: agent/localclient.py:480
+#, python-format
+msgid "Conectado como «%(name)s» a %(portal)s. El agente se reinicia con la conexión nueva."
+msgstr "Connecté en tant que « %(name)s » à %(portal)s. L'agent redémarre avec la nouvelle connexion."
+
+#: agent/localclient.py:492
+msgid "Para borrar el enrolamiento sin el servicio: cenya-agent goodbye"
+msgstr "Pour supprimer l'enrôlement sans le service : cenya-agent goodbye"
+
+#: agent/localops.py:167
+msgid "No existe ese fichero."
+msgstr "Ce fichier n'existe pas."
+
+#: agent/localops.py:171
+msgid "No es un fichero de certificados que se pueda leer (PEM)."
+msgstr "Ce n'est pas un fichier de certificats lisible (PEM)."
+
+#: agent/localops.py:181
+msgid "Ajuste desconocido."
+msgstr "Paramètre inconnu."
+
+#: agent/localops.py:185
+msgid "Idioma no disponible: es, en, de, fr, pt_BR o vacío."
+msgstr "Langue non disponible : es, en, de, fr, pt_BR ou vide."
+
+#: agent/localops.py:190
+msgid "Tiene que ser una ruta."
+msgstr "Doit être un chemin."
+
+#: agent/localops.py:197
+msgid "Tiene que ser un objeto con «mode» y «url»."
+msgstr "Doit être un objet avec « mode » et « url »."
+
+#: agent/localops.py:202
+msgid "Modo de proxy no válido: system, manual o none."
+msgstr "Mode de proxy non valide : system, manual ou none."
+
+#: agent/localops.py:211 agent/localops.py:407
+msgid "La dirección del proxy no es válida."
+msgstr "L'adresse du proxy n'est pas valide."
+
+#: agent/localops.py:218 agent/localops.py:222
+msgid "Tiene que ser un objeto con «subnets» y «addresses»."
+msgstr "Doit être un objet avec « subnets » et « addresses »."
+
+#: agent/localops.py:238
+#, python-format
+msgid "No son redes ni direcciones válidas: %(values)s"
+msgstr "Ce ne sont pas des réseaux ou adresses valides : %(values)s"
+
+#: agent/localops.py:244
+msgid "Valor no válido: gentle, normal, fast o vacío."
+msgstr "Valeur non valide : gentle, normal, fast ou vide."
+
+#: agent/localops.py:249
+msgid "Tiene que ser verdadero o falso."
+msgstr "Doit être vrai ou faux."
+
+#: agent/localops.py:260 agent/localops.py:264
+msgid "«until» tiene que ser una fecha ISO 8601."
+msgstr "« until » doit être une date ISO 8601."
+
+#: agent/localops.py:269
+msgid "«seconds» tiene que ser un número de segundos mayor que cero."
+msgstr "« seconds » doit être un nombre de secondes supérieur à zéro."
+
+#: agent/localops.py:272
+msgid "Falta «until» o «seconds»."
+msgstr "« until » ou « seconds » manque."
+
+#: agent/localops.py:274
+msgid "Esa hora ya ha pasado."
+msgstr "Cette heure est déjà passée."
+
+#: agent/localops.py:276
+#, python-format
+msgid "Una pausa no puede durar más de %(days)d días."
+msgstr "Une pause ne peut pas durer plus de %(days)d jours."
+
+#: agent/localops.py:396
+msgid "La dirección del portal no es válida."
+msgstr "L'adresse du portail n'est pas valide."
+
+#: agent/localops.py:413
+#, python-format
+msgid "No se encuentra el nombre %(host)s."
+msgstr "Le nom %(host)s est introuvable."
+
+#: agent/localops.py:415
+#, python-format
+msgid "El nombre %(host)s se resuelve."
+msgstr "Le nom %(host)s est résolu."
+
+#: agent/localops.py:420
+#, python-format
+msgid "El puerto %(port)s de %(host)s no contesta."
+msgstr "Le port %(port)s de %(host)s ne répond pas."
+
+#: agent/localops.py:423
+#, python-format
+msgid "%(host)s rechaza la conexión al puerto %(port)s."
+msgstr "%(host)s refuse la connexion au port %(port)s."
+
+#: agent/localops.py:426
+#, python-format
+msgid "No se puede abrir una conexión con %(host)s:%(port)s."
+msgstr "Impossible d'ouvrir une connexion avec %(host)s:%(port)s."
+
+#: agent/localops.py:428
+#, python-format
+msgid "El puerto %(port)s de %(host)s acepta conexiones."
+msgstr "Le port %(port)s de %(host)s accepte les connexions."
+
+#: agent/localops.py:430
+msgid "Sin TLS: la dirección es http://."
+msgstr "Pas de TLS : l'adresse est en http://."
+
+#: agent/localops.py:432
+msgid "El certificado se comprueba a través del proxy, en el paso siguiente."
+msgstr "Le certificat est vérifié via le proxy, à l'étape suivante."
+
+#: agent/localops.py:436
+msgid "El certificado del portal es válido."
+msgstr "Le certificat du portail est valide."
+
+#: agent/localops.py:437
+msgid "El certificado es válido con la lista de CA de Mozilla (no con la del sistema)."
+msgstr "Le certificat est valide avec la liste d'AC de Mozilla (pas avec celle du système)."
+
+#: agent/localops.py:438
+#, python-format
+msgid "El certificado del portal no es válido: %(reason)s"
+msgstr "Le certificat du portail n'est pas valide : %(reason)s"
+
+#: agent/localops.py:439
+#, python-format
+msgid "No se puede leer el fichero de CA configurado (%(path)s)."
+msgstr "Le fichier d'AC configuré est illisible (%(path)s)."
+
+#: agent/localops.py:440
+#, python-format
+msgid "Falló la negociación TLS (%(reason)s)."
+msgstr "La négociation TLS a échoué (%(reason)s)."
+
+#: agent/localops.py:446
+msgid "Este agente no está enrolado."
+msgstr "Cet agent n'est pas enrôlé."
+
+#: agent/localops.py:450
+msgid "El servidor acepta a este agente."
+msgstr "Le serveur accepte cet agent."
+
+#: agent/localops.py:452
+msgid "El servidor rechaza el token de este agente: hay que enrolarlo de nuevo."
+msgstr "Le serveur refuse le jeton de cet agent : il faut le réenrôler."
+
+#: agent/localops.py:454
+msgid "La instalación de Cenya está en solo lectura."
+msgstr "L'installation Cenya est en lecture seule."
+
+#: agent/localops.py:457
+#, python-format
+msgid "El servidor respondió %(status)s: %(detail)s"
+msgstr "Le serveur a répondu %(status)s : %(detail)s"
+
+#: agent/localops.py:460
+#, python-format
+msgid "No se pudo hablar con el servidor: %(detail)s"
+msgstr "Impossible de parler au serveur : %(detail)s"
+
+#: agent/localops.py:597 agent/localops.py:835
+msgid "Este agente no está enrolado: conéctalo con una cadena de Ajustes → Agentes."
+msgstr "Cet agent n'est pas enrôlé : connecte-le avec une chaîne de Paramètres → Agents."
+
+#: agent/localops.py:666
+msgid "«lines» tiene que ser un número entero positivo."
+msgstr "« lines » doit être un entier positif."
+
+#: agent/localops.py:669
+msgid "«after» tiene que ser el cursor de una respuesta anterior."
+msgstr "« after » doit être le curseur d'une réponse précédente."
+
+#: agent/localops.py:698
+#, python-format
+msgid "Tarea desconocida. Las tareas son: %(tasks)s."
+msgstr "Tâche inconnue. Les tâches sont : %(tasks)s."
+
+#: agent/localops.py:702
+msgid "El servidor solo habla el protocolo 1: ahí no hay tareas sueltas, solo el barrido completo."
+msgstr "Le serveur ne parle que le protocole 1 : pas de tâches séparées, seulement le balayage complet."
+
+#: agent/localops.py:705
+msgid "El servidor ha rechazado a este agente: no se empieza ninguna tarea."
+msgstr "Le serveur a refusé cet agent : aucune tâche n'est lancée."
+
+#: agent/localops.py:720
+#, python-format
+msgid "No se pudieron guardar los ajustes en %(path)s."
+msgstr "Les paramètres n'ont pas pu être enregistrés dans %(path)s."
+
+#: agent/localops.py:738
+#, python-format
+msgid "[agente] En pausa desde esta máquina hasta %(until)s."
+msgstr "[agent] En pause depuis cette machine jusqu'à %(until)s."
+
+#: agent/localops.py:744
+msgid "[agente] Pausa local levantada desde esta máquina."
+msgstr "[agent] Pause locale levée depuis cette machine."
+
+#: agent/localops.py:753
+msgid "Hay ajustes que no son válidos; no se ha cambiado nada."
+msgstr "Certains paramètres ne sont pas valides ; rien n'a été modifié."
+
+#: agent/localops.py:755
+msgid "No hay nada que cambiar."
+msgstr "Il n'y a rien à modifier."
+
+#: agent/localops.py:770
+msgid "Los ajustes se guardaron, pero la conexión no se pudo rehacer con ellos."
+msgstr "Les paramètres ont été enregistrés, mais la connexion n'a pas pu être refaite avec eux."
+
+#: agent/localops.py:783
+#, python-format
+msgid "[agente] Ajustes locales cambiados desde esta máquina: %(fields)s."
+msgstr "[agent] Paramètres locaux modifiés depuis cette machine : %(fields)s."
+
+#: agent/localops.py:796
+msgid "La dirección no es válida."
+msgstr "L'adresse n'est pas valide."
+
+#: agent/localops.py:799
+msgid "Esa dirección está excluida en este agente: no se sondea."
+msgstr "Cette adresse est exclue sur cet agent : elle n'est pas sondée."
+
+#: agent/localops.py:805
+msgid "El servidor ha rechazado a este agente: no se usa ninguna credencial."
+msgstr "Le serveur a refusé cet agent : aucun identifiant n'est utilisé."
+
+#: agent/localops.py:849
+msgid "Falta la cadena de conexión (la de Ajustes → Agentes)."
+msgstr "La chaîne de connexion manque (celle de Paramètres → Agents)."
+
+#: agent/localops.py:852
+msgid "El token de este agente lo fija la variable CENYA_AGENT_TOKEN: cámbiala allí."
+msgstr "Le jeton de cet agent est fixé par la variable CENYA_AGENT_TOKEN : modifie-la là."
+
+#: agent/localops.py:854 agent/localops.py:876
+msgid "Ya se está cambiando la conexión de este agente."
+msgstr "La connexion de cet agent est déjà en cours de modification."
+
+#: agent/localops.py:870
+#, python-format
+msgid "[agente] Conectado desde esta máquina como «%(name)s» en %(url)s."
+msgstr "[agent] Connecté depuis cette machine en tant que « %(name)s » à %(url)s."
+
+#: agent/localops.py:892
+msgid "[agente] Desconectado desde esta máquina."
+msgstr "[agent] Déconnecté depuis cette machine."
+
+#: agent/localops.py:900
+msgid "Se ha avisado al servidor: este agente queda dado de baja."
+msgstr "Le serveur a été prévenu : cet agent est désinscrit."
+
+#: agent/localops.py:902
+msgid "Este agente no estaba conectado a ningún servidor."
+msgstr "Cet agent n'était connecté à aucun serveur."
+
+#: agent/localops.py:926
+msgid "Falta la URL de NetBox."
+msgstr "L'URL de NetBox manque."
+
+#: agent/localops.py:928
+msgid "Falta el token de NetBox."
+msgstr "Le jeton NetBox manque."
+
+#: agent/localops.py:930
+msgid "«verify_tls» y «send» tienen que ser verdadero o falso."
+msgstr "« verify_tls » et « send » doivent être vrai ou faux."
+
+#: agent/localops.py:939
+msgid "Ya hay una exportación de NetBox en marcha."
+msgstr "Un export NetBox est déjà en cours."
+
+#: agent/localops.py:956
+#, python-format
+msgid "La exportación falló (%(type)s)."
+msgstr "L'export a échoué (%(type)s)."
+
+#: agent/localops.py:973 agent/localops.py:1039 agent/netbox_export.py:299
+#, python-format
+msgid "No se pudo escribir %(path)s: %(error)s"
+msgstr "Impossible d'écrire %(path)s : %(error)s"
+
+#: agent/localops.py:1058
+msgid "Falta «path»: la ruta completa donde dejar el fichero."
+msgstr "« path » manque : le chemin complet où déposer le fichier."
+
+#: agent/localops.py:1061
+msgid "«path» tiene que ser una ruta completa (absoluta)."
+msgstr "« path » doit être un chemin complet (absolu)."
+
+#: agent/localops.py:1065
+#, python-format
+msgid "No existe la carpeta %(path)s."
+msgstr "Le dossier %(path)s n'existe pas."
+
+#: agent/localpipe.py:340 agent/localpipe.py:563
+#, python-format
+msgid "[canal local] No se puede abrir %(name)s (%(error)s): la aplicación y los comandos locales no podrán hablar con el servicio."
+msgstr "[canal local] Impossible d'ouvrir %(name)s (%(error)s) : l'application et les commandes locales ne pourront pas parler au service."
+
+#: agent/localpipe.py:381
+#, python-format
+msgid "[canal local] El canal local se ha cerrado por un error: %(error)s"
+msgstr "[canal local] Le canal local s'est fermé à cause d'une erreur : %(error)s"
+
+#: agent/localpipe.py:540
+#, python-format
+msgid "[canal local] %(path)s existe y no es un socket: no se toca."
+msgstr "[canal local] %(path)s existe et n'est pas un socket : on n'y touche pas."
+
+#: agent/localpipe.py:550
+#, python-format
+msgid "[canal local] Ya hay otro agente escuchando en %(path)s."
+msgstr "[canal local] Un autre agent écoute déjà sur %(path)s."
+
+#: agent/localpipe.py:655
+msgid "[canal local] Sin pywin32 no hay canal local: la aplicación y los comandos locales no podrán hablar con el servicio."
+msgstr "[canal local] Sans pywin32, pas de canal local : l'application et les commandes locales ne pourront pas parler au service."
+
 #: agent/netbox_export.py:124
 #, python-format
 msgid "NetBox no respondió en %(seconds)s segundos. ¿Es esa la URL y llega la red hasta allí?"
@@ -353,11 +956,6 @@ msgstr "Sans jeton, impossible de lire NetBox."
 msgid "Leyendo %(path)s…"
 msgstr "Lecture de %(path)s…"
 
-#: agent/netbox_export.py:299
-#, python-format
-msgid "No se pudo escribir %(path)s: %(error)s"
-msgstr "Impossible d'écrire %(path)s : %(error)s"
-
 #: agent/netbox_export.py:306
 #, python-format
 msgid "Exportado %(n)d objeto a %(path)s."
@@ -374,7 +972,7 @@ msgstr "Téléversez-le dans Cenya : Paramètres → Importer → « NetBox, dep
 msgid "[agente] Tarea %(task)s enviada: %(created)s, %(refreshed)s"
 msgstr "[agent] Tâche %(task)s envoyée : %(created)s, %(refreshed)s"
 
-#: agent/runtime.py:528
+#: agent/runtime.py:626
 #, python-format
 msgid "[agente] Tarea %(task)s guardada en la cola local: se enviará cuando el servidor conteste."
 msgstr "[agent] Tâche %(task)s mise dans la file locale : elle sera envoyée quand le serveur répondra."

@@ -28,12 +28,17 @@ from agent.config import check_transport, setting
 from agent.i18n import _t
 
 
-def redeem(raw_connection: str, environ: Mapping[str, str], *, ca_bundle: str = "") -> store.Enrollment:
+def redeem(
+    raw_connection: str, environ: Mapping[str, str], *, ca_bundle: str = "", save: bool = True
+) -> store.Enrollment:
     """Redeem the code in `raw_connection` and save the result.
 
     Raises `SystemExit` with a message written for a person on any failure: this
     runs from a console or from a service start-up, where a stack trace helps
     nobody.
+
+    Con `save=False` no guarda nada: el canal local (`connect`) canjea primero
+    y solo guarda si salió bien, para que un fallo deje el enrolamiento de antes.
     """
     try:
         target = connection.parse(raw_connection)
@@ -71,6 +76,8 @@ def redeem(raw_connection: str, environ: Mapping[str, str], *, ca_bundle: str = 
         name=str(answer.get("name") or ""),
         uuid=agent_uuid.strip() if isinstance(agent_uuid, str) else "",
     )
+    if not save:
+        return saved
     try:
         store.save(saved, environ)
     except store.StoreError as exc:

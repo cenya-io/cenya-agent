@@ -257,6 +257,16 @@ class AgentClient:
         # the operator chose, and a second opinion would undo it.
         self._may_fall_back = not ca_bundle
 
+    def reconfigure(self, *, ca_bundle: str = "", proxy: tuple[str, str] | None = None) -> None:
+        """A new CA bundle or proxy without a new client: whoever holds this one sees it at once.
+
+        Lo usa el canal local (`settings.set`) para aplicar el cambio sin
+        reiniciar. Lanza si la CA no se puede cargar, antes de tocar nada.
+        """
+        fresh = AgentClient(self.base_url, self.token, ca_bundle=ca_bundle, proxy=proxy)
+        self._bad_proxy, self._proxy = fresh._bad_proxy, fresh._proxy
+        self._opener, self._may_fall_back = fresh._opener, fresh._may_fall_back
+
     def _open(self, request: urllib.request.Request, timeout: float = TIMEOUT_SECONDS) -> Any:
         """Open the request, trusting what the operating system trusts.
 

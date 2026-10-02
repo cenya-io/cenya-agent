@@ -20,7 +20,7 @@ import time
 from datetime import datetime, timezone
 from typing import Protocol
 
-from agent import __version__, enroll, logs, notes, probe, status, store
+from agent import __version__, enroll, localops, localpipe, logs, notes, probe, status, store
 from agent import settings as local_settings
 from agent.notes import collector_note
 from agent.client import AgentClient, PushError
@@ -208,6 +208,12 @@ def main(argv: list[str] | None = None, stop_event: StopSignal | None = None) ->
     siguiente. La siesta, en cambio, se corta en el acto.
     """
     args = argv if argv is not None else sys.argv[1:]
+    from agent import localclient
+
+    if args[:1] and args[0] in localclient.COMMANDS:
+        # Clientes del canal local: hablan con el servicio que ya corre en
+        # esta máquina, no arrancan otro agente.
+        raise SystemExit(localclient.run(args))
     if args[:1] == ["enroll"]:
         raise SystemExit(enroll.run(args[1:]))
     if args[:1] == ["goodbye"]:
@@ -242,13 +248,14 @@ def main(argv: list[str] | None = None, stop_event: StopSignal | None = None) ->
     if securing.moved:
         _say(store.moved_line(securing), error=True)
     local = local_settings.load()
+    language_locked = bool(os.environ.get("CENYA_LANGUAGE"))
     # El idioma de `settings.json`, si nadie lo fijó en el entorno: lo leen
     # `agent.i18n` (lo que se imprime) y `accept_language` (los errores del
     # servidor). Las variables mandan, como en el resto de ajustes.
     if local.language and not os.environ.get("CENYA_LANGUAGE"):
         os.environ["CENYA_LANGUAGE"] = local.language
     config = from_env()
-    client = AgentClient(config.url, config.token, ca_bundle=config.ca_bundle or local.ca_bundle, proxy=local.proxy)
+    client = _client_for(config, local)
 
     if "--once" in args:
         # Un servidor caído aquí es un mensaje, no un volcado de pila: `--once`
@@ -268,10 +275,66 @@ def main(argv: list[str] | None = None, stop_event: StopSignal | None = None) ->
         return
 
     runtime = Runtime(client, config, say=_say)
+    # El canal local (spec 4): la aplicación de escritorio y los comandos
+    # `status`, `pause`... hablan con este proceso por él. Vive lo que vive el
+    # proceso; cada identidad (un `connect` desde el canal) es una sesión.
+    channel = localops.LocalService(language_locked=language_locked)
+    server = localpipe.serve(channel.dispatcher())
+    try:
+        while True:
+            channel.attach(runtime, client, config)
+            _session(client, config, runtime, channel, channel.stop_signal(stop_event), stop_event)
+            if _stopping(stop_event):
+                break
+            change = channel.take_change()
+            if change is None:
+                break
+            channel.detach()
+            # Lo que esperaba en la cola era de la identidad de antes.
+            channel.discard_outbox()
+            if change == localops.DISCONNECTED:
+                status.stopped()
+                if not channel.wait_for_connect(stop_event):
+                    break
+            try:
+                config = from_env()
+            except SystemExit as exc:
+                _say(str(exc.code), error=True)
+                if not channel.wait_for_connect(stop_event):
+                    break
+                config = from_env()
+            client = _client_for(config, local_settings.load())
+            runtime = Runtime(client, config, say=_say)
+    finally:
+        if server is not None:
+            server.close()
+    _say(_t("[agente] Detenido."))
+    status.stopped()
+
+
+def _client_for(config: Config, local: local_settings.Settings) -> AgentClient:
+    return AgentClient(config.url, config.token, ca_bundle=config.ca_bundle or local.ca_bundle, proxy=local.proxy)
+
+
+def _session(
+    client: AgentClient,
+    config: Config,
+    runtime: Runtime,
+    channel: localops.LocalService,
+    stop: StopSignal,
+    stop_event: StopSignal | None,
+) -> None:
+    """Una identidad: el protocolo 2, o el 1 si el servidor no sabe del 2, hasta que paren.
+
+    `stop` es la parada del servicio o un cambio de identidad desde el canal
+    local; `stop_event`, solo la del servicio (si ya estaba puesta, ni se
+    pregunta al servidor).
+    """
     mode = V1 if _stopping(stop_event) else runtime.negotiate()
     while True:
+        channel.set_mode(mode)
         if mode == V1:
-            if not _legacy_loop(client, config, runtime, stop_event):
+            if not _legacy_loop(client, config, runtime, stop):
                 break
             mode = V2
             continue
@@ -279,12 +342,10 @@ def main(argv: list[str] | None = None, stop_event: StopSignal | None = None) ->
         # arranca el 2, y si el servidor resulta ser del 1 su 404 lo dirá.
         _say(_t("[agente] Conectado a %(url)s con el protocolo 2.") % {"url": config.url})
         status.started(version=__version__, url=config.url, interval_seconds=0)
-        if runtime.run(stop_event) != FALLBACK:
+        if runtime.run(stop) != FALLBACK:
             break
         _say(_t("[agente] El servidor solo habla el protocolo 1: se sigue con el bucle de siempre."))
         mode = V1
-    _say(_t("[agente] Detenido."))
-    status.stopped()
 
 
 #: Cada cuánto se vuelve a probar el protocolo 2 desde el bucle del 1 (spec 1.8).
