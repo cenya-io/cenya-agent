@@ -16,6 +16,10 @@
       4. El token queda protegido: ni Usuarios ni Todos pueden leerlo.
       5. La carpeta del programa está en el PATH del sistema y `cenya-agent`
          funciona en una consola nueva, sin `cd`.
+      5b. El OpenSSH que lleva el instalador (`openssh\ssh.exe` y sus DLL) arranca,
+         es >= 8.4, `cenya-agent selftest` lo da por bueno y, contra un servidor
+         SSH de mentira en 127.0.0.1, entra con contraseñas con comillas, `%`,
+         acentos y una barra final a través de `cenya-agent-askpass.exe`.
       6. Volver a ejecutar el instalador (actualización) conserva el enrolamiento,
          el servicio sigue en marcha y el PATH no se duplica. Repetirlo con una
          cadena ya gastada no lo toca: un equipo enrolado ignora /CONNECTION.
@@ -97,6 +101,25 @@ try {
     Check "la carpeta está en el PATH del sistema una vez" ((PathEntries) -eq 1) "($(PathEntries) veces)"
     $found = & cmd.exe /d /c "set `"PATH=$([Environment]::GetEnvironmentVariable('Path', 'Machine'))`" && where cenya-agent" 2>$null
     Check "una consola nueva encuentra cenya-agent" (($found | Out-String) -match [regex]::Escape((Join-Path $appDir "cenya-agent.exe"))) ($found | Out-String)
+
+    Write-Host "5b. El OpenSSH propio y la contraseña SSH"
+    $sshExe = Join-Path $appDir "openssh\ssh.exe"
+    $askpassExe = Join-Path $appDir "cenya-agent-askpass.exe"
+    Check "el instalador lleva openssh\ssh.exe" (Test-Path $sshExe)
+    Check "y el ayudante cenya-agent-askpass.exe" (Test-Path $askpassExe)
+    $banner = (& cmd.exe /d /c ('"' + $sshExe + '" -V 2>&1') | Out-String).Trim()
+    Check "ssh.exe arranca y dice su versión" ($banner -match "OpenSSH_") $banner
+    $selftest = (& (Join-Path $appDir "cenya-agent.exe") selftest | Out-String) | ConvertFrom-Json
+    Check "selftest ve el OpenSSH empaquetado" ($selftest.ssh.bundled -eq $true) ($selftest.ssh | ConvertTo-Json -Compress)
+    Check "selftest da la contraseña SSH por disponible" ($selftest.ssh.password_auth -eq $true)
+    # Un inicio de sesión de verdad con los ficheros instalados. `cryptography` solo
+    # lo usa el servidor de mentira de las pruebas; el agente no depende de ella.
+    & python -c "import cryptography" 2>$null
+    if ($LASTEXITCODE -ne 0) { & python -m pip install --quiet cryptography | Out-Null }
+    $repoRoot = (Resolve-Path (Join-Path $here "..\..")).Path
+    Push-Location $repoRoot
+    try { & python (Join-Path $here "ci_ssh_check.py") --ssh $sshExe --askpass $askpassExe; $loginExit = $LASTEXITCODE } finally { Pop-Location }
+    Check "entra con contraseña a través del ssh.exe y el askpass instalados" ($loginExit -eq 0) "(código $loginExit)"
 
     Write-Host "6. Actualización: no pide nada y conserva el enrolamiento"
     $exit = Install @() "setup-2.log"

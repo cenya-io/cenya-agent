@@ -539,15 +539,27 @@ class SshCollector:
                 collector_note("ssh", "no_credentials", "no hay credenciales SSH configuradas (Ajustes -> Agentes -> Barrido)")
             )
             return []
-        if not ssh.SSHPASS_AVAILABLE and any(credential.secret for credential in credentials):
+        if not ssh.PASSWORD_AUTH_AVAILABLE and any(credential.secret for credential in credentials):
             # No es un error que pare nada: las credenciales con clave siguen
             # funcionando. Se dice porque, si no, el usuario ve «no entró en
-            # ningún Windows... perdón, en ningún Linux» y no sabe por qué.
-            errors.append(
-                collector_note(
-                    "ssh", "sshpass_missing", "hay credenciales con contraseña y falta «sshpass»; solo se usarán las de clave"
+            # ningún equipo» y no sabe por qué. Y se dice lo cierto: con un
+            # OpenSSH anterior a 8.4 lo que arregla esto es actualizarlo.
+            if ssh.VERSION is not None and ssh.VERSION < ssh.MIN_ASKPASS_VERSION:
+                errors.append(
+                    collector_note(
+                        "ssh",
+                        "password_auth_unavailable",
+                        f"hay credenciales con contraseña pero el OpenSSH instalado ({ssh.VERSION[0]}.{ssh.VERSION[1]}) "
+                        "es anterior a 8.4 y no sirve para ellas; actualízalo o instala «sshpass»; solo se usarán las de clave",
+                        version=f"{ssh.VERSION[0]}.{ssh.VERSION[1]}",
+                    )
                 )
-            )
+            else:
+                errors.append(
+                    collector_note(
+                        "ssh", "sshpass_missing", "hay credenciales con contraseña y falta «sshpass»; solo se usarán las de clave"
+                    )
+                )
 
         hosts = ctx["hosts"] or []
         if not hosts:
