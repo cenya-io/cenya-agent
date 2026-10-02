@@ -36,8 +36,10 @@ ALL_OFF_BUT = {"presence": {"every_seconds": 300}, "inventory": {"every_seconds"
 class Server:
     """Un servidor de mentira que habla los protocolos 1 y 2 (o solo el 1)."""
 
-    def __init__(self, *, v2: bool = True, config: dict | None = None) -> None:
+    def __init__(self, *, v2: bool = True, config: dict | None = None, heartbeat: bool = True) -> None:
         self.v2 = v2
+        #: Sin latido: un servidor que no está bien (un proxy en pleno despliegue).
+        self.heartbeat = heartbeat
         self.config = config if config is not None else {"subnets": ["192.0.2.0/30"], "tasks": ALL_OFF_BUT}
         self.requests: list[tuple[str, dict]] = []
         self.orders: list[dict] = []
@@ -67,6 +69,8 @@ class Server:
         if path.startswith("/api/agent/v2/orders/"):
             return 200, {"ok": True}
         if path == "/api/agent/heartbeat/":
+            if not self.heartbeat:
+                return 502, {"error": "Bad gateway."}
             return 200, {"ok": True, "interval_seconds": 900, "config": self.config}
         if path == "/api/agent/findings/":
             return 200, {"ok": True, "run": "r1", "created": len(body.get("items") or []), "refreshed": 0}
@@ -183,6 +187,10 @@ class NegotiationTests(RuntimeTestCase):
     def test_a_404_is_protocol_1(self) -> None:
         with serving(Server(v2=False)) as url:
             self.assertEqual(self.runtime(url).negotiate(), rt.V1)
+
+    def test_a_404_with_a_failing_heartbeat_is_not_protocol_1(self) -> None:
+        with serving(Server(v2=False, heartbeat=False)) as url:
+            self.assertEqual(self.runtime(url).negotiate(), rt.UNKNOWN)
 
     def test_no_answer_is_unknown(self) -> None:
         self.assertEqual(self.runtime("http://127.0.0.1:9").negotiate(), rt.UNKNOWN)
@@ -445,7 +453,8 @@ class MainTests(RuntimeTestCase):
             printed = self.run_main(url, stop)
         self.assertEqual(sweep.call_count, 1)
         self.assertTrue(printed[0].startswith("[agente] Empujando a"))
-        self.assertEqual([p for p, _ in server.requests], ["/api/agent/v2/checkin/"])
+        # El 404 del checkin se confirma con un latido del protocolo 1 (spec 1.8).
+        self.assertEqual([p for p, _ in server.requests], ["/api/agent/v2/checkin/", "/api/agent/heartbeat/"])
 
     def test_the_old_loop_tries_protocol_2_again_every_hour(self) -> None:
         server = Server(v2=False)

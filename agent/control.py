@@ -18,7 +18,9 @@ The rules that matter:
   that cannot be sent goes to the outbox and is retried.
 * **Nothing kills the thread.** A failed check-in is a line in the log and
   another try at the next tick. The one answer that changes course is a 404
-  from ``v2/checkin``: the server only speaks protocol 1 (spec 1.8).
+  from ``v2/checkin`` *confirmed* by a protocol-1 heartbeat that works: the
+  server only speaks protocol 1 (spec 1.8). A 404 with a failing heartbeat is
+  a server that is unwell, not an old one.
 
 The logic is in methods that can be called one at a time (``checkin_once``,
 ``handle_order``), so the tests drive it without threads or clocks.
@@ -27,6 +29,7 @@ The logic is in methods that can be called one at a time (``checkin_once``,
 from __future__ import annotations
 
 import ipaddress
+import socket
 import threading
 from collections import OrderedDict
 from collections.abc import Callable
@@ -229,7 +232,7 @@ class Control:
             body, about_hash = self.body(self._clock())
             answer = self.client.checkin(body)
         except PushError as exc:
-            if exc.status == 404:
+            if exc.status == 404 and self.speaks_only_protocol_1():
                 self.gone = True
             else:
                 self._say_error(str(exc))
@@ -241,6 +244,22 @@ class Control:
             return False
         self.accept(answer, body, about_hash)
         return True
+
+    def speaks_only_protocol_1(self) -> bool:
+        """After a 404 on ``v2/checkin``: is this a protocol-1 server? Never raises.
+
+        Solo si su latido del protocolo 1 contesta bien. Un 404 suelto puede
+        ser un proxy inverso a mitad de un despliegue, y tomarlo por un
+        servidor viejo dejaba al agente una hora con barridos completos del
+        protocolo 1; un servidor viejo de verdad contesta al latido. Con el
+        latido fallando también, el servidor está mal: se sigue en el 2 y se
+        reintenta.
+        """
+        try:
+            answer = self.client.heartbeat(version=__version__, hostname=socket.gethostname())
+        except Exception:  # noqa: BLE001
+            return False
+        return isinstance(answer, dict)
 
     def accept(self, answer: dict[str, Any], body: dict[str, Any], about_hash: str) -> None:
         """Lo que se hace con una respuesta buena: aplicarla y vaciar la cola. Nunca lanza."""

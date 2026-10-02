@@ -199,16 +199,20 @@ class Runtime:
     def negotiate(self) -> str:
         """Un primer checkin para saber qué habla el servidor: `v2`, `v1` o `unknown`.
 
-        Un 404 es un servidor del protocolo 1 (spec 1.8). Una respuesta que no
-        dice `protocol` ≥ 2 también se toma por protocolo 1: un servidor 2
-        siempre lo dice. Sin respuesta (la red caída) no se sabe: quien llama
-        arranca el protocolo 2, y el primer 404 lo devolverá al 1.
+        Un 404 es un servidor del protocolo 1 (spec 1.8) si su latido del
+        protocolo 1 contesta; si no, es un servidor que no está bien y no se
+        sabe. Una respuesta que no dice `protocol` ≥ 2 también se toma por
+        protocolo 1: un servidor 2 siempre lo dice. Sin respuesta (la red
+        caída) no se sabe: quien llama arranca el protocolo 2, y el primer 404
+        confirmado lo devolverá al 1.
         """
         try:
             body, about_hash = self.control.body(self._clock())
             answer = self.client.checkin(body)
         except PushError as exc:
-            return V1 if exc.status == 404 else UNKNOWN
+            if exc.status == 404 and self.control.speaks_only_protocol_1():
+                return V1
+            return UNKNOWN
         except Exception:  # noqa: BLE001
             return UNKNOWN
         if not isinstance(answer, dict):

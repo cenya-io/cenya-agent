@@ -31,6 +31,15 @@ class FakeClient:
         self.parts: list[dict] = []
         self.fail_orders: list[Exception] = []
         self.fail_parts: list[Exception] = []
+        #: El latido del protocolo 1: lo que contesta un servidor viejo de verdad.
+        self.heartbeat_answer: Any = PushError("no hay nadie", status=None)
+        self.heartbeats = 0
+
+    def heartbeat(self, *, version: str, hostname: str) -> Any:
+        self.heartbeats += 1
+        if isinstance(self.heartbeat_answer, Exception):
+            raise self.heartbeat_answer
+        return self.heartbeat_answer
 
     def checkin(self, body: dict) -> Any:
         self.checkins.append(body)
@@ -227,11 +236,24 @@ class OrderTests(ControlTestCase):
 
 
 class CheckinTests(ControlTestCase):
-    def test_a_404_means_the_server_only_speaks_protocol_1(self) -> None:
+    def test_a_404_with_a_working_heartbeat_means_the_server_only_speaks_protocol_1(self) -> None:
         self.client.answers = [PushError("no", status=404)]
+        self.client.heartbeat_answer = {"interval_seconds": 900, "config": {}}
         ctl = self.control()
         self.assertFalse(ctl.checkin_once())
         self.assertTrue(ctl.gone)
+
+    def test_a_404_with_a_failing_heartbeat_is_a_server_unwell_and_protocol_2_stays(self) -> None:
+        """Un proxy inverso a mitad de un despliegue: antes, una hora entera de
+        barridos completos del protocolo 1 por un solo 404."""
+        for heartbeat in (PushError("caído"), PushError("no", status=404), PushError("502", status=502)):
+            with self.subTest(heartbeat=str(heartbeat)):
+                self.client.answers = [PushError("no", status=404), {"ok": True, "protocol": 2}]
+                self.client.heartbeat_answer = heartbeat
+                ctl = self.control()
+                self.assertFalse(ctl.checkin_once())
+                self.assertFalse(ctl.gone)
+                self.assertTrue(ctl.checkin_once())  # y en cuanto vuelve, sigue en el 2
 
     def test_a_network_failure_is_not_a_404(self) -> None:
         self.client.answers = [PushError("caído"), PushError("401", status=401)]

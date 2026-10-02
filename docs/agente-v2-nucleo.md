@@ -237,9 +237,13 @@ token deja de valer. Respuesta `{"ok": true}`.
 
 ### 1.8 Compatibilidad
 
-- **Agente 2 contra servidor 1**: `v2/checkin` contesta 404. El agente pasa al
-  bucle del protocolo 1 (el de la 0.10.x, que se conserva) y vuelve a probar
-  `v2/checkin` cada hora.
+- **Agente 2 contra servidor 1**: `v2/checkin` contesta 404 **y** el latido
+  del protocolo 1 (`/api/agent/heartbeat/`) al mismo servidor contesta bien:
+  así es un servidor viejo. Solo entonces el agente pasa al bucle del
+  protocolo 1 (el de la 0.10.x, que se conserva) y vuelve a probar
+  `v2/checkin` cada hora. Un 404 con el latido fallando también es un
+  servidor que no está bien (un proxy inverso a mitad de un despliegue): el
+  agente sigue en el protocolo 2 y reintenta en el siguiente checkin.
 - **Agente 1 contra servidor 2**: funciona como hoy.
 
 ---
