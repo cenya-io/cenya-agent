@@ -1,0 +1,597 @@
+# German translation of the NetInventory agent (tray icon).
+# Terms: locale/GLOSARIO.md. Regenerate: see agent/i18n.py.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: cenya-agent 0.9.1\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-10-01 19:12+0200\n"
+"PO-Revision-Date: 2026-09-14 17:00+0200\n"
+"Last-Translator: NetInventory\n"
+"Language-Team: German\n"
+"Language: de\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+#: agent/__main__.py:32 agent/status.py:359
+#, python-format
+msgid "%(n)d hallazgo nuevo"
+msgid_plural "%(n)d hallazgos nuevos"
+msgstr[0] "%(n)d neuer Fund"
+msgstr[1] "%(n)d neue Funde"
+
+#: agent/__main__.py:33 agent/status.py:361
+#, python-format
+msgid "%(n)d ya conocido."
+msgid_plural "%(n)d ya conocidos."
+msgstr[0] "%(n)d bereits bekannt."
+msgstr[1] "%(n)d bereits bekannt."
+
+#: agent/__main__.py:36
+#, python-format
+msgid "%(n)d envío"
+msgid_plural "%(n)d envíos"
+msgstr[0] "%(n)d Teil"
+msgstr[1] "%(n)d Teilen"
+
+#: agent/__main__.py:37
+#, python-format
+msgid "[agente] Barrido enviado en %(batches)s: %(created)s, %(refreshed)s"
+msgstr "[Agent] Scan gesendet in %(batches)s: %(created)s, %(refreshed)s"
+
+#: agent/__main__.py:38
+#, python-format
+msgid "[agente] Barrido enviado: %(created)s, %(refreshed)s"
+msgstr "[Agent] Scan gesendet: %(created)s, %(refreshed)s"
+
+#: agent/__main__.py:43
+#, python-format
+msgid "Error inesperado: %(error)s"
+msgstr "Unerwarteter Fehler: %(error)s"
+
+#: agent/__main__.py:189 agent/__main__.py:205 agent/__main__.py:212
+#, python-format
+msgid "[agente] %(error)s"
+msgstr "[Agent] %(error)s"
+
+#: agent/__main__.py:195
+#, python-format
+msgid "[agente] Empujando a %(url)s cada ~%(seconds)d s."
+msgstr "[Agent] Sendet an %(url)s alle ~%(seconds)d s."
+
+#: agent/__main__.py:215
+msgid "[agente] Detenido."
+msgstr "[Agent] Angehalten."
+
+#: agent/client.py:174
+#, python-format
+msgid "El servidor respondió %(code)s: %(detail)s"
+msgstr "Der Server antwortete %(code)s: %(detail)s"
+
+#: agent/client.py:177
+#, python-format
+msgid "No se pudo hablar con el servidor: %(error)s"
+msgstr "Keine Verbindung zum Server: %(error)s"
+
+#: agent/client.py:182
+msgid "El servidor respondió algo que no es un objeto JSON."
+msgstr "Die Antwort des Servers ist kein JSON-Objekt."
+
+#: agent/config.py:55
+#, python-format
+msgid ""
+"La dirección del portal es http:// hacia %(host)s: el latido lleva las "
+"credenciales de descubrimiento y viajarían en claro. Usa https:// (con "
+"CENYA_CA_BUNDLE si el certificado es propio) o, solo para pruebas, "
+"CENYA_INSECURE_HTTP=1."
+msgstr ""
+"Die Portaladresse ist http:// zu %(host)s: Der Heartbeat enthält die "
+"Anmeldedaten für die Erkennung, die unverschlüsselt übertragen würden. "
+"https:// verwenden (mit CENYA_CA_BUNDLE bei eigenem Zertifikat) oder, nur "
+"zum Testen, CENYA_INSECURE_HTTP=1."
+
+#: agent/config.py:128
+msgid ""
+"Este agente no está enrolado. En Ajustes → Agentes genera una cadena de "
+"conexión y ejecuta: cenya-agent enroll <cadena>"
+msgstr ""
+"Dieser Agent ist nicht registriert. Unter Einstellungen → Agenten eine "
+"Verbindungszeichenfolge erzeugen und ausführen: cenya-agent enroll "
+"<Zeichenfolge>"
+
+#: agent/connection.py:42
+msgid ""
+"La cadena de conexión no es válida: debe parecerse a cenya://"
+"portal.midominio.com/XXXX-XXXX-XXXX. Cópiala entera de Ajustes → Agentes."
+msgstr ""
+"Die Verbindungszeichenfolge ist ungültig: Sie muss etwa so aussehen: cenya://"
+"portal.meinefirma.de/XXXX-XXXX-XXXX. Vollständig aus Einstellungen → Agenten "
+"kopieren."
+
+#: agent/enroll.py:49
+msgid ""
+"El servidor no devolvió ningún token. ¿Es la dirección de un portal de Cenya?"
+msgstr ""
+"Der Server hat kein Token zurückgegeben. Ist das die Adresse eines Cenya-"
+"Portals?"
+
+#: agent/enroll.py:57
+#, python-format
+msgid ""
+"%(error)s El código ya se ha usado: genera otra cadena en Ajustes → Agentes."
+msgstr ""
+"%(error)s Der Code wurde bereits verwendet: Unter Einstellungen → Agenten "
+"eine neue Zeichenfolge erzeugen."
+
+#: agent/enroll.py:71
+#, python-format
+msgid "[agente] Enrolado como «%(name)s» en %(url)s."
+msgstr "[Agent] Registriert als «%(name)s» bei %(url)s."
+
+#: agent/enroll.py:90
+#, python-format
+msgid ""
+"Este equipo ya está enrolado como «%(name)s» en %(url)s. Para enrolarlo de "
+"nuevo, añade --force."
+msgstr ""
+"Dieser Rechner ist bereits als «%(name)s» bei %(url)s registriert. Zum "
+"erneuten Registrieren --force anfügen."
+
+#: agent/enroll.py:98
+msgid "Cadena de conexión (la de Ajustes → Agentes): "
+msgstr "Verbindungszeichenfolge (die aus Einstellungen → Agenten): "
+
+#: agent/enroll.py:101
+msgid ""
+"Falta la cadena de conexión: cenya-agent enroll cenya://portal.midominio.com/"
+"XXXX-XXXX-XXXX"
+msgstr ""
+"Die Verbindungszeichenfolge fehlt: cenya-agent enroll cenya://"
+"portal.meinefirma.de/XXXX-XXXX-XXXX"
+
+#: agent/enroll.py:109
+msgid "El enrolamiento ha fallado."
+msgstr "Die Registrierung ist fehlgeschlagen."
+
+#: agent/enroll.py:111
+#, python-format
+msgid "Agente «%(name)s» enrolado en %(url)s."
+msgstr "Agent «%(name)s» bei %(url)s registriert."
+
+#: agent/enroll.py:112
+#, python-format
+msgid ""
+"El token queda guardado de forma protegida en %(path)s; no hace falta "
+"copiarlo."
+msgstr ""
+"Das Token ist geschützt unter %(path)s gespeichert; es muss nicht kopiert "
+"werden."
+
+#: agent/enroll.py:113
+msgid "Para dejarlo funcionando, ejecuta: cenya-agent"
+msgstr "Damit er dauerhaft läuft, ausführen: cenya-agent"
+
+#: agent/installer_text.py:35
+msgid ""
+"Hace falta un PowerShell de administrador: instalar un servicio lo exige "
+"Windows."
+msgstr ""
+"Dafür ist eine PowerShell mit Administratorrechten nötig: Windows verlangt "
+"sie zum Installieren eines Dienstes."
+
+#: agent/installer_text.py:36
+#, python-format
+msgid ""
+"No se encuentra %(exe)s. ¿Está instalado el agente con el extra [windows] en "
+"%(dir)s?"
+msgstr ""
+"%(exe)s ist nicht zu finden. Ist der Agent mit dem Extra [windows] in "
+"%(dir)s installiert?"
+
+#: agent/installer_text.py:37
+msgid "Cadena de conexión (Ajustes → Agentes → Añadir un agente)"
+msgstr "Verbindungszeichenfolge (Einstellungen → Agenten → Agent hinzufügen)"
+
+#: agent/installer_text.py:38
+msgid "Sin enrolar el agente, el servicio no puede arrancar."
+msgstr "Ohne Registrierung des Agenten kann der Dienst nicht starten."
+
+#: agent/installer_text.py:39
+msgid "El enrolamiento ha fallado: el motivo está justo encima."
+msgstr "Die Registrierung ist fehlgeschlagen: Der Grund steht direkt darüber."
+
+#: agent/installer_text.py:40
+msgid "Con -Token hace falta también -Url."
+msgstr "Zu -Token wird auch -Url benötigt."
+
+#: agent/installer_text.py:41
+msgid "Deteniendo el servicio para actualizarlo…"
+msgstr "Dienst wird für die Aktualisierung angehalten…"
+
+#: agent/installer_text.py:42
+#, python-format
+msgid "La instalación del servicio falló (código %(code)s)."
+msgstr "Die Installation des Dienstes ist fehlgeschlagen (Code %(code)s)."
+
+#: agent/installer_text.py:43
+msgid "No se pudo configurar el reinicio automático (sc.exe failure)."
+msgstr ""
+"Der automatische Neustart konnte nicht eingerichtet werden (sc.exe failure)."
+
+#: agent/installer_text.py:44
+#, python-format
+msgid ""
+"No se encuentra %(tray)s: el icono de bandeja no se instala (¿agente "
+"anterior a esta versión?)."
+msgstr ""
+"%(tray)s ist nicht zu finden: Das Symbol im Infobereich wird nicht "
+"installiert (Agent älter als diese Version?)."
+
+#: agent/installer_text.py:45
+#, python-format
+msgid ""
+"El servicio no arrancó. Mira el Visor de eventos: Registros de Windows → "
+"Aplicación, origen %(source)s."
+msgstr ""
+"Der Dienst ist nicht gestartet. Siehe Ereignisanzeige: Windows-Protokolle → "
+"Anwendung, Quelle %(source)s."
+
+#: agent/installer_text.py:46
+msgid "Servicio «Cenya Agent» instalado y en marcha."
+msgstr "Dienst „Cenya Agent“ installiert und gestartet."
+
+#: agent/installer_text.py:47
+#, python-format
+msgid "Sus mensajes van al Visor de eventos (Aplicación, origen %(source)s)."
+msgstr ""
+"Seine Meldungen stehen in der Ereignisanzeige (Anwendung, Quelle %(source)s)."
+
+#: agent/installer_text.py:48
+#, python-format
+msgid "Se gestiona desde services.msc, o con: %(exe)s stop | start | remove"
+msgstr "Verwaltung über services.msc oder mit: %(exe)s stop | start | remove"
+
+#: agent/installer_text.py:49
+#, python-format
+msgid ""
+"El icono de bandeja aparecerá al iniciar sesión. Para verlo ya: %(tray)s"
+msgstr ""
+"Das Symbol im Infobereich erscheint bei der Anmeldung. Sofort anzeigen: "
+"%(tray)s"
+
+#: agent/installer_text.py:51
+msgid ""
+"Windows lo guarda al principio en el desplegable ^ de la barra de tareas: "
+"arrástralo fuera para tenerlo siempre a la vista."
+msgstr ""
+"Windows legt es zunächst im Überlaufbereich ^ der Taskleiste ab: Zum "
+"dauerhaften Anzeigen herausziehen."
+
+#: agent/netbox_export.py:124
+#, python-format
+msgid ""
+"NetBox no respondió en %(seconds)s segundos. ¿Es esa la URL y llega la red "
+"hasta allí?"
+msgstr "NetBox hat innerhalb von %(seconds)s Sekunden nicht geantwortet. Ist das die richtige URL, und ist die Verbindung dorthin erreichbar?"
+
+#: agent/netbox_export.py:137
+msgid ""
+"NetBox rechazó el token. Crea uno de solo lectura en tu NetBox (Admin → API "
+"tokens) y prueba de nuevo."
+msgstr "NetBox hat das Token abgelehnt. Erstelle in deinem NetBox ein Token nur mit Leserechten (Admin → API tokens) und versuche es erneut."
+
+#: agent/netbox_export.py:142
+msgid ""
+"NetBox respondió con una redirección (¿falta o sobra «https» o una barra al "
+"final de la URL?). No se siguen redirecciones con un token."
+msgstr "NetBox hat mit einer Weiterleitung geantwortet (fehlt «https» oder ein Schrägstrich am Ende der URL, oder ist er zu viel?). Mit einem Token werden keine Weiterleitungen verfolgt."
+
+#: agent/netbox_export.py:146
+#, python-format
+msgid "NetBox respondió %(code)s."
+msgstr "NetBox hat mit %(code)s geantwortet."
+
+#: agent/netbox_export.py:151
+#, python-format
+msgid ""
+"El certificado de ese NetBox no es válido (%(reason)s). Si es un NetBox de "
+"tu red con certificado autofirmado o caducado, añade --insecure y vuelve a "
+"intentarlo."
+msgstr "Das Zertifikat dieses NetBox ist nicht gültig (%(reason)s). Ist es ein NetBox in deinem Netz mit selbstsigniertem oder abgelaufenem Zertifikat, füge --insecure hinzu und versuche es erneut."
+
+#: agent/netbox_export.py:158
+#, python-format
+msgid "No se pudo hablar con NetBox: %(reason)s"
+msgstr "Keine Verbindung zu NetBox möglich: %(reason)s"
+
+#: agent/netbox_export.py:162
+msgid "La respuesta de NetBox no es JSON. ¿Es esa la URL de NetBox?"
+msgstr "Die Antwort von NetBox ist kein JSON. Ist das die URL des NetBox?"
+
+#: agent/netbox_export.py:181
+#, python-format
+msgid "La respuesta de %(path)s no tiene la forma esperada."
+msgstr "Die Antwort von %(path)s hat nicht die erwartete Form."
+
+#: agent/netbox_export.py:186
+#, python-format
+msgid ""
+"%(path)s tiene más de %(max)s objetos. Esta importación está pensada para "
+"inventarios de pyme; hablemos antes de traer eso."
+msgstr "%(path)s hat mehr als %(max)s Objekte. Dieser Import ist für Inventare kleiner und mittlerer Unternehmen gedacht; lass uns reden, bevor wir das übernehmen."
+
+#: agent/netbox_export.py:227
+msgid "La URL tiene que empezar por http:// o https://."
+msgstr "Die URL muss mit http:// oder https:// beginnen."
+
+#: agent/netbox_export.py:229
+msgid "La URL no dice a qué servidor conectarse."
+msgstr "Die URL sagt nicht, mit welchem Server verbunden werden soll."
+
+#: agent/netbox_export.py:244
+#, python-format
+msgid "Uso: %(prog)s URL [--output FICHERO] [--insecure]"
+msgstr "Verwendung: %(prog)s URL [--output DATEI] [--insecure]"
+
+#: agent/netbox_export.py:278
+#, python-format
+msgid "Falta el token de NetBox: pásalo en la variable %(var)s."
+msgstr "Das NetBox-Token fehlt: Übergib es in der Variable %(var)s."
+
+#: agent/netbox_export.py:282
+msgid "Token de solo lectura de NetBox (no se muestra al escribirlo): "
+msgstr "NetBox-Token nur mit Leserechten (wird beim Tippen nicht angezeigt): "
+
+#: agent/netbox_export.py:284
+msgid "Sin token no se puede leer NetBox."
+msgstr "Ohne Token lässt sich NetBox nicht lesen."
+
+#: agent/netbox_export.py:288
+#, python-format
+msgid "Leyendo %(path)s…"
+msgstr "Lese %(path)s…"
+
+#: agent/netbox_export.py:299
+#, python-format
+msgid "No se pudo escribir %(path)s: %(error)s"
+msgstr "%(path)s konnte nicht geschrieben werden: %(error)s"
+
+#: agent/netbox_export.py:306
+#, python-format
+msgid "Exportado %(n)d objeto a %(path)s."
+msgid_plural "Exportados %(n)d objetos a %(path)s."
+msgstr[0] "%(n)d Objekt nach %(path)s exportiert."
+msgstr[1] "%(n)d Objekte nach %(path)s exportiert."
+
+#: agent/netbox_export.py:312
+msgid "Súbelo en Cenya: Ajustes → Importar → «NetBox, desde un fichero»."
+msgstr "Lade sie in Cenya hoch: Einstellungen → Importieren → «NetBox, aus einer Datei»."
+
+#: agent/status.py:237
+msgid "hace menos de un minuto"
+msgstr "vor weniger als einer Minute"
+
+#: agent/status.py:240
+#, python-format
+msgid "hace %(n)d minuto"
+msgid_plural "hace %(n)d minutos"
+msgstr[0] "vor %(n)d Minute"
+msgstr[1] "vor %(n)d Minuten"
+
+#: agent/status.py:243
+#, python-format
+msgid "hace %(n)d hora"
+msgid_plural "hace %(n)d horas"
+msgstr[0] "vor %(n)d Stunde"
+msgstr[1] "vor %(n)d Stunden"
+
+#: agent/status.py:245
+#, python-format
+msgid "hace %(n)d día"
+msgid_plural "hace %(n)d días"
+msgstr[0] "vor %(n)d Tag"
+msgstr[1] "vor %(n)d Tagen"
+
+#: agent/status.py:261 agent/status.py:276
+msgid "Agente detenido"
+msgstr "Agent angehalten"
+
+#: agent/status.py:261
+msgid "El servicio está detenido y no hay datos de su última ejecución."
+msgstr ""
+"Der Dienst ist angehalten, und von seinem letzten Lauf gibt es keine Daten."
+
+#: agent/status.py:263
+msgid "Servicio no instalado"
+msgstr "Dienst nicht installiert"
+
+#: agent/status.py:263
+msgid "El servicio del agente no está instalado en este equipo."
+msgstr "Der Agent-Dienst ist auf diesem Computer nicht installiert."
+
+#: agent/status.py:264
+msgid "Sin datos del agente"
+msgstr "Keine Daten vom Agenten"
+
+#: agent/status.py:264
+msgid ""
+"No se encuentra el fichero de estado: el agente no ha arrancado nunca aquí, "
+"o no se puede leer."
+msgstr ""
+"Die Statusdatei ist nicht zu finden: Der Agent wurde hier nie gestartet, "
+"oder die Datei ist nicht lesbar."
+
+#: agent/status.py:275
+msgid "Agente detenido por un error"
+msgstr "Agent wegen eines Fehlers angehalten"
+
+#: agent/status.py:280
+msgid "hace un tiempo desconocido"
+msgstr "vor unbekannter Zeit"
+
+#: agent/status.py:283
+msgid "Sin noticias del agente"
+msgstr "Keine Nachricht vom Agenten"
+
+#: agent/status.py:285
+#, python-format
+msgid ""
+"La última noticia del agente es de %(ago)s: puede haberse detenido, o el "
+"fichero de estado ya no se actualiza."
+msgstr ""
+"Letzte Nachricht vom Agenten: %(ago)s. Er wurde möglicherweise angehalten, "
+"oder die Statusdatei wird nicht mehr aktualisiert."
+
+#: agent/status.py:295
+msgid "No puede hablar con el servidor"
+msgstr "Keine Verbindung zum Server"
+
+#: agent/status.py:301
+msgid "Barriendo la red"
+msgstr "Scannt das Netzwerk"
+
+#: agent/status.py:302
+#, python-format
+msgid "Paso actual: %(step)s"
+msgstr "Aktueller Schritt: %(step)s"
+
+#: agent/status.py:305
+msgid "Arrancando"
+msgstr "Startet"
+
+#: agent/status.py:306
+msgid "En marcha"
+msgstr "Läuft"
+
+#: agent/status.py:314
+#, python-format
+msgid "Cenya Agent: %(headline)s"
+msgstr "Cenya Agent: %(headline)s"
+
+#: agent/status.py:356
+#, python-format
+msgid "Último barrido: %(clock)s (%(ago)s)."
+msgstr "Letzter Scan: %(clock)s (%(ago)s)."
+
+#: agent/status.py:369
+#, python-format
+msgid "Salió parcial, con %(n)d aviso (detalle en Ajustes → Agentes)."
+msgid_plural "Salió parcial, con %(n)d avisos (detalle en Ajustes → Agentes)."
+msgstr[0] ""
+"Unvollständig, mit %(n)d Hinweis (Details unter Einstellungen → Agenten)."
+msgstr[1] ""
+"Unvollständig, mit %(n)d Hinweisen (Details unter Einstellungen → Agenten)."
+
+#: agent/status.py:376
+msgid "Todavía no ha terminado ningún barrido."
+msgstr "Noch kein Scan abgeschlossen."
+
+#: agent/status.py:379
+#, python-format
+msgid "Próximo barrido hacia las %(clock)s."
+msgstr "Nächster Scan gegen %(clock)s."
+
+#: agent/store.py:119
+#, python-format
+msgid ""
+"No se pudo guardar el enrolamiento de forma segura en %(path)s: %(error)s"
+msgstr ""
+"Die Registrierung konnte nicht sicher unter %(path)s gespeichert werden: "
+"%(error)s"
+
+#: agent/tray.py:175
+#, python-format
+msgid "Versión del agente: %(version)s"
+msgstr "Agent-Version: %(version)s"
+
+#: agent/tray.py:178
+#, python-format
+msgid "Servidor: %(url)s"
+msgstr "Server: %(url)s"
+
+#: agent/tray.py:192
+msgid "Ver estado"
+msgstr "Status anzeigen"
+
+#: agent/tray.py:195
+msgid "Abrir Ajustes → Agentes"
+msgstr "Einstellungen → Agenten öffnen"
+
+#: agent/tray.py:199
+msgid "Cerrar este icono"
+msgstr "Dieses Symbol schließen"
+
+#: agent/tray.py:272
+#, python-format
+msgid ""
+"El icono de Cenya Agent no ha podido arrancar:\n"
+"%(error)s"
+msgstr ""
+"Das Symbol von Cenya Agent konnte nicht starten:\n"
+"%(error)s"
+
+#: agent/winservice.py:161
+msgid "El bucle del agente terminó sin que nadie lo parara."
+msgstr "Die Agent-Schleife endete, ohne dass jemand sie angehalten hat."
+
+#: agent/winservice.py:170
+#, python-format
+msgid "Cenya Agent se ha detenido: %(reason)s"
+msgstr "Cenya Agent wurde angehalten: %(reason)s"
+
+#: agent/winservice.py:211
+#, python-format
+msgid ""
+"No se encuentra %(dll)s: la Python con la que se creó este entorno ya no "
+"está donde estaba. Vuelve a crear el entorno virtual."
+msgstr ""
+"%(dll)s ist nicht zu finden: Das Python, mit dem diese Umgebung erstellt "
+"wurde, ist nicht mehr am selben Ort. Virtuelle Umgebung neu erstellen."
+
+#: agent/winservice.py:224
+#, python-format
+msgid ""
+"No se puede reemplazar %(file)s: detén el servicio antes de actualizarlo "
+"(%(command)s stop)."
+msgstr ""
+"%(file)s kann nicht ersetzt werden: Dienst vor dem Aktualisieren anhalten "
+"(%(command)s stop)."
+
+#: agent/winservice.py:321
+msgid ""
+"Este equipo no está enrolado y en esta consola no hay ningún token: el "
+"servicio no podría arrancar. Ejecuta antes cenya-agent enroll <cadena> y "
+"vuelve a instalar."
+msgstr ""
+"Dieser Rechner ist nicht registriert und in dieser Konsole gibt es kein "
+"Token: Der Dienst könnte nicht starten. Zuerst cenya-agent enroll "
+"<Zeichenfolge> ausführen und erneut installieren."
+
+#: agent/winservice.py:327
+#, python-format
+msgid "Variables guardadas en el servicio: %(names)s"
+msgstr "Im Dienst gespeicherte Variablen: %(names)s"
+
+#: agent/winservice.py:329
+msgid ""
+"Sin variables CENYA_* en esta consola: se dejan las que ya tuviera el "
+"servicio."
+msgstr ""
+"Keine CENYA_*-Variablen in dieser Konsole: Der Dienst behält die bisherigen."
+
+#: agent/winservice.py:331
+msgid "La clave del servicio queda legible solo por SYSTEM y Administradores."
+msgstr ""
+"Der Registrierungsschlüssel des Dienstes ist jetzt nur für SYSTEM und "
+"Administratoren lesbar."
+
+#: agent/winservice.py:336
+#, python-format
+msgid ""
+"Estado del agente en %(path)s (lo escribe el servicio; lo lee el icono de "
+"bandeja)."
+msgstr ""
+"Agentenstatus in %(path)s (vom Dienst geschrieben, vom Symbol im Infobereich "
+"gelesen)."

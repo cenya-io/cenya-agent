@@ -1,0 +1,70 @@
+# The agent as an installable package: `pip install ./agent` (or the wheel)
+# instead of "copy the folder and run python -m agent from its parent".
+#
+# The distribution is cenya-agent; the importable package stays `agent`,
+# which is what its own modules import. The runtime dependencies are all
+# OPTIONAL on purpose -- without them the agent still runs and the collector
+# that needs one reports itself unavailable (partial sweep, never a broken one):
+#
+#     pip install ./agent                  # ping + ARP + DNS + SSH (system ssh)
+#     pip install ./agent[snmp]            # + SNMP (identity, LLDP/CDP, UPS)
+#     pip install ./agent[winrm]           # + WinRM
+#     pip install ./agent[windows]         # + runs as a real Windows service
+#     pip install ./agent[completo]        # everything
+#
+# Licence note (project rule: no copyleft anywhere in the chain): pysnmp is
+# BSD-2-Clause, pywinrm MIT, requests_ntlm ISC. paramiko (LGPL) stays out; the
+# SSH collector shells out to the system's ssh binary instead.
+#
+# pywin32 (extra "windows") declares "PSF" but is a patchwork by component,
+# checked against the licence files of 312: win32/, com/ and win32comext/ --
+# where win32serviceutil, win32service, servicemanager and win32security live,
+# everything agent/winservice.py imports -- are BSD-3-Clause. Its one copyleft
+# piece is adodbapi (LGPL-2.1), an ADO database layer nothing here imports.
+
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cenya-agent"
+version = "0.10.1"
+description = "El agente de descubrimiento de NetInventory: barre la red y propone, sin guardar estado y solo con HTTPS saliente."
+readme = "README.md"
+requires-python = ">=3.10"
+# El agente es público bajo Apache 2.0, al contrario que el servidor, que es
+# propietario (LICENSE de la raíz). El texto completo está en agent/LICENSE.
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+
+[project.optional-dependencies]
+snmp = ["pysnmp>=7.1,<8"]
+winrm = ["pywinrm>=0.4,<1", "requests_ntlm>=1.2"]
+# Solo se instala en Windows: en Linux el servicio es la unidad systemd de
+# deploy/, y el marcador deja que `[completo]` siga valiendo en los dos.
+windows = ["pywin32>=306; sys_platform == 'win32'"]
+completo = [
+    "pysnmp>=7.1,<8",
+    "pywinrm>=0.4,<1",
+    "requests_ntlm>=1.2",
+    "pywin32>=306; sys_platform == 'win32'",
+]
+
+[project.scripts]
+cenya-agent = "agent.__main__:main"
+# install | update | start | stop | remove | debug. Solo Windows, con [windows].
+cenya-agent-service = "agent.winservice:main"
+
+[project.gui-scripts]
+# El icono de bandeja. `gui-scripts` y no `scripts`: arranca sin ventana de
+# consola detrás. Solo Windows, con [windows].
+cenya-agent-tray = "agent.tray:main"
+
+[tool.setuptools]
+packages = ["agent", "agent.collectors"]
+package-dir = { "agent" = ".", "agent.collectors" = "collectors" }
+
+[tool.setuptools.package-data]
+# Los catálogos del icono de bandeja, tal cual: agent/i18n.py los compila en
+# memoria al arrancar, así que no hay .mo que generar ni que se quede viejo.
+agent = ["translations/*/LC_MESSAGES/cenya-agent.po"]

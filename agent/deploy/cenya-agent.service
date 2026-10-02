@@ -1,0 +1,38 @@
+# Unidad systemd de ejemplo para el agente de Cenya.
+#
+# Instalación (como root):
+#   1. pip install /ruta/al/repo/agent[completo]   (o el extra que toque)
+#   2. cp cenya-agent.service /etc/systemd/system/
+#   3. Edita Environment= con tu URL y tu token (Ajustes → Agentes).
+#   4. systemctl daemon-reload && systemctl enable --now cenya-agent
+#
+# El agente no guarda estado ni abre puertos: solo empuja por HTTPS saliente,
+# así que puede correr con un usuario sin privilegios. `DynamicUser` crea uno
+# efímero y el sandboxing de abajo le quita lo que no necesita.
+
+[Unit]
+Description=Agente de descubrimiento de Cenya
+Documentation=https://github.com/cenya-io/cenya-agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+# Ajusta la ruta si instalaste en un virtualenv: /opt/netinventory/venv/bin/cenya-agent
+ExecStart=/usr/local/bin/cenya-agent
+Environment=NETINVENTORY_URL=https://inventario.midominio.local
+Environment=NETINVENTORY_AGENT_TOKEN=nia_PON_AQUI_EL_TOKEN
+# Con certificado propio: Environment=NETINVENTORY_CA_BUNDLE=/etc/netinventory/ca.pem
+
+Restart=on-failure
+RestartSec=30
+
+# Endurecimiento: nada de esto le hace falta al agente para barrer y empujar.
+DynamicUser=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

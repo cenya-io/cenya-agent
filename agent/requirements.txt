@@ -1,0 +1,15 @@
+# Las dependencias del agente. Todas permisivas: la regla del proyecto es no
+# meter GPL/AGPL en ninguna parte de la cadena, ni siquiera indirecta.
+#
+# Las dos son **opcionales**: sin ellas el agente arranca igual y el colector
+# que las necesita se reporta no disponible. El barrido sale parcial, nunca roto.
+#
+# Lo que NO está aquí, y por qué:
+#   * `paramiko` (LGPL-2.1) -- el colector SSH usa el binario `ssh` del sistema.
+#   * `pyvmomi` -- vCenter y Proxmox se hablan por REST con la librería estándar.
+pysnmp>=7.1,<8       # BSD-2-Clause — SNMP v2c para los colectores de descubrimiento
+pywinrm>=0.4,<1      # MIT — WinRM (Windows)
+requests_ntlm>=1.2   # ISC — autenticación NTLM para pywinrm; sin esto solo queda «basic»
+# BSD-3-Clause en lo que se usa (win32/, com/); su único trozo LGPL es adodbapi,
+# que no se importa. Solo Windows: el servicio real (agent/winservice.py).
+pywin32>=306; sys_platform == "win32"

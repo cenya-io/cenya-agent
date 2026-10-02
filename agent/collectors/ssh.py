@@ -1,0 +1,640 @@
+"""L3: SSH.
+
+A los hosts vivos con el 22 abierto se entra y se les pregunta quién son. Lo
+que sale de aquí es lo que convierte una IP que contestó a un ping en una ficha
+de inventario: sistema operativo, nombre real, interfaces con su MAC y su IP y,
+cuando el equipo lo deja, fabricante, modelo y número de serie.
+
+**Una tentativa por familia, gana la que conteste.** Un switch Cisco no sabe qué
+es ``uname`` y un Linux no sabe qué es ``show version``, así que en vez de
+adivinar por el banner --que miente y que cada versión cambia-- se prueban los
+comandos de cada familia en orden y se acepta el primero cuya salida se puede
+leer. Añadir HP, Juniper o un NAS es una entrada más en ``FAMILIES``: el bucle
+no cambia, que es lo que importa aquí más que la cobertura de hoy.
+
+El hallazgo mantiene el ``kind`` ``host`` y la identidad del barrido, así que en
+vez de una segunda fila en la bandeja *enriquece* la que ya existe.
+"""
+
+from __future__ import annotations
+
+import re
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
+from typing import Any, Callable
+
+from agent import credentials as creds
+from agent import net, ssh
+from agent.collectors import register
+from agent.collectors.base import Finding
+from agent.notes import collector_note
+
+SSH_PORT = 22
+#: Cuántos equipos a la vez. Bajo a propósito: cada uno es un proceso `ssh`, y
+#: cincuenta procesos simultáneos en el servidor de una pyme se notan.
+WORKERS = 10
+
+#: La marca que separa las secciones de la salida de Linux. Sin `#` delante: en
+#: un shell, una palabra que empieza por almohadilla es un comentario y el
+#: `echo` no imprimiría nada -- la salida llegaba entera y sin separar.
+MARK = "@@netinv:"
+
+
+# --- Familias -------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Family:
+    """Un intento: qué se pregunta y cómo se lee la respuesta.
+
+    ``parse`` devuelve un diccionario vacío cuando la salida no es de esta
+    familia. Eso es lo que decide que se pruebe la siguiente. Un analizador
+    puede devolver ``family`` dentro del diccionario para afinar: varios
+    fabricantes contestan al mismo comando de detección, y abrir una conexión
+    por fabricante para repetirlo serían intentos de autenticación de más sin
+    aprender nada nuevo.
+    """
+
+    name: str
+    command: str
+    parse: Callable[[str], dict[str, Any]]
+
+
+#: Cada sección va precedida de su marca para poder trocear la salida. Los
+#: `2>/dev/null` son deliberados: en un equipo sin `dmidecode` ni DMI en `/sys`
+#: --una máquina virtual, un contenedor-- el error iría a la salida de error y
+#: no rompería nada, pero llena el informe de ruido que no dice nada.
+_LINUX_SECTIONS: tuple[tuple[str, str], ...] = (
+    ("uname", "uname -sr"),
+    ("os", "cat /etc/os-release 2>/dev/null"),
+    ("host", "hostname"),
+    ("link", "ip -o link 2>/dev/null"),
+    ("addr", "ip -o -4 addr 2>/dev/null"),
+    ("vendor", "cat /sys/class/dmi/id/sys_vendor 2>/dev/null"),
+    ("model", "cat /sys/class/dmi/id/product_name 2>/dev/null"),
+    # El serie del DMI solo lo lee root. Se pide igual y si no hay permiso sale
+    # vacío: pedirlo con `sudo` sería pedir una contraseña que no tenemos.
+    ("serial", "cat /sys/class/dmi/id/product_serial 2>/dev/null"),
+)
+
+LINUX_COMMAND = "; ".join(f"echo {MARK}{name}; {command}" for name, command in _LINUX_SECTIONS)
+
+
+def _sections(output: str) -> dict[str, list[str]]:
+    """La salida troceada por marcas. Sin marcas, nada: no es de esta familia."""
+    found: dict[str, list[str]] = {}
+    current = ""
+    for line in output.splitlines():
+        stripped = line.strip()
+        if stripped.startswith(MARK):
+            current = stripped[len(MARK) :].strip()
+            found[current] = []
+        elif current:
+            found[current].append(line.rstrip())
+    return found
+
+
+_MAC_RE = re.compile(r"link/ether\s+([0-9a-fA-F:]{17})")
+_IFACE_RE = re.compile(r"^\d+:\s*([^:@]+)")
+_ADDR_RE = re.compile(r"^\d+:\s*(\S+)\s+inet\s+(\d+\.\d+\.\d+\.\d+)")
+_PRETTY_RE = re.compile(r'^PRETTY_NAME="?([^"]+)"?', re.MULTILINE)
+
+
+def parse_linux(output: str) -> dict[str, Any]:
+    """Lo que dice un Linux de sí mismo. Vacío si esto no es un Linux."""
+    sections = _sections(output)
+    if not sections:
+        return {}
+    uname = " ".join(sections.get("uname") or []).strip()
+    os_release = "\n".join(sections.get("os") or [])
+    pretty = _PRETTY_RE.search(os_release)
+    description = (pretty.group(1) if pretty else uname).strip()
+    hostname = next((line.strip() for line in sections.get("host") or [] if line.strip()), "")
+
+    interfaces: list[dict[str, str]] = []
+    addresses: dict[str, str] = {}
+    for line in sections.get("addr") or []:
+        match = _ADDR_RE.match(line.strip())
+        if match:
+            addresses.setdefault(match.group(1), match.group(2))
+    for line in sections.get("link") or []:
+        name_match = _IFACE_RE.match(line.strip())
+        if not name_match:
+            continue
+        name = name_match.group(1).strip()
+        if name == "lo":
+            # El bucle local no es una interfaz del inventario: está en todas
+            # las máquinas, con la misma dirección, y no lleva a ningún sitio.
+            continue
+        mac_match = _MAC_RE.search(line)
+        interfaces.append(
+            {
+                "name": name,
+                "mac": (mac_match.group(1).lower() if mac_match else ""),
+                "status": "up" if ",UP" in line or "<UP" in line else "down",
+                "ip": addresses.get(name, ""),
+            }
+        )
+
+    if not (uname or hostname or interfaces):
+        # Contestó, pero no a esto. Que lo intente la familia siguiente.
+        return {}
+    return {
+        "hostname": hostname,
+        "description": description,
+        "os": description or uname,
+        "interfaces": interfaces,
+        "manufacturer": _first_line(sections.get("vendor")),
+        "model": _first_line(sections.get("model")),
+        "serial": _first_line(sections.get("serial")),
+    }
+
+
+def _first_line(lines: list[str] | None) -> str:
+    for line in lines or []:
+        value = line.strip()
+        # Los equipos de fábrica traen estos rellenos en el DMI. Guardarlos
+        # sería peor que dejarlo vacío: parece un dato y no lo es.
+        if value and value.lower() not in {"none", "to be filled by o.e.m.", "default string", "system serial number"}:
+            return value
+    return ""
+
+
+_CISCO_HOSTNAME_RE = re.compile(r"^(\S+)\s+uptime is", re.MULTILINE)
+_CISCO_SERIAL_RE = re.compile(r"[Ss]ystem serial number\s*:\s*(\S+)")
+_CISCO_MODEL_RE = re.compile(r"[Mm]odel [Nn]umber\s*:\s*(\S+)")
+_CISCO_BANNER_RE = re.compile(r"^(Cisco IOS.*|.*Software.*Version.*)$", re.MULTILINE)
+
+
+def parse_cisco(output: str) -> dict[str, Any]:
+    """Un IOS clásico: `show version` y poco más.
+
+    No se sacan las interfaces: hacen falta otros comandos y en un equipo de red
+    eso ya lo da SNMP mejor, que además no necesita entrar. Aquí interesan el
+    nombre, la versión y el número de serie, que SNMP no siempre da.
+    """
+    if "Cisco" not in output and "IOS" not in output:
+        return {}
+    banner = _CISCO_BANNER_RE.search(output)
+    hostname = _CISCO_HOSTNAME_RE.search(output)
+    serial = _CISCO_SERIAL_RE.search(output)
+    model = _CISCO_MODEL_RE.search(output)
+    description = (banner.group(1).strip() if banner else "Cisco IOS")
+    return {
+        "family": "cisco",
+        "hostname": hostname.group(1) if hostname else "",
+        "description": description,
+        "os": description,
+        "interfaces": [],
+        "manufacturer": "Cisco",
+        "model": model.group(1) if model else "",
+        "serial": serial.group(1) if serial else "",
+    }
+
+
+MIKROTIK_COMMAND = "/system resource print; /system identity print; /system routerboard print"
+
+_KEY_VALUE_RE = re.compile(r"^\s*([a-z][a-z0-9-]*)\s*:\s*(.+?)\s*$")
+
+
+def parse_mikrotik(output: str) -> dict[str, Any]:
+    """RouterOS contesta con pares `clave: valor` a tres comandos seguidos."""
+    values: dict[str, str] = {}
+    for line in output.splitlines():
+        match = _KEY_VALUE_RE.match(line)
+        if match:
+            values.setdefault(match.group(1), match.group(2))
+    if "version" not in values and "board-name" not in values:
+        return {}
+    platform = values.get("platform", "MikroTik")
+    version = values.get("version", "")
+    description = f"{platform} RouterOS {version}".strip()
+    return {
+        "hostname": values.get("name", ""),
+        "description": description,
+        "os": description,
+        "interfaces": [],
+        "manufacturer": platform,
+        "model": values.get("model") or values.get("board-name", ""),
+        "serial": values.get("serial-number", ""),
+    }
+
+
+# --- Los que comparten «show version» ---------------------------------------------
+
+_JUNOS_HOST_RE = re.compile(r"^Hostname:\s*(\S+)", re.MULTILINE)
+_JUNOS_MODEL_RE = re.compile(r"^Model:\s*(\S+)", re.MULTILINE)
+_JUNOS_VERSION_RE = re.compile(r"^Junos:\s*(\S+)", re.MULTILINE)
+
+
+def parse_junos(output: str) -> dict[str, Any]:
+    """Un JunOS: `show version` con sus `Hostname:`, `Model:` y `Junos:`."""
+    if "JUNOS" not in output and "Junos:" not in output:
+        return {}
+    version = _JUNOS_VERSION_RE.search(output)
+    hostname = _JUNOS_HOST_RE.search(output)
+    model = _JUNOS_MODEL_RE.search(output)
+    description = f"Juniper JunOS {version.group(1)}".strip() if version else "Juniper JunOS"
+    return {
+        "family": "junos",
+        "hostname": hostname.group(1) if hostname else "",
+        "description": description,
+        "os": description,
+        "interfaces": [],
+        "manufacturer": "Juniper",
+        "model": model.group(1) if model else "",
+        "serial": "",
+    }
+
+
+_ARUBA_MARK_RE = re.compile(r"ArubaOS(?:-CX)?|ProCurve|\bAruba\b")
+_ARUBA_SERIAL_RE = re.compile(r"Serial\s+Number\s*:?\s*(\S+)", re.IGNORECASE)
+
+
+def parse_aruba(output: str) -> dict[str, Any]:
+    """Un Aruba (AOS-S, AOS-CX) o su antepasado ProCurve."""
+    mark = _ARUBA_MARK_RE.search(output)
+    if not mark:
+        return {}
+    banner = next(
+        (line.strip() for line in output.splitlines() if _ARUBA_MARK_RE.search(line)),
+        mark.group(0),
+    )
+    serial = _ARUBA_SERIAL_RE.search(output)
+    return {
+        "family": "aruba",
+        "hostname": "",
+        "description": banner,
+        "os": banner,
+        "interfaces": [],
+        "manufacturer": "HP ProCurve" if "ProCurve" in output else "Aruba",
+        "model": "",
+        "serial": serial.group(1) if serial else "",
+    }
+
+
+def parse_dell(output: str) -> dict[str, Any]:
+    """Un Dell Networking (OS10, series N…): la firma es la marca en el banner."""
+    if "Dell" not in output:
+        return {}
+    banner = next((line.strip() for line in output.splitlines() if "Dell" in line), "Dell Networking")
+    return {
+        "family": "dell",
+        "hostname": "",
+        "description": banner,
+        "os": banner,
+        "interfaces": [],
+        "manufacturer": "Dell",
+        "model": "",
+        "serial": "",
+    }
+
+
+def parse_show_version(output: str) -> dict[str, Any]:
+    """Un solo comando, varios fabricantes: la firma del texto decide.
+
+    `show version` lo entienden IOS, JunOS, ArubaOS y Dell Networking; una
+    conexión por fabricante para repetir el mismo comando serían intentos de
+    autenticación de más sin aprender nada nuevo. Cisco va primero por ser lo
+    más común; JunOS antes que Aruba y Dell porque su firma es inconfundible.
+    """
+    for parse in (parse_cisco, parse_junos, parse_aruba, parse_dell):
+        data = parse(output)
+        if data:
+            return data
+    return {}
+
+
+# --- Los que comparten «display version» ------------------------------------------
+
+
+def parse_display_version(output: str) -> dict[str, Any]:
+    """Huawei (VRP) y HPE/H3C (Comware) comparten mandos —la herencia
+    Huawei-3Com— y captura; se distinguen por la firma del banner."""
+    huawei = "Versatile Routing Platform" in output or re.search(r"\bVRP\b", output) is not None
+    comware = "Comware" in output
+    if not huawei and not comware:
+        return {}
+    banner = next(
+        (line.strip() for line in output.splitlines() if "Version" in line and line.strip()),
+        "Huawei VRP" if huawei else "Comware",
+    )
+    return {
+        "family": "huawei" if huawei else "comware",
+        "hostname": "",
+        "description": banner,
+        "os": banner,
+        "interfaces": [],
+        "manufacturer": "Huawei" if huawei else "HPE / H3C",
+        "model": "",
+        "serial": "",
+    }
+
+
+# --- Los de comando propio ---------------------------------------------------------
+
+_FORTI_VERSION_RE = re.compile(r"^Version:\s*(\S+)\s+(\S+)", re.MULTILINE)
+_FORTI_SERIAL_RE = re.compile(r"^Serial-Number:\s*(\S+)", re.MULTILINE)
+_FORTI_HOSTNAME_RE = re.compile(r"^Hostname:\s*(\S+)", re.MULTILINE)
+
+
+def parse_fortinet(output: str) -> dict[str, Any]:
+    """Un FortiOS: `get system status` con sus `Version:` y `Serial-Number:`."""
+    if "Forti" not in output:
+        return {}
+    version = _FORTI_VERSION_RE.search(output)
+    hostname = _FORTI_HOSTNAME_RE.search(output)
+    serial = _FORTI_SERIAL_RE.search(output)
+    description = f"{version.group(1)} {version.group(2)}".strip() if version else "FortiOS"
+    return {
+        "family": "fortinet",
+        "hostname": hostname.group(1) if hostname else "",
+        "description": description,
+        "os": description,
+        "interfaces": [],
+        "manufacturer": "Fortinet",
+        "model": version.group(1) if version else "",
+        "serial": serial.group(1) if serial else "",
+    }
+
+
+_GAIA_VERSION_RE = re.compile(r"Product version\s+(.+)$", re.MULTILINE)
+
+
+def parse_gaia(output: str) -> dict[str, Any]:
+    """Un CheckPoint con Gaia: `show version all` en su clish."""
+    if "Check Point" not in output and "Gaia" not in output:
+        return {}
+    version = _GAIA_VERSION_RE.search(output)
+    description = version.group(1).strip() if version else "Check Point Gaia"
+    return {
+        "family": "gaia",
+        "hostname": "",
+        "description": description,
+        "os": description,
+        "interfaces": [],
+        "manufacturer": "Check Point",
+        "model": "",
+        "serial": "",
+    }
+
+
+def parse_esxi(output: str) -> dict[str, Any]:
+    """Un ESXi por su consola: se identifica, pero no se captura — su
+    «configuración» es un `state.tgz` binario, no un volcado de texto, y su
+    inventario de verdad ya llega mejor por el colector de hipervisores."""
+    if "VMware ESXi" not in output:
+        return {}
+    description = next(
+        (line.strip() for line in output.splitlines() if "VMware ESXi" in line),
+        "VMware ESXi",
+    )
+    return {
+        "family": "esxi",
+        "hostname": "",
+        "description": description,
+        "os": description,
+        "interfaces": [],
+        "manufacturer": "VMware",
+        "model": "",
+        "serial": "",
+    }
+
+
+#: El orden es el orden en que se prueban, y no es arbitrario: en la red de una
+#: pyme hay muchos más Linux que equipos de red, y cada intento fallido es una
+#: conexión. Detrás de Linux, los grupos por comando compartido; al final, los
+#: fabricantes de comando propio, que son los menos comunes.
+FAMILIES: tuple[Family, ...] = (
+    Family("linux", LINUX_COMMAND, parse_linux),
+    Family("show-version", "show version", parse_show_version),
+    Family("display-version", "display version", parse_display_version),
+    Family("mikrotik", MIKROTIK_COMMAND, parse_mikrotik),
+    Family("fortinet", "get system status", parse_fortinet),
+    Family("gaia", "show version all", parse_gaia),
+    Family("esxi", "vmware -v", parse_esxi),
+)
+
+#: El comando que vuelca la configuración de cada familia, para la copia con
+#: historial y diff. Quien no está aquí no captura, y es deliberado: la
+#: «configuración» de un Linux no es un archivo, y la de un ESXi es un tgz
+#: binario — fingir que se copian sería prometer una copia que no restaura.
+#:
+#: `show running-config` en IOS puede paginar en algún equipo raro por canal
+#: exec; si pagina, el timeout de `ssh.run` lo corta y esa copia simplemente
+#: no sale (con su línea en errors), nunca sale truncada en silencio.
+CAPTURE_COMMANDS: dict[str, str] = {
+    "cisco": "show running-config",
+    "mikrotik": "/export",
+    "aruba": "show running-config",
+    "junos": "show configuration | display set",
+    "dell": "show running-configuration",
+    "huawei": "display current-configuration",
+    "comware": "display current-configuration",
+    "fortinet": "show full-configuration",
+    "gaia": "show configuration",
+}
+
+#: Techo por copia. El mismo número que `core.discovery.MAX_CONFIG_BYTES`: el
+#: agente no puede importarlo --no tiene Django-- así que se repite aquí.
+MAX_CONFIG_BYTES = 256 * 1024
+
+
+# --- El colector ----------------------------------------------------------------
+
+
+def interrogate(
+    host: str, credentials: list[creds.Credential]
+) -> tuple[dict[str, Any], creds.Credential | None]:
+    """Lo que ese equipo cuenta de sí mismo, y con qué credencial se entró.
+
+    Se prueba credencial por credencial hasta que una entra; **con la primera
+    que entra se deja de probar**, aunque su familia no diga nada. Seguir
+    probando contra un equipo donde ya se ha entrado son intentos fallidos de
+    autenticación de más, y contra un Directorio Activo eso bloquea cuentas.
+
+    La credencial vuelve con los datos porque la captura de configuración
+    reutiliza **exactamente la que funcionó**: probar otras sería engordar la
+    misma cuenta de intentos fallidos que este bucle se cuida de no engordar.
+    """
+    for credential in credentials:
+        connected = False
+        for family in FAMILIES:
+            answer = ssh.run(
+                host=host,
+                username=credential.username,
+                secret=credential.secret,
+                port=credential.port,
+                key_file=credential.key_file,
+                command=family.command,
+            )
+            if not answer.connected:
+                break
+            connected = True
+            data = family.parse(answer.output)
+            if data:
+                # El analizador puede afinar la familia (un `show version`
+                # sirve a cuatro fabricantes); si no lo hace, vale la del
+                # intento.
+                return {**data, "family": data.get("family", family.name)}, credential
+        if connected:
+            return {}, credential
+    return {}, None
+
+
+def fetch_config(host: str, credential: creds.Credential, command: str) -> str:
+    """La configuración del equipo, o "". Nunca truncada en silencio."""
+    answer = ssh.run(
+        host=host,
+        username=credential.username,
+        secret=credential.secret,
+        port=credential.port,
+        key_file=credential.key_file,
+        command=command,
+    )
+    if not answer.connected:
+        return ""
+    output = answer.output or ""
+    if len(output.encode()) > MAX_CONFIG_BYTES:
+        # Una configuración de pyme cabe de sobra en 256 KB; algo mayor es
+        # otra cosa (un volcado, un banner infinito) y guardar media copia
+        # sería peor que no guardarla: parecería completa.
+        return ""
+    return output
+
+
+def _capture_enabled(ctx: dict) -> bool:
+    """Si el servidor lo dice, manda; si no, la variable de entorno; y el
+    valor de fábrica es encendido: es la mitad del valor del agente."""
+    config = ctx.get("config") or {}
+    if "capture_configs" in config:
+        return bool(config["capture_configs"])
+    env = ctx.get("env")
+    return bool(getattr(env, "capture_configs", True))
+
+
+@register
+class SshCollector:
+    name = "ssh"
+
+    def collect(self, ctx: dict) -> list[Finding]:
+        errors = ctx.setdefault("errors", [])
+        if not ssh.AVAILABLE:
+            errors.append(
+                collector_note("ssh", "missing_binary", "no hay binario «ssh» en esta máquina (OpenSSH no está instalado)")
+            )
+            return []
+        if "hosts" not in ctx:
+            # El mismo fallo que dejó SNMP mudo: sin el barrido delante no hay a
+            # quién llamar, y callarse aquí marca la ejecución como correcta.
+            errors.append(
+                collector_note(
+                    "ssh", "sweep_not_run", "el barrido no ha corrido antes; revisa RUN_ORDER en agent/collectors."
+                )
+            )
+            return []
+        credentials = creds.for_kind(ctx, creds.SSH)
+        if not credentials:
+            errors.append(
+                collector_note("ssh", "no_credentials", "no hay credenciales SSH configuradas (Ajustes -> Agentes -> Barrido)")
+            )
+            return []
+        if not ssh.SSHPASS_AVAILABLE and any(credential.secret for credential in credentials):
+            # No es un error que pare nada: las credenciales con clave siguen
+            # funcionando. Se dice porque, si no, el usuario ve «no entró en
+            # ningún Windows... perdón, en ningún Linux» y no sabe por qué.
+            errors.append(
+                collector_note(
+                    "ssh", "sshpass_missing", "hay credenciales con contraseña y falta «sshpass»; solo se usarán las de clave"
+                )
+            )
+
+        hosts = ctx["hosts"] or []
+        if not hosts:
+            return []
+        by_ip = {host["ip"]: host.get("mac", "") for host in hosts if host.get("ip")}
+
+        # Qué puertos se sondean sale de las credenciales, no de una constante.
+        # Con el 22 fijo, un servidor con SSH en el 2222 --que es de lo más
+        # común-- se caía de la lista **aquí**, antes de que nadie llegara a
+        # probar su credencial, y sin dejar ni una línea en `errors`: cero
+        # hallazgos y ningún motivo. El mismo fallo mudo que dejó SNMP inerte.
+        ports = {credential.port or SSH_PORT for credential in credentials}
+        open_ports: dict[str, set[int]] = {}
+        for port in sorted(ports):
+            for ip in net.hosts_listening(list(by_ip), port):
+                open_ports.setdefault(ip, set()).add(port)
+        reachable = [ip for ip in by_ip if ip in open_ports]
+        if not reachable:
+            return []
+
+        def usable(ip: str) -> list[creds.Credential]:
+            """Las credenciales cuyo puerto está abierto en ese equipo.
+
+            Una sin puerto vale para el de siempre; una que lo trae escrito solo
+            vale para el suyo. Probar las demás son intentos de autenticación de
+            más contra un equipo que no los va a atender, y esa es justo la
+            cuenta que `interrogate` se cuida de no engordar.
+            """
+            return [c for c in credentials if (c.port or SSH_PORT) in open_ports[ip]]
+
+        with ThreadPoolExecutor(max_workers=WORKERS) as pool:
+            answers = list(pool.map(lambda ip: interrogate(ip, usable(ip)), reachable))
+
+        capture = _capture_enabled(ctx)
+        findings: list[Finding] = []
+        for ip, (data, credential) in zip(reachable, answers):
+            if not data:
+                continue
+            sweep_mac = by_ip.get(ip, "")
+            own_mac = next((iface["mac"] for iface in data.get("interfaces") or [] if iface.get("mac")), "")
+            # La identidad prefiere la MAC **que vio el barrido**, no la primera
+            # que devuelve el equipo: la huella se calcula de aquí, y elegir otra
+            # MAC del mismo equipo abriría una segunda fila en la bandeja para
+            # algo que ya está ahí. Es el fallo silencioso que este orden evita.
+            identity = {"mac": sweep_mac or own_mac} if (sweep_mac or own_mac) else {"ip": ip}
+            findings.append(
+                Finding(
+                    kind="host",
+                    identity=identity,
+                    payload={
+                        "hostname": data.get("hostname", ""),
+                        "ip": ip,
+                        "mac": sweep_mac or own_mac,
+                        "description": data.get("description", ""),
+                        "os": data.get("os", ""),
+                        "manufacturer": data.get("manufacturer", ""),
+                        "model": data.get("model", ""),
+                        "serial": data.get("serial", ""),
+                        "interfaces": data.get("interfaces") or [],
+                        "family": data.get("family", ""),
+                        "seen_by": "ssh",
+                    },
+                )
+            )
+
+            # La copia de configuración, con la misma credencial que entró.
+            # Solo las familias que tienen comando (equipos de red): la del
+            # Linux no es un archivo, y no se finge que lo sea. El hallazgo
+            # «config» no pasa por la bandeja: el servidor lo adjunta directo
+            # al equipo ya inventariado, y solo cuando el contenido cambió.
+            command = CAPTURE_COMMANDS.get(data.get("family", ""), "")
+            if not capture or credential is None or not command:
+                continue
+            content = fetch_config(ip, credential, command)
+            if not content.strip():
+                continue
+            findings.append(
+                Finding(
+                    kind="config",
+                    identity=identity,
+                    payload={
+                        "config": content,
+                        "family": data.get("family", ""),
+                        "hostname": data.get("hostname", ""),
+                        "ip": ip,
+                        "mac": sweep_mac or own_mac,
+                    },
+                )
+            )
+        return findings

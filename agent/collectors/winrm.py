@@ -1,0 +1,210 @@
+"""L3: WinRM.
+
+Lo mismo que el colector SSH, para el otro lado de la sala: a los hosts vivos
+con el 5985 (o el 5986) abierto se les pregunta por PowerShell quién son.
+
+Un Windows sabe de sí mismo bastante más que un Linux: además del nombre, la
+versión y el hardware, dice **si está en un dominio y qué papel juega en él**.
+Eso último es lo que convierte una lista de servidores en un mapa: saber cuál
+es el controlador de dominio y cuál tiene Hyper-V es media respuesta a «¿de qué
+depende esto?», que es la pregunta que vende el producto.
+
+El hallazgo mantiene el ``kind`` ``host`` y la identidad del barrido: enriquece
+la fila que ya está en la bandeja en vez de abrir otra.
+"""
+
+from __future__ import annotations
+
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any
+
+from agent import credentials as creds
+from agent import net, winrm
+from agent.collectors import register
+from agent.collectors.base import Finding
+from agent.notes import collector_note
+
+#: Los dos puertos del servicio. Se prueba el de siempre y, si no, el de TLS:
+#: un Windows endurecido tiene el 5985 cerrado y solo escucha en el 5986.
+PORTS: tuple[int, ...] = (winrm.DEFAULT_PORT, winrm.DEFAULT_TLS_PORT)
+WORKERS = 10
+
+#: `Win32_ComputerSystem.DomainRole`. Los dos últimos son controladores de
+#: dominio; los demás, miembros o máquinas sueltas. Números y no texto porque es
+#: lo que devuelve Windows, y traducirlo aquí evita depender del idioma del
+#: sistema operativo -- el mismo motivo por el que la caché ARP se lee con
+#: expresiones regulares y no por el título de sus columnas.
+DOMAIN_ROLES: dict[int, str] = {
+    0: "estación de trabajo suelta",
+    1: "estación de trabajo del dominio",
+    2: "servidor suelto",
+    3: "servidor del dominio",
+    4: "controlador de dominio",
+    5: "controlador de dominio principal",
+}
+DOMAIN_CONTROLLER_ROLES = (4, 5)
+
+
+def roles_of(data: dict[str, Any]) -> list[str]:
+    """Para qué sirve esta máquina, en palabras. Lo que se enseña en la bandeja."""
+    found: list[str] = []
+    try:
+        role = int(data.get("domain_role") or 0)
+    except (TypeError, ValueError):
+        role = 0
+    if role in DOMAIN_CONTROLLER_ROLES:
+        found.append(DOMAIN_ROLES[role])
+    if data.get("hyperv"):
+        found.append("host de Hyper-V")
+    return found
+
+
+def interrogate(host: str, port: int, credentials: list[creds.Credential], ctx: dict) -> dict[str, Any]:
+    """Lo que ese Windows cuenta de sí mismo, o nada.
+
+    Con la primera credencial que entra se deja de probar. En un Directorio
+    Activo esto no es una optimización: cada intento fallido cuenta para la
+    política de bloqueo de la cuenta, y un barrido cada quince minutos contra
+    cien equipos bloquea al usuario antes de la primera hora.
+    """
+    for credential in credentials:
+        answer = winrm.query(
+            host=host,
+            username=credential.username,
+            secret=credential.secret,
+            port=credential.port or port,
+            ca_file=creds.ca_file_for(ctx, credential),
+        )
+        if answer.connected:
+            return answer.data or {}
+    return {}
+
+
+@register
+class WinrmCollector:
+    name = "winrm"
+
+    def collect(self, ctx: dict) -> list[Finding]:
+        errors = ctx.setdefault("errors", [])
+        if not winrm.AVAILABLE:
+            errors.append(
+                collector_note("winrm", "missing_library", "falta pywinrm (pip install -r agent/requirements.txt)")
+            )
+            return []
+        if "hosts" not in ctx:
+            errors.append(
+                collector_note(
+                    "winrm", "sweep_not_run", "el barrido no ha corrido antes; revisa RUN_ORDER en agent/collectors."
+                )
+            )
+            return []
+        credentials = creds.for_kind(ctx, creds.WINRM)
+        if not credentials:
+            errors.append(
+                collector_note(
+                    "winrm", "no_credentials", "no hay credenciales de Windows configuradas (Ajustes -> Agentes -> Barrido)"
+                )
+            )
+            return []
+
+        hosts = ctx["hosts"] or []
+        if not hosts:
+            return []
+        by_ip = {host["ip"]: host.get("mac", "") for host in hosts if host.get("ip")}
+
+        # Qué puerto tiene abierto cada uno. Se mira antes de autenticarse por lo
+        # mismo que en SSH: intentar entrar en los ciento veinte equipos que
+        # contestaron al ping se come el barrido en tiempos de espera.
+        # Los puertos salen también de las credenciales y no solo de los dos de
+        # fábrica: un Windows con WinRM en un puerto propio se caía de la lista
+        # aquí, antes de que nadie probara su credencial y sin dejar ni una línea
+        # en `errors`. El puerto escrito a mano se sondea primero: si alguien se
+        # ha molestado en ponerlo, es el que quiere.
+        ports = list(
+            dict.fromkeys(
+                [credential.port for credential in credentials if credential.port] + list(PORTS)
+            )
+        )
+        targets: list[tuple[str, int]] = []
+        pending = list(by_ip)
+        for port in ports:
+            if not pending:
+                break
+            listening = set(net.hosts_listening(pending, port))
+            targets.extend((ip, port) for ip in pending if ip in listening)
+            pending = [ip for ip in pending if ip not in listening]
+        if not targets:
+            return []
+
+        def usable(port: int) -> list[creds.Credential]:
+            """Las credenciales que aplican al puerto que se encontró abierto.
+
+            Una sin puerto vale para cualquiera; una que lo trae escrito solo
+            vale para el suyo. Probar las demás son intentos fallidos de más, y
+            contra un Directorio Activo eso bloquea la cuenta: es el mismo
+            motivo por el que `interrogate` para en la primera que entra.
+            """
+            return [c for c in credentials if (c.port or port) == port]
+
+        with ThreadPoolExecutor(max_workers=WORKERS) as pool:
+            answers = list(
+                pool.map(
+                    lambda target: interrogate(target[0], target[1], usable(target[1]), ctx),
+                    targets,
+                )
+            )
+
+        findings: list[Finding] = []
+        for (ip, _port), data in zip(targets, answers):
+            if not data:
+                continue
+            sweep_mac = by_ip.get(ip, "")
+            interfaces = _interfaces(data)
+            own_mac = next((iface["mac"] for iface in interfaces if iface["mac"]), "")
+            # La MAC del barrido manda sobre la que diga el equipo: la huella se
+            # calcula de la identidad, y cambiar de MAC entre barridos abre una
+            # segunda fila en la bandeja para un equipo que ya estaba.
+            identity = {"mac": sweep_mac or own_mac} if (sweep_mac or own_mac) else {"ip": ip}
+            description = " ".join(
+                part for part in (str(data.get("os") or ""), str(data.get("os_version") or "")) if part
+            ).strip()
+            findings.append(
+                Finding(
+                    kind="host",
+                    identity=identity,
+                    payload={
+                        "hostname": str(data.get("hostname") or ""),
+                        "ip": ip,
+                        "mac": sweep_mac or own_mac,
+                        "description": description,
+                        "os": description,
+                        "domain": str(data.get("domain") or "") if data.get("in_domain") else "",
+                        "roles": roles_of(data),
+                        "manufacturer": str(data.get("manufacturer") or ""),
+                        "model": str(data.get("model") or ""),
+                        "serial": str(data.get("serial") or ""),
+                        "interfaces": interfaces,
+                        "seen_by": "winrm",
+                    },
+                )
+            )
+        return findings
+
+
+def _interfaces(data: dict[str, Any]) -> list[dict[str, str]]:
+    """Las interfaces con IP, normalizadas.
+
+    Windows escribe las MAC con guiones y en mayúsculas; el resto del producto
+    las guarda con dos puntos y en minúsculas. Sin normalizar aquí, la misma
+    tarjeta vista por el barrido y por WinRM parecían dos.
+    """
+    found: list[dict[str, str]] = []
+    for raw in data.get("interfaces") or []:
+        if not isinstance(raw, dict):
+            continue
+        mac = str(raw.get("mac") or "").strip().lower().replace("-", ":")
+        name = str(raw.get("name") or "").strip()
+        if not name:
+            continue
+        found.append({"name": name, "mac": mac, "status": "up", "ip": str(raw.get("ip") or "")})
+    return found

@@ -1,0 +1,87 @@
+# Tests en Linux, instalador de Windows construido y probado de verdad, y, al
+# empujar una etiqueta `agent-vX.Y.Z`, Release con el .exe y un `latest.json`
+# que lee la web (versión, URL, SHA-256, fecha). Repo público: minutos gratis.
+name: Agente
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ["agent-v*"]
+  workflow_dispatch:
+
+concurrency:
+  group: agente-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: python -m pip install "./agent[completo]"
+      - run: python -m unittest discover -s agent/tests -t .
+
+  windows:
+    needs: tests
+    runs-on: windows-2022
+    timeout-minutes: 30
+    permissions:
+      contents: write   # solo para adjuntar la Release; GITHUB_TOKEN => autor "github-actions[bot]"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: La etiqueta coincide con la versión del código
+        if: startsWith(github.ref, 'refs/tags/agent-v')
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}".Substring("agent-v".Length)
+          $code = (Select-String -Path agent/__init__.py -Pattern '__version__ = "(.+)"').Matches[0].Groups[1].Value
+          if ($tag -ne $code) { throw "La etiqueta dice $tag y agent/__init__.py dice $code" }
+
+      - name: Dependencias
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "./agent[completo]" pyinstaller
+          if (-not (Get-Command iscc -ErrorAction SilentlyContinue) -and -not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup --no-progress -y
+          }
+
+      - name: Construir el instalador
+        shell: pwsh
+        run: ./agent/packaging/build.ps1
+
+      - name: Instalar, comprobar y desinstalar de verdad
+        shell: pwsh
+        run: |
+          $installer = (Get-ChildItem agent/installer -Filter "Cenya-Agent-Setup-*.exe" | Select-Object -First 1).FullName
+          ./agent/packaging/smoke-test.ps1 -Installer $installer
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: cenya-agent-installer
+          path: agent/installer/*.exe
+          if-no-files-found: warn
+
+      - name: Release con latest.json
+        if: startsWith(github.ref, 'refs/tags/agent-v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $exe = Get-ChildItem agent/installer -Filter "Cenya-Agent-Setup-*.exe" | Select-Object -First 1
+          $version = "${{ github.ref_name }}".Substring("agent-v".Length)
+          $sha = (Get-FileHash $exe.FullName -Algorithm SHA256).Hash.ToLower()
+          $url = "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/$($exe.Name)"
+          @{ version = $version; url = $url; sha256 = $sha; released = (Get-Date).ToUniversalTime().ToString("s") + "Z" } |
+            ConvertTo-Json | Set-Content latest.json -Encoding utf8
+          gh release create "${{ github.ref_name }}" $exe.FullName latest.json --title "Cenya Agent $version" --generate-notes

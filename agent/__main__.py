@@ -1,0 +1,268 @@
+"""The main loop: heartbeat, sweep, push, sleep.
+
+Stateless on purpose. Everything the agent needs to remember -- its interval,
+what has already been seen, what a person decided about it -- lives on the
+server. ``--once`` runs a single sweep and exits, which is how the end-to-end
+path gets exercised in tests and demos.
+"""
+
+from __future__ import annotations
+
+import socket
+import sys
+import time
+from datetime import datetime, timezone
+from typing import Protocol
+
+from agent import __version__, enroll, notes, probe, status
+from agent.notes import collector_note
+from agent.client import AgentClient, PushError
+from agent.collectors import all_collectors
+from agent.config import Config, from_env
+from agent.i18n import _t, _tn
+
+# Lo que imprime el bucle se lee en una consola, en `docker logs` y, con el
+# servicio de Windows, en el Visor de eventos (winservice redirige la salida
+# allí): texto para una persona, así que va por el catálogo del agente.
+
+
+def _sweep_line(created: int, refreshed: int, batches: int) -> str:
+    """«Barrido enviado: 3 hallazgos nuevos, 10 ya conocidos.», en su idioma."""
+    parts = {
+        "created": _tn("%(n)d hallazgo nuevo", "%(n)d hallazgos nuevos", created) % {"n": created},
+        "refreshed": _tn("%(n)d ya conocido.", "%(n)d ya conocidos.", refreshed) % {"n": refreshed},
+    }
+    if batches > 1:
+        parts["batches"] = _tn("%(n)d envío", "%(n)d envíos", batches) % {"n": batches}
+        return _t("[agente] Barrido enviado en %(batches)s: %(created)s, %(refreshed)s") % parts
+    return _t("[agente] Barrido enviado: %(created)s, %(refreshed)s") % parts
+
+
+def unexpected_error(exc: BaseException) -> str:
+    """Con el tipo de la excepción delante: un `KeyError` solo dice `'x'`."""
+    return _t("Error inesperado: %(error)s") % {"error": f"{type(exc).__name__}: {exc}"}
+
+
+class StopSignal(Protocol):
+    """Lo que el bucle necesita para saber que tiene que parar.
+
+    `threading.Event` lo cumple tal cual, y es lo que le pasa el servicio de
+    Windows (`agent/winservice.py`). Un protocolo y no el tipo concreto para
+    que este módulo no dependa de quién lo para: en la consola nadie pasa
+    nada y el bucle se comporta exactamente como antes.
+    """
+
+    def is_set(self) -> bool: ...
+
+    def wait(self, timeout: float | None = None) -> bool: ...
+
+
+def _stopping(stop_event: StopSignal | None) -> bool:
+    return stop_event is not None and stop_event.is_set()
+
+
+def sweep(client: AgentClient, env: Config, *, report: bool = True) -> int:
+    """One pass over every collector. Returns how many findings were pushed.
+
+    A collector that blows up must not kill the sweep: it is reported as a
+    partial run and the rest of the findings still go up.
+
+    `report` escribe el fichero de estado que lee el icono de bandeja. `--once`
+    lo apaga: es alguien probando a mano, y pisaría el estado del servicio que
+    quizá corre a la vez en la misma máquina.
+    """
+    if report:
+        status.sweep_started()
+    answer = client.heartbeat(version=__version__, hostname=socket.gethostname())
+    started = datetime.now(timezone.utc)
+    # The shared context: the server-sent config, the environment overrides,
+    # and what one collector leaves for the next (the sweep's live hosts).
+    ctx: dict = {"config": answer.get("config") or {}, "env": env}
+    items = []
+    collectors = all_collectors()
+    for collector in collectors:
+        if report:
+            status.sweep_step(collector.name)
+        try:
+            items.extend(f.as_json() for f in collector.collect(ctx))
+        except Exception as exc:  # noqa: BLE001 - one broken collector, not a dead agent
+            ctx.setdefault("errors", []).append(
+                collector_note(collector.name, "crashed", str(exc), detail=f"{type(exc).__name__}: {exc}")
+            )
+    # Los encargos de «Analizar» que trajo el latido: el sondeo dirigido de
+    # cada IP, con su informe por protocolo. Van en el mismo empuje que el
+    # barrido; el servidor los fusiona por IP con su fila de la bandeja.
+    try:
+        items.extend(probe.findings_for(ctx))
+    except Exception as exc:  # noqa: BLE001 - un sondeo roto no tumba el barrido
+        ctx.setdefault("errors", []).append(
+            collector_note("probe", "crashed", str(exc), detail=f"{type(exc).__name__}: {exc}")
+        )
+    errors = ctx.get("errors") or []
+    result = client.push_findings(
+        run={
+            "started_at": started.isoformat(),
+            "finished_at": datetime.now(timezone.utc).isoformat(),
+            "status": "partial" if errors else "ok",
+            "stats": {"collectors": len(collectors)},
+            # El texto en castellano, para un servidor que aún no conoce las
+            # notas; y las notas, para que el servidor las escriba en el idioma
+            # de quien las lee en la web (agent/notes.py).
+            "error": "; ".join(errors),
+            "notes": [notes.to_json(entry) for entry in errors],
+            "agent_version": __version__,
+        },
+        items=items,
+    )
+    print(
+        _sweep_line(
+            int(result.get("created", 0) or 0),
+            int(result.get("refreshed", 0) or 0),
+            int(result.get("batches") or 1),
+        ),
+        flush=True,
+    )
+    interval = _interval(answer.get("interval_seconds"))
+    if report:
+        status.sweep_finished(
+            created=int(result.get("created", 0) or 0),
+            refreshed=int(result.get("refreshed", 0) or 0),
+            errors=list(ctx.get("errors") or []),
+            next_in=interval or env.interval_seconds,
+        )
+    return interval
+
+
+#: Suelo y techo del intervalo. Un cero martillea el servidor sin pausa y un
+#: negativo lanza `ValueError` desde `time.sleep`; los dos matarían al agente por
+#: un dato del servidor o del entorno, que es de quien menos debe fiarse.
+MIN_INTERVAL_SECONDS = 30
+MAX_INTERVAL_SECONDS = 24 * 60 * 60
+
+
+def _interval(value: object, fallback: int = 0) -> int:
+    """Los segundos que decir al bucle, acotados. Cero significa «deja el tuyo»."""
+    try:
+        seconds = int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return fallback
+    if seconds <= 0:
+        return fallback
+    return max(MIN_INTERVAL_SECONDS, min(seconds, MAX_INTERVAL_SECONDS))
+
+
+def main(argv: list[str] | None = None, stop_event: StopSignal | None = None) -> None:
+    """Arranca el agente.
+
+    `stop_event` lo usa quien necesita pararlo desde fuera --el servicio de
+    Windows cuando alguien pulsa «Detener»-- sin matar el proceso. Un barrido
+    en curso no se interrumpe (cortar a media consulta SNMP no ahorra nada y
+    deja al colector en un estado raro): termina, y el bucle ya no empieza el
+    siguiente. La siesta, en cambio, se corta en el acto.
+    """
+    args = argv if argv is not None else sys.argv[1:]
+    if args[:1] == ["enroll"]:
+        raise SystemExit(enroll.run(args[1:]))
+    if args[:1] == ["selftest"]:
+        from agent import selftest
+
+        raise SystemExit(selftest.run())
+    if args[:1] == ["export-netbox"]:
+        # No necesita estar enrolado: lee un NetBox y deja un fichero, sin
+        # hablar con el servidor de Cenya.
+        from agent import netbox_export
+
+        raise SystemExit(netbox_export.run(args[1:]))
+    # Un contenedor o un script que arranca el agente directamente puede traer
+    # la cadena de conexión en el entorno: se canjea aquí, la primera vez.
+    enroll.ensure_enrolled()
+    config = from_env()
+    client = AgentClient(config.url, config.token, ca_bundle=config.ca_bundle)
+
+    if "--once" in args:
+        # Un servidor caído aquí es un mensaje, no un volcado de pila: `--once`
+        # es lo que alguien ejecuta a mano para comprobar que el enrolado
+        # funciona, y es justo cuando la URL o el token suelen estar mal.
+        try:
+            sweep(client, config, report=False)
+        except PushError as exc:
+            print(_t("[agente] %(error)s") % {"error": exc}, file=sys.stderr, flush=True)
+            raise SystemExit(1) from exc
+        return
+
+    interval = _interval(config.interval_seconds, fallback=MIN_INTERVAL_SECONDS)
+    print(
+        _t("[agente] Empujando a %(url)s cada ~%(seconds)d s.") % {"url": config.url, "seconds": interval},
+        flush=True,
+    )
+    status.started(version=__version__, url=config.url, interval_seconds=interval)
+    while not _stopping(stop_event):
+        try:
+            interval = sweep(client, config) or interval
+        except PushError as exc:
+            # A network cut or a revoked token is not a reason to die: sleep
+            # and try again. The server keeps the state; the agent just knocks.
+            print(_t("[agente] %(error)s") % {"error": exc}, file=sys.stderr, flush=True)
+            status.failed(str(exc))
+        except Exception as exc:  # noqa: BLE001
+            # Ni un dato inesperado del servidor. El agente vive en la máquina
+            # de un cliente sin nadie mirándola: morir en silencio es la peor
+            # de las opciones, porque el inventario deja de actualizarse y no
+            # hay ninguna señal de que haya pasado nada.
+            print(_t("[agente] %(error)s") % {"error": unexpected_error(exc)}, file=sys.stderr, flush=True)
+            status.failed(unexpected_error(exc))
+        interval = _nap(client, interval, stop_event)
+    print(_t("[agente] Detenido."), flush=True)
+    status.stopped()
+
+
+#: Cada cuánto pregunta el agente mientras duerme entre barridos. Es lo que
+#: hace posibles «Barrer ahora» y «Analizar» sin abrir un solo puerto ni
+#: mantener una conexión permanente: el servidor apunta el encargo, y el
+#: agente pasa a recogerlo como muy tarde un minuto después. Un latido son
+#: unos cientos de bytes: mil agentes preguntando cada minuto siguen siendo
+#: ruido para el servidor.
+POLL_SECONDS = 60
+
+
+def _nap(client: AgentClient, interval: int, stop_event: StopSignal | None = None) -> int:
+    """La siesta entre barridos, a sorbos, preguntando en cada sorbo.
+
+    Devuelve el intervalo (quizá actualizado por el servidor a mitad de
+    siesta). Sale antes de tiempo si el servidor dice `sweep_now`: alguien
+    pulsó «Barrer ahora» o encargó un análisis y no quiere esperar al ciclo.
+    Un latido fallido no despierta ni mata nada: se sigue durmiendo y el
+    barrido normal llegará igual.
+
+    Con `stop_event`, cada sorbo es una espera sobre él en vez de un
+    `time.sleep`: quien para el servicio no espera al final del minuto. Se
+    mira también antes de empezar, por si la orden llegó durante el barrido.
+    """
+    slept = 0
+    while slept < interval:
+        if _stopping(stop_event):
+            break
+        chunk = min(POLL_SECONDS, interval - slept)
+        if stop_event is None:
+            time.sleep(chunk)
+        elif stop_event.wait(chunk):
+            break
+        slept += chunk
+        if slept >= interval:
+            break
+        try:
+            answer = client.heartbeat(version=__version__, hostname=socket.gethostname())
+        except Exception as exc:  # noqa: BLE001 - la red va y viene; el sueño sigue
+            # Pero el icono sí lo cuenta: un servidor que no contesta durante
+            # la siesta es lo que tardaría quince minutos en notarse si no.
+            status.nap_tick(next_in=interval - slept, error=str(exc))
+            continue
+        interval = _interval(answer.get("interval_seconds"), fallback=interval)
+        status.nap_tick(next_in=max(0, interval - slept))
+        if answer.get("sweep_now") or (answer.get("config") or {}).get("probe_ips"):
+            break
+    return interval
+
+
+if __name__ == "__main__":
+    main()
