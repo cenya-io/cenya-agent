@@ -46,6 +46,9 @@ common = dict(
         "servicemanager",
         "win32gui",
         "certifi",
+        # La clave del agente (agent/identity.py) la importa dentro de una
+        # función, solo si está: dicho aquí para que no dependa del análisis.
+        "cryptography",
     ],
     # Lo que el agente nunca usa y pesa: una interfaz gráfica de Tk, las
     # pruebas de unittest de terceros...

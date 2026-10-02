@@ -1,25 +1,33 @@
-"""The main loop: heartbeat, sweep, push, sleep.
+"""The agent's entry point, and the protocol-1 loop it falls back to.
 
-Stateless on purpose. Everything the agent needs to remember -- its interval,
-what has already been seen, what a person decided about it -- lives on the
-server. ``--once`` runs a single sweep and exits, which is how the end-to-end
-path gets exercised in tests and demos.
+Since 0.11 the agent speaks protocol 2 (``docs/agente-v2-nucleo.md``): a
+control channel and tasks with their own cadence, run by `agent.runtime`.
+Against a server that only knows protocol 1 -- its ``v2/checkin`` answers 404
+-- it runs the loop of the 0.10.x agents, kept here unchanged (heartbeat,
+sweep, push, sleep), and tries protocol 2 again every hour (spec 1.8).
+
+``--once`` runs a single pass and exits, which is how the end-to-end path gets
+exercised in tests and demos: a presence and an inventory with protocol 2, the
+full sweep with protocol 1.
 """
 
 from __future__ import annotations
 
+import os
 import socket
 import sys
 import time
 from datetime import datetime, timezone
 from typing import Protocol
 
-from agent import __version__, enroll, notes, probe, status
+from agent import __version__, enroll, logs, notes, probe, status
+from agent import settings as local_settings
 from agent.notes import collector_note
 from agent.client import AgentClient, PushError
 from agent.collectors import all_collectors
 from agent.config import Config, from_env
 from agent.i18n import _t, _tn
+from agent.runtime import FALLBACK, V1, V2, Runtime
 
 # Lo que imprime el bucle se lee en una consola, en `docker logs` y, con el
 # servicio de Windows, en el Visor de eventos (winservice redirige la salida
@@ -36,6 +44,16 @@ def _sweep_line(created: int, refreshed: int, batches: int) -> str:
         parts["batches"] = _tn("%(n)d envío", "%(n)d envíos", batches) % {"n": batches}
         return _t("[agente] Barrido enviado en %(batches)s: %(created)s, %(refreshed)s") % parts
     return _t("[agente] Barrido enviado: %(created)s, %(refreshed)s") % parts
+
+
+def _say(text: str, *, error: bool = False) -> None:
+    """Una línea para una persona: a la consola (o al Visor de eventos) y al registro."""
+    if error:
+        print(text, file=sys.stderr, flush=True)
+        logs.error(text)
+    else:
+        print(text, flush=True)
+        logs.info(text)
 
 
 def unexpected_error(exc: BaseException) -> str:
@@ -114,13 +132,12 @@ def sweep(client: AgentClient, env: Config, *, report: bool = True) -> int:
         },
         items=items,
     )
-    print(
+    _say(
         _sweep_line(
             int(result.get("created", 0) or 0),
             int(result.get("refreshed", 0) or 0),
             int(result.get("batches") or 1),
-        ),
-        flush=True,
+        )
     )
     interval = _interval(answer.get("interval_seconds"))
     if report:
@@ -176,44 +193,86 @@ def main(argv: list[str] | None = None, stop_event: StopSignal | None = None) ->
     # Un contenedor o un script que arranca el agente directamente puede traer
     # la cadena de conexión en el entorno: se canjea aquí, la primera vez.
     enroll.ensure_enrolled()
+    logs.setup()
+    local = local_settings.load()
+    # El idioma de `settings.json`, si nadie lo fijó en el entorno: lo leen
+    # `agent.i18n` (lo que se imprime) y `accept_language` (los errores del
+    # servidor). Las variables mandan, como en el resto de ajustes.
+    if local.language and not os.environ.get("CENYA_LANGUAGE"):
+        os.environ["CENYA_LANGUAGE"] = local.language
     config = from_env()
-    client = AgentClient(config.url, config.token, ca_bundle=config.ca_bundle)
+    client = AgentClient(config.url, config.token, ca_bundle=config.ca_bundle or local.ca_bundle, proxy=local.proxy)
 
     if "--once" in args:
         # Un servidor caído aquí es un mensaje, no un volcado de pila: `--once`
         # es lo que alguien ejecuta a mano para comprobar que el enrolado
         # funciona, y es justo cuando la URL o el token suelen estar mal.
+        runtime = Runtime(client, config, report=False, say=_say)
         try:
-            sweep(client, config, report=False)
+            if runtime.negotiate() == V2:
+                runtime.once()
+            else:
+                sweep(client, config, report=False)
         except PushError as exc:
-            print(_t("[agente] %(error)s") % {"error": exc}, file=sys.stderr, flush=True)
+            _say(_t("[agente] %(error)s") % {"error": exc}, error=True)
             raise SystemExit(1) from exc
         return
 
+    runtime = Runtime(client, config, say=_say)
+    mode = V1 if _stopping(stop_event) else runtime.negotiate()
+    while True:
+        if mode == V1:
+            if not _legacy_loop(client, config, runtime, stop_event):
+                break
+            mode = V2
+            continue
+        # Protocolo 2, o no se sabe todavía (la red caída al arrancar): se
+        # arranca el 2, y si el servidor resulta ser del 1 su 404 lo dirá.
+        _say(_t("[agente] Conectado a %(url)s con el protocolo 2.") % {"url": config.url})
+        status.started(version=__version__, url=config.url, interval_seconds=0)
+        if runtime.run(stop_event) != FALLBACK:
+            break
+        _say(_t("[agente] El servidor solo habla el protocolo 1: se sigue con el bucle de siempre."))
+        mode = V1
+    _say(_t("[agente] Detenido."))
+    status.stopped()
+
+
+#: Cada cuánto se vuelve a probar el protocolo 2 desde el bucle del 1 (spec 1.8).
+V2_RETRY_SECONDS = 60 * 60
+
+
+def _legacy_loop(client: AgentClient, config: Config, runtime: Runtime, stop_event: StopSignal | None) -> bool:
+    """El bucle del protocolo 1, el de la 0.10.x. `True` si hay que pasar al 2.
+
+    Sale con `False` cuando lo paran. Cada hora, entre barrido y barrido,
+    pregunta otra vez por `v2/checkin`: el servidor puede haberse actualizado.
+    """
     interval = _interval(config.interval_seconds, fallback=MIN_INTERVAL_SECONDS)
-    print(
-        _t("[agente] Empujando a %(url)s cada ~%(seconds)d s.") % {"url": config.url, "seconds": interval},
-        flush=True,
-    )
+    _say(_t("[agente] Empujando a %(url)s cada ~%(seconds)d s.") % {"url": config.url, "seconds": interval})
     status.started(version=__version__, url=config.url, interval_seconds=interval)
+    last_try = time.monotonic()
     while not _stopping(stop_event):
         try:
             interval = sweep(client, config) or interval
         except PushError as exc:
             # A network cut or a revoked token is not a reason to die: sleep
             # and try again. The server keeps the state; the agent just knocks.
-            print(_t("[agente] %(error)s") % {"error": exc}, file=sys.stderr, flush=True)
+            _say(_t("[agente] %(error)s") % {"error": exc}, error=True)
             status.failed(str(exc))
         except Exception as exc:  # noqa: BLE001
             # Ni un dato inesperado del servidor. El agente vive en la máquina
             # de un cliente sin nadie mirándola: morir en silencio es la peor
             # de las opciones, porque el inventario deja de actualizarse y no
             # hay ninguna señal de que haya pasado nada.
-            print(_t("[agente] %(error)s") % {"error": unexpected_error(exc)}, file=sys.stderr, flush=True)
+            _say(_t("[agente] %(error)s") % {"error": unexpected_error(exc)}, error=True)
             status.failed(unexpected_error(exc))
         interval = _nap(client, interval, stop_event)
-    print(_t("[agente] Detenido."), flush=True)
-    status.stopped()
+        if not _stopping(stop_event) and time.monotonic() - last_try >= V2_RETRY_SECONDS:
+            last_try = time.monotonic()
+            if runtime.negotiate() == V2:
+                return True
+    return False
 
 
 #: Cada cuánto pregunta el agente mientras duerme entre barridos. Es lo que

@@ -19,8 +19,29 @@ from agent.collectors import all_collectors
 
 #: Lo que tiene que haber en una instalación completa. `snmp` y `winrm` son
 #: opcionales a propósito en `pip install`, pero el instalador las lleva dentro.
-OPTIONAL_MODULES = {"snmp": "pysnmp", "winrm": "winrm", "ntlm": "requests_ntlm"}
+OPTIONAL_MODULES = {
+    "snmp": "pysnmp",
+    "winrm": "winrm",
+    "ntlm": "requests_ntlm",
+    # La clave del agente (agent/identity.py): sin ella, `sealed_credentials`
+    # sale en falso y el servidor no puede sellarle credenciales.
+    "crypto": "cryptography",
+}
 WINDOWS_MODULES = ("win32serviceutil", "servicemanager", "win32gui")
+#: El núcleo del protocolo 2. Los importa el bucle de forma estática, pero un
+#: `excludes` mal puesto en el .spec los dejaría fuera sin que nada fallara
+#: hasta que el servicio arrancase en casa de un cliente.
+RUNTIME_MODULES = (
+    "about",
+    "control",
+    "identity",
+    "logs",
+    "outbox",
+    "runtime",
+    "scheduler",
+    "settings",
+    "tasks",
+)
 
 
 def _has(module: str) -> bool:
@@ -41,6 +62,7 @@ def report() -> dict[str, object]:
         "platform": sys.platform,
         "collectors": [collector.name for collector in all_collectors()],
         "modules": {name: _has(module) for name, module in OPTIONAL_MODULES.items()},
+        "runtime": {name: _has(f"agent.{name}") for name in RUNTIME_MODULES},
         "languages": languages,
         "state_file": str(store.path()),
     }
@@ -55,6 +77,7 @@ def complete(data: dict[str, object]) -> bool:
     ok = len(data["collectors"]) >= 6  # type: ignore[arg-type]
     ok = ok and all(data["modules"].values())  # type: ignore[union-attr]
     ok = ok and all(data["languages"].values())  # type: ignore[union-attr]
+    ok = ok and all(data.get("runtime", {}).values())  # type: ignore[union-attr]
     if "windows_modules" in data:
         ok = ok and all(data["windows_modules"].values())  # type: ignore[union-attr]
     return bool(ok)

@@ -21,7 +21,8 @@ import socket
 import sys
 from collections.abc import Mapping
 
-from agent import __version__, connection, store
+from agent import __version__, about, connection, identity, store
+from agent import settings as local_settings
 from agent.client import AgentClient, PushError
 from agent.config import check_transport, setting
 from agent.i18n import _t
@@ -39,9 +40,25 @@ def redeem(raw_connection: str, environ: Mapping[str, str], *, ca_bundle: str = 
     except connection.ConnectionStringError as exc:
         raise SystemExit(str(exc)) from exc
     check_transport(target.url, dict(environ))
-    client = AgentClient(target.url, "", ca_bundle=ca_bundle or setting(environ, "CA_BUNDLE"))
+    local = local_settings.load(environ)
+    client = AgentClient(target.url, "", ca_bundle=ca_bundle or local.ca_bundle, proxy=local.proxy)
+    # Protocolo 2 (spec 1.1): la clave pública, para que el servidor pueda
+    # sellarle credenciales, y la presentación del agente. Las dos son
+    # opcionales: sin `cryptography` no hay clave, y se enrola igual.
+    public_key = identity.ensure(environ)
+    presentation = about.build(
+        excluded_subnets=local.excluded_subnets,
+        excluded_addresses=local.excluded_addresses,
+        auto_update=local.auto_update,
+    )
     try:
-        answer = client.enroll(code=target.code, hostname=socket.gethostname(), version=__version__)
+        answer = client.enroll(
+            code=target.code,
+            hostname=socket.gethostname(),
+            version=__version__,
+            public_key=public_key,
+            about=presentation,
+        )
     except PushError as exc:
         raise SystemExit(str(exc)) from exc
     token = answer.get("token")

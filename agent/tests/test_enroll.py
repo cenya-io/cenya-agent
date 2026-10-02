@@ -163,12 +163,16 @@ class FakeClient:
 
     answer: dict | Exception = {"ok": True, "token": "cya_nuevo", "name": "CPD"}
     calls: list[dict] = []
+    extras: list[dict] = []
 
-    def __init__(self, base_url: str, token: str, *, ca_bundle: str = "") -> None:
+    def __init__(self, base_url: str, token: str, *, ca_bundle: str = "", proxy: object = None) -> None:
         self.base_url, self.token, self.ca_bundle = base_url, token, ca_bundle
 
-    def enroll(self, *, code: str, hostname: str, version: str) -> dict:
+    def enroll(self, *, code: str, hostname: str, version: str, public_key: str = "", about: dict | None = None) -> dict:
         FakeClient.calls.append({"url": self.base_url, "token": self.token, "code": code})
+        # Lo nuevo del protocolo 2 (spec 1.1), aparte: los tests de antes
+        # comparan las llamadas enteras y no tienen por qué saber de ello.
+        FakeClient.extras.append({"public_key": public_key, "about": about})
         if isinstance(FakeClient.answer, Exception):
             raise FakeClient.answer
         return FakeClient.answer
@@ -180,9 +184,24 @@ class RedeemTests(unittest.TestCase):
         self.env = {"CENYA_STATE_DIR": self.dir}
         FakeClient.answer = {"ok": True, "token": "cya_nuevo", "name": "CPD"}
         FakeClient.calls = []
+        FakeClient.extras = []
         patcher = mock.patch.object(enroll, "AgentClient", FakeClient)
         patcher.start()
         self.addCleanup(patcher.stop)
+
+    def test_protocol_2_sends_the_public_key_and_the_about(self) -> None:
+        """Spec 1.1: la clave pública (si hay `cryptography`) y la presentación."""
+        from agent import identity
+
+        enroll.redeem(f"cenya://portal/{CODE}", self.env)
+
+        extra = FakeClient.extras[0]
+        self.assertEqual(extra["about"]["agent_version"], enroll.__version__)
+        if identity.available():
+            self.assertTrue(extra["public_key"].startswith("-----BEGIN PUBLIC KEY-----"))
+            self.assertEqual(extra["public_key"], identity.public_key(self.env))
+        else:
+            self.assertEqual(extra["public_key"], "")
 
     def test_redeeming_saves_the_token_the_server_gave(self) -> None:
         saved = enroll.redeem(f"cenya://portal/{CODE}", self.env)

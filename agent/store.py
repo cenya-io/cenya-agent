@@ -95,25 +95,38 @@ def _restrict_windows(target: Path) -> None:
         raise OSError(result.stderr.strip() or result.stdout.strip() or f"icacls {result.returncode}")
 
 
+def write_protected(target: Path, content: str | bytes) -> None:
+    """Write `content` to `target` atomically, readable only by who must read it.
+
+    The one way the agent writes anything secret or near-secret to disk: the
+    token, the identity key (`agent/identity.py`), the local settings. Raises
+    `OSError` when it cannot be protected -- and then nothing is left behind.
+    """
+    target.parent.mkdir(parents=True, exist_ok=True)
+    # El temporal ya nace cerrado (mkstemp usa 0600) y se protege antes de
+    # recibir el contenido, no después: ni un instante legible por otros.
+    fd, tmp_name = tempfile.mkstemp(dir=target.parent, prefix=f".{target.stem}-", suffix=".tmp")
+    tmp = Path(tmp_name)
+    try:
+        data = content.encode("utf-8") if isinstance(content, str) else content
+        with os.fdopen(fd, "wb") as handle:
+            if sys.platform == "win32":
+                handle.flush()
+                _restrict_windows(tmp)
+            handle.write(data)
+        os.replace(tmp, target)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
 def save(enrollment: Enrollment, environ: Mapping[str, str] | None = None) -> Path:
     """Write the enrolment, protected, replacing any previous one."""
     target = path(environ)
     try:
-        target.parent.mkdir(parents=True, exist_ok=True)
-        # El temporal ya nace cerrado (mkstemp usa 0600) y se protege antes de
-        # recibir el token, no después: ni un instante legible por otros.
-        fd, tmp_name = tempfile.mkstemp(dir=target.parent, prefix=".enrollment-", suffix=".tmp")
-        tmp = Path(tmp_name)
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                if sys.platform == "win32":
-                    handle.flush()
-                    _restrict_windows(tmp)
-                json.dump({"url": enrollment.url, "token": enrollment.token, "name": enrollment.name}, handle)
-            os.replace(tmp, target)
-        except BaseException:
-            tmp.unlink(missing_ok=True)
-            raise
+        write_protected(
+            target, json.dumps({"url": enrollment.url, "token": enrollment.token, "name": enrollment.name})
+        )
     except OSError as exc:
         raise StoreError(
             _t("No se pudo guardar el enrolamiento de forma segura en %(path)s: %(error)s")
