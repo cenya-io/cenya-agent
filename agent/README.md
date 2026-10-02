@@ -36,7 +36,7 @@ Se canjea la primera vez y el token queda en el volumen `agent_state`:
 
 ```bash
 CENYA_CONNECTION=cenya://inventario.midominio.local/K7QF-9M2X-4TQN \
-docker compose --profile agente up -d agent
+docker compose up -d
 ```
 
 Lo mismo sirve para un script de despliegue en cualquier servidor: si en el
@@ -55,6 +55,27 @@ Para un solo barrido y salir (pruebas, demos):
 python -m agent --once
 ```
 
+## Dónde se descarga
+
+Cada versión etiquetada (`agent-vX.Y.Z`) que pasa la prueba de verdad del
+instalador (`.github/workflows/agent-installer.yml`) se publica, y ya no se
+toca, como *Release* de este repositorio:
+
+```
+https://github.com/cenya-io/cenya-agent/releases/download/agent-v<versión>/Cenya-Agent-Setup-<versión>.exe   # Windows
+https://github.com/cenya-io/cenya-agent/releases/download/agent-v<versión>/latest.json                       # versión, URL y SHA-256
+https://github.com/cenya-io/cenya-agent/archive/refs/tags/agent-v<versión>.zip                               # Linux y el resto
+```
+
+Lo normal es no escribir nada de eso a mano: **Ajustes → Agentes → Añadir un
+agente** enlaza a la versión exacta que corresponde a ese servidor, con el
+comando de Linux ya escrito. En Linux, en un entorno propio:
+
+```bash
+sudo python3 -m venv /opt/cenya-agent
+sudo /opt/cenya-agent/bin/pip install "cenya-agent[completo] @ https://github.com/cenya-io/cenya-agent/archive/refs/tags/agent-v0.10.2.zip#subdirectory=agent"
+```
+
 ## El instalador de Windows
 
 Para quien no quiere ni oír hablar de Python: **`Cenya-Agent-Setup-<versión>.exe`**.
@@ -67,7 +88,7 @@ Para desplegarlo en masa (un MSP con muchas máquinas, un script, Intune), en
 silencio:
 
 ```powershell
-.\Cenya-Agent-Setup-0.10.1.exe /VERYSILENT /CONNECTION=cenya://portal.midominio.com/K7QF-9M2X-4TQN
+.\Cenya-Agent-Setup-0.10.2.exe /VERYSILENT /CONNECTION=cenya://portal.midominio.com/K7QF-9M2X-4TQN
 ```
 
 | Parámetro | Para qué |
@@ -295,7 +316,7 @@ Variables:
 
 ### Aviso sobre el despliegue con Docker
 
-El servicio `agent` del `docker-compose.yml` usa `network_mode: host`: sin eso,
+El servicio `agent` del `docker-compose.yml` de este repositorio usa `network_mode: host`: sin eso,
 el barrido recorre la red interna del propio Docker (172.x) y no la de la
 empresa, y **la primera vez que alguien lo prueba no encuentra nada**, aunque
 diga que barre su propia /24 -- esa /24 no es la suya.
@@ -313,6 +334,20 @@ desactivar la verificación de TLS**, es dar la CA que lo firma con
 `CENYA_CA_BUNDLE=/ruta/al/ca.pem`. Con Docker, el fichero hay que
 montarlo dentro del contenedor con un volumen; hay un ejemplo comentado en
 `docker-compose.yml`.
+
+### Un certificado público que Windows «rechaza»
+
+Desde la 0.10.2, si la verificación del certificado falla y no hay
+`CENYA_CA_BUNDLE`, el agente lo intenta **una vez más con la lista de CA
+públicas de Mozilla** (`certifi`, que lleva el instalador) y se queda con la
+que funcione. Existe por un caso real: Python en Windows lee el almacén de
+certificados del sistema, que conserva certificados antiguos y caducados, y
+OpenSSL puede elegir uno y rechazar con «certificate has expired» un
+certificado de Let's Encrypt que el navegador acepta sin problema. La
+verificación nunca se desactiva; con una CA propia puesta en `CENYA_CA_BUNDLE`
+no se prueba nada más, porque esa es la decisión de quien opera el equipo; y
+si el segundo intento también falla, el error que se enseña es el del primero.
+Sin `certifi` (un `python -m agent` pelado) no hay segundo intento.
 
 ## Qué hace
 

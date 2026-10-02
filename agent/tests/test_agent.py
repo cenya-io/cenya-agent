@@ -145,8 +145,11 @@ def _https_server():
 
 class ConfigTests(unittest.TestCase):
     def test_missing_token_is_a_clear_error(self) -> None:
-        with self.assertRaises(SystemExit):
-            config.from_env({})
+        # Una carpeta de estado vacía, dicha a propósito: sin ella se lee el
+        # almacén de verdad, y en una máquina con un agente enrolado «falta el
+        # token» deja de ser cierto.
+        with tempfile.TemporaryDirectory() as empty, self.assertRaises(SystemExit):
+            config.from_env({"CENYA_STATE_DIR": empty})
 
     def test_defaults(self) -> None:
         cfg = config.from_env({"NETINVENTORY_AGENT_TOKEN": "nia_x"})
