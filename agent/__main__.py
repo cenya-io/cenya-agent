@@ -25,7 +25,7 @@ from agent import settings as local_settings
 from agent.notes import collector_note
 from agent.client import AgentClient, PushError
 from agent.collectors import all_collectors
-from agent.config import Config, from_env
+from agent.config import Config, from_env, setting
 from agent.i18n import _t, _tn
 from agent.memory import Excluded, Memory
 from agent.runtime import FALLBACK, V1, V2, Runtime
@@ -253,9 +253,7 @@ def main(argv: list[str] | None = None, stop_event: StopSignal | None = None) ->
     except store.StoreError as exc:
         _say(str(exc), error=True)
         raise SystemExit(str(exc)) from exc
-    # Un contenedor o un script que arranca el agente directamente puede traer
-    # la cadena de conexión en el entorno: se canjea aquí, la primera vez.
-    enroll.ensure_enrolled()
+    once = "--once" in args
     logs.setup()
     if securing.moved:
         _say(store.moved_line(securing), error=True)
@@ -266,10 +264,13 @@ def main(argv: list[str] | None = None, stop_event: StopSignal | None = None) ->
     # servidor). Las variables mandan, como en el resto de ajustes.
     if local.language and not os.environ.get("CENYA_LANGUAGE"):
         os.environ["CENYA_LANGUAGE"] = local.language
-    config = from_env()
-    client = _client_for(config, local)
 
-    if "--once" in args:
+    if once:
+        # Un contenedor o un script que arranca el agente directamente puede
+        # traer la cadena de conexión en el entorno: se canjea aquí, la primera vez.
+        enroll.ensure_enrolled()
+        config = from_env()
+        client = _client_for(config, local)
         # Un servidor caído aquí es un mensaje, no un volcado de pila: `--once`
         # es lo que alguien ejecuta a mano para comprobar que el enrolado
         # funciona, y es justo cuando la URL o el token suelen estar mal.
@@ -286,14 +287,26 @@ def main(argv: list[str] | None = None, stop_event: StopSignal | None = None) ->
             raise SystemExit(1) from exc
         return
 
-    runtime = Runtime(client, config, say=_say)
     # El canal local (spec 4): la aplicación de escritorio y los comandos
     # `status`, `pause`... hablan con este proceso por él. Vive lo que vive el
-    # proceso; cada identidad (un `connect` desde el canal) es una sesión.
+    # proceso, también sin enrolar: un equipo recién instalado se conecta
+    # desde la aplicación (`connect`), y para eso el servicio tiene que estar
+    # ahí escuchando, no salir al arrancar. Cada identidad es una sesión.
     channel = localops.LocalService(language_locked=language_locked)
     server = localpipe.serve(channel.dispatcher())
     try:
+        config = _identity(channel, first=True)
         while True:
+            if config is None:
+                # Sin identidad: el canal contesta (`status` dice por qué) y se
+                # espera a un `connect`. Para Windows el servicio está en marcha
+                # y sano: nada de salir con error y reiniciarse en bucle.
+                if not channel.wait_for_connect(stop_event):
+                    break
+                config = _identity(channel)
+                continue
+            client = _client_for(config, local_settings.load())
+            runtime = Runtime(client, config, say=_say)
             channel.attach(runtime, client, config)
             _session(client, config, runtime, channel, channel.stop_signal(stop_event), stop_event)
             if _stopping(stop_event):
@@ -304,24 +317,39 @@ def main(argv: list[str] | None = None, stop_event: StopSignal | None = None) ->
             channel.detach()
             # Lo que esperaba en la cola era de la identidad de antes.
             channel.discard_outbox()
-            if change == localops.DISCONNECTED:
-                status.stopped()
-                if not channel.wait_for_connect(stop_event):
-                    break
-            try:
-                config = from_env()
-            except SystemExit as exc:
-                _say(str(exc.code), error=True)
-                if not channel.wait_for_connect(stop_event):
-                    break
-                config = from_env()
-            client = _client_for(config, local_settings.load())
-            runtime = Runtime(client, config, say=_say)
+            config = None if change == localops.DISCONNECTED else _identity(channel)
     finally:
         if server is not None:
             server.close()
     _say(_t("[agente] Detenido."))
     status.stopped()
+
+
+def _identity(channel: localops.LocalService, *, first: bool = False) -> Config | None:
+    """La identidad con la que trabajar, o `None` (y el canal sabe por qué) si no hay una usable.
+
+    La primera vez también canjea ``CENYA_CONNECTION`` si la hay (un
+    contenedor que arranca el agente directamente). Lo que antes hacía salir
+    al agente --sin enrolar, un enrolamiento apartado por inseguro, una
+    dirección http:// sin permiso-- ahora se dice y se espera.
+    """
+    try:
+        if first:
+            enroll.ensure_enrolled()
+        return from_env()
+    except SystemExit as exc:
+        message = str(exc.code) if exc.code not in (None, 0) else ""
+        if store.untrusted_enrollment():
+            reason = localops.UNTRUSTED_STATE
+        elif store.load() is None and not setting(os.environ, "AGENT_TOKEN"):
+            reason = localops.NOT_ENROLLED_STATE
+        else:
+            reason = localops.INVALID_STATE
+        channel.set_unenrolled(reason, message)
+        _say(message or _t("[agente] Sin enrolar: esperando una conexión."), error=True)
+        _say(_t("[agente] Esperando a que se conecte este equipo (cenya-agent connect <cadena>, o la aplicación Cenya Agent)."))
+        status.stopped(reason=message)
+        return None
 
 
 def _client_for(config: Config, local: local_settings.Settings) -> AgentClient:

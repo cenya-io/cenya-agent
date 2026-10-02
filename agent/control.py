@@ -39,12 +39,13 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from agent import __version__, logs, notes, status
+from agent import __version__, identity, logs, notes, status
 from agent.client import PROTOCOL, AgentClient, PushError
 from agent.i18n import _t
 from agent.notes import Note, collector_note
 from agent.outbox import KIND_ORDER, Entry, Outbox
 from agent.scheduler import TASKS, TRIGGER_ORDER, Job, effective_pause, is_paused
+from agent.settings import is_indefinite
 
 CHECKIN_SECONDS = 30
 MIN_CHECKIN_SECONDS = 10
@@ -211,6 +212,9 @@ class Hooks:
     netbox_export: Callable[[str, dict[str, Any]], tuple[str, dict[str, Any], list[Note]]] | None = None
     #: Un checkin bueno, con su `update` (o `None`): decide `agent/update.py`.
     update_offered: Callable[[Any], None] = lambda _update: None
+    #: La clave pública de este agente (PEM) o "" (spec 1.2, `public_key`): se
+    #: presenta en el checkin mientras el servidor no confirme que la tiene.
+    public_key: Callable[[], str] = lambda: ""
     #: El `update_state` del checkin (docs/agente-v2-instalacion.md, 4), o `None`.
     update_state: Callable[[], dict[str, Any] | None] = lambda: None
 
@@ -238,6 +242,15 @@ class Control:
         self._take_orders = take_orders
         self._handled: OrderedDict[str, None] = OrderedDict()
         self._handled_lock = threading.Lock()
+        #: Un checkin cada vez: el del hilo de control y el que pide el canal
+        #: local («Buscar actualizaciones», «Probar la conexión») no se cruzan
+        #: (dos a la vez atenderían dos veces los mismos encargos).
+        self._checkin_lock = threading.RLock()
+        #: Si el servidor ha confirmado (`has_public_key: true`) que guarda la
+        #: clave de este agente. Sin confirmar, cada checkin la presenta.
+        self.key_confirmed = False
+        #: `identity`/`key_mismatch`, dicho una vez: el servidor guarda OTRA clave.
+        self.key_problem: dict[str, Any] | None = None
         for order_id in outbox.order_ids():
             self._remember(order_id)
         self._about_sent: str | None = None
@@ -278,11 +291,20 @@ class Control:
             "state": state,
             "activity": activity,
             "schedule": self.hooks.schedule(now),
-            "paused_until": local_pause.isoformat() if local_pause else None,
+            # Una pausa «hasta que la reanude» no es una fecha (spec 1.2): va
+            # como `paused_indefinitely` y sin `paused_until`.
+            "paused_until": local_pause.isoformat() if local_pause and not is_indefinite(local_pause) else None,
             "config_etag": etag,
             "about_hash": about_hash,
             "outbox": self.outbox.count(),
         }
+        if is_indefinite(local_pause):
+            body["paused_indefinitely"] = True
+        if not self.key_confirmed and (pem := self._safely(self.hooks.public_key)):
+            # Un agente que llegó de la 0.10.x enrolado no presentó su clave al
+            # enrolarse: se presenta aquí. El servidor solo la acepta si no
+            # tiene ninguna, y nunca sustituye la que tenga.
+            body["public_key"] = pem
         if (update_state := self._safely(self.hooks.update_state)) is not None:
             body["update_state"] = update_state
         # El `about` entero solo si cambió desde el último que llegó, o si el
@@ -297,6 +319,10 @@ class Control:
         Devuelve si el servidor contestó. Un 404 pone `gone`: quien corre el
         bucle vuelve al protocolo 1.
         """
+        with self._checkin_lock:
+            return self._checkin_once()
+
+    def _checkin_once(self) -> bool:
         try:
             body, about_hash = self.body(self._clock())
             answer = self.exchange(body)
@@ -401,9 +427,32 @@ class Control:
         if self._report:
             status.contact()
 
+    def _check_key(self, answer: dict[str, Any]) -> None:
+        """¿Guarda el servidor la clave de este agente? (spec 1.2, `has_public_key` / `public_key_sha256`)."""
+        if answer.get("has_public_key") is not True:
+            return  # falta o es falso: no se sabe, y se sigue presentando
+        theirs = answer.get("public_key_sha256")
+        mine = self._safely(self.hooks.public_key) or ""
+        if isinstance(theirs, str) and theirs and mine and theirs.lower() != identity.fingerprint(mine):
+            if self.key_problem is None:
+                note = collector_note(
+                    "identity",
+                    "key_mismatch",
+                    "el servidor guarda otra clave para este agente: no podrá abrir credenciales selladas hasta enrolarlo de nuevo",
+                )
+                self.key_problem = notes.to_json(note)
+                logs.error(
+                    _t(
+                        "[agente] El portal guarda otra clave para este agente: no podrá abrir las credenciales "
+                        "selladas. Enrólalo de nuevo (cenya-agent enroll <cadena> --force)."
+                    )
+                )
+        self.key_confirmed = True
+
     def apply(self, answer: dict[str, Any]) -> None:
         """Aplica la respuesta de un checkin (spec 1.2)."""
         self._need_about = bool(answer.get("need_about"))
+        self._check_key(answer)
         etag = answer.get("config_etag")
         config = answer.get("config")
         changed = False

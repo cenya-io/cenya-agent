@@ -1,7 +1,8 @@
 ﻿; Instalador de Windows del agente de Cenya (Inno Setup 6).
 ;
-; Una persona lo ejecuta y termina con el servicio instalado, el icono de
-; bandeja y, si el instalador traía la conexión, el agente enrolado. Lo normal
+; Una persona lo ejecuta y termina con el servicio instalado y en marcha, el
+; icono de bandeja, la aplicación Cenya Agent en el menú Inicio y, si el
+; instalador traía la conexión, el agente enrolado. Lo normal
 ; es que la traiga en su propio NOMBRE: el servidor lo entrega como
 ;
 ;   Cenya-Agent-Setup-0.11.0_<base32>.exe
@@ -56,8 +57,14 @@
 ;  * El enrolamiento corre con `cenya-agent.exe enroll`, **después** de copiar
 ;    los ficheros: el token lo guarda el propio agente en su almacén protegido
 ;    (ProgramData\Cenya\enrollment.json) y el instalador nunca lo ve.
-;  * Si el enrolamiento falla, o no se dio conexión, el servicio se instala pero
-;    no se arranca: sin token solo daría errores en el Visor de eventos.
+;  * Sin conexión, el servicio se instala Y SE ARRANCA: sin enrolar sirve el
+;    canal local y espera, y la aplicación lo conecta (su «Conectar»). En
+;    silencio, una cadena que no se pudo canjear sale con 21 antes de instalar
+;    el servicio: quien despliega en masa ve el error.
+;  * La aplicación (cenya-agent-app.exe) necesita el runtime WebView2 de
+;    Microsoft, que traen Windows 11 y Windows 10 al día pero puede faltar en un
+;    Windows Server o un LTSC. Si falta, se avisa en la última página (y en el
+;    registro de la instalación) y se instala igual: el servicio no lo necesita.
 ;  * La carpeta del programa entra en el PATH del sistema (una sola vez, aunque
 ;    se actualice) para que `cenya-agent` funcione en cualquier consola nueva,
 ;    que es lo que enseñan las pantallas de Cenya. Al desinstalar se quita esa
@@ -139,7 +146,10 @@ spanish.CaNotFound=No se encuentra el fichero del certificado de la CA:%n%n%1
 spanish.CaFailed=No se pudo aplicar el certificado de la CA:%n%n%1
 spanish.EnrollFailed=El agente se ha instalado, pero no se ha podido enrolar:%n%n%1%nGenera otra cadena en Ajustes → Agentes y ejecútala con: cenya-agent enroll <cadena>
 spanish.ServiceFailed=No se pudo instalar el servicio de Windows (código %1). Mira el registro de la instalación.
-spanish.NotEnrolledNote=El servicio está instalado pero no se ha arrancado porque este equipo aún no está enrolado.
+spanish.NotEnrolledNote=El servicio está en marcha esperando a que conectes este equipo: abre Cenya Agent en el menú Inicio y pulsa «Conectar».
+spanish.AppShortcut=Cenya Agent
+spanish.OpenAppToConnect=Abrir Cenya Agent para conectar este equipo
+spanish.WebView2Missing=Aviso: la ventana de Cenya Agent necesita el componente Microsoft Edge WebView2 Runtime, que no está instalado en este equipo. El agente funciona igual. Para usar la ventana, instálalo desde https://developer.microsoft.com/microsoft-edge/webview2/ («Evergreen Bootstrapper»).
 spanish.TrayTask=Mostrar el icono de estado en la bandeja del sistema
 spanish.UpdateBackupFailed=No se pudo guardar la versión instalada antes de actualizar (código %1). No se ha cambiado nada.
 spanish.UpdateWatchdogFailed=No se pudo crear la tarea que vigila la actualización (código %1). No se ha cambiado nada.
@@ -156,7 +166,10 @@ english.CaNotFound=The CA certificate file cannot be found:%n%n%1
 english.CaFailed=The CA certificate could not be applied:%n%n%1
 english.EnrollFailed=The agent was installed, but it could not be enrolled:%n%n%1%nGenerate another string in Settings → Agents and run: cenya-agent enroll <string>
 english.ServiceFailed=The Windows service could not be installed (code %1). See the installation log.
-english.NotEnrolledNote=The service is installed but was not started because this machine is not enrolled yet.
+english.NotEnrolledNote=The service is running and waiting for you to connect this machine: open Cenya Agent from the Start menu and click "Connect".
+english.AppShortcut=Cenya Agent
+english.OpenAppToConnect=Open Cenya Agent to connect this machine
+english.WebView2Missing=Note: the Cenya Agent window needs the Microsoft Edge WebView2 Runtime, which is not installed on this machine. The agent works anyway. To use the window, install it from https://developer.microsoft.com/microsoft-edge/webview2/ ("Evergreen Bootstrapper").
 english.TrayTask=Show the status icon in the system tray
 english.UpdateBackupFailed=The installed version could not be saved before updating (code %1). Nothing has been changed.
 english.UpdateWatchdogFailed=The task that watches over the update could not be created (code %1). Nothing has been changed.
@@ -173,7 +186,10 @@ german.CaNotFound=Die Zertifikatsdatei der Zertifizierungsstelle wurde nicht gef
 german.CaFailed=Das Zertifikat der Zertifizierungsstelle konnte nicht übernommen werden:%n%n%1
 german.EnrollFailed=Der Agent wurde installiert, konnte aber nicht registriert werden:%n%n%1%nErzeugen Sie unter Einstellungen → Agenten eine neue Zeichenfolge und führen Sie aus: cenya-agent enroll <Zeichenfolge>
 german.ServiceFailed=Der Windows-Dienst konnte nicht installiert werden (Code %1). Siehe das Installationsprotokoll.
-german.NotEnrolledNote=Der Dienst ist installiert, wurde aber nicht gestartet, da dieser Rechner noch nicht registriert ist.
+german.NotEnrolledNote=Der Dienst läuft und wartet darauf, dass Sie diesen Rechner verbinden: Öffnen Sie Cenya Agent im Startmenü und klicken Sie auf „Verbinden“.
+german.AppShortcut=Cenya Agent
+german.OpenAppToConnect=Cenya Agent öffnen, um diesen Rechner zu verbinden
+german.WebView2Missing=Hinweis: Das Fenster von Cenya Agent benötigt die Microsoft Edge WebView2 Runtime, die auf diesem Rechner nicht installiert ist. Der Agent funktioniert trotzdem. Um das Fenster zu nutzen, installieren Sie sie von https://developer.microsoft.com/microsoft-edge/webview2/ („Evergreen Bootstrapper“).
 german.TrayTask=Statussymbol im Infobereich der Taskleiste anzeigen
 german.UpdateBackupFailed=Die installierte Version konnte vor dem Update nicht gesichert werden (Code %1). Es wurde nichts geändert.
 german.UpdateWatchdogFailed=Die Aufgabe, die das Update überwacht, konnte nicht erstellt werden (Code %1). Es wurde nichts geändert.
@@ -190,7 +206,10 @@ french.CaNotFound=Le fichier du certificat de l'autorité est introuvable :%n%n%
 french.CaFailed=Le certificat de l'autorité n'a pas pu être appliqué :%n%n%1
 french.EnrollFailed=L'agent a été installé, mais n'a pas pu être enrôlé :%n%n%1%nGénérez une autre chaîne dans Paramètres → Agents et exécutez : cenya-agent enroll <chaîne>
 french.ServiceFailed=Le service Windows n'a pas pu être installé (code %1). Consultez le journal d'installation.
-french.NotEnrolledNote=Le service est installé mais n'a pas été démarré, car cette machine n'est pas encore enrôlée.
+french.NotEnrolledNote=Le service est en cours d'exécution et attend que vous connectiez cette machine : ouvrez Cenya Agent depuis le menu Démarrer et cliquez sur « Connecter ».
+french.AppShortcut=Cenya Agent
+french.OpenAppToConnect=Ouvrir Cenya Agent pour connecter cette machine
+french.WebView2Missing=Remarque : la fenêtre de Cenya Agent a besoin du composant Microsoft Edge WebView2 Runtime, qui n'est pas installé sur cette machine. L'agent fonctionne quand même. Pour utiliser la fenêtre, installez-le depuis https://developer.microsoft.com/microsoft-edge/webview2/ (« Evergreen Bootstrapper »).
 french.TrayTask=Afficher l'icône d'état dans la zone de notification
 french.UpdateBackupFailed=La version installée n'a pas pu être sauvegardée avant la mise à jour (code %1). Rien n'a été modifié.
 french.UpdateWatchdogFailed=La tâche qui surveille la mise à jour n'a pas pu être créée (code %1). Rien n'a été modifié.
@@ -207,7 +226,10 @@ brazilianportuguese.CaNotFound=O arquivo do certificado da CA não foi encontrad
 brazilianportuguese.CaFailed=Não foi possível aplicar o certificado da CA:%n%n%1
 brazilianportuguese.EnrollFailed=O agente foi instalado, mas não foi possível registrá-lo:%n%n%1%nGere outra cadeia em Configurações → Agentes e execute: cenya-agent enroll <cadeia>
 brazilianportuguese.ServiceFailed=Não foi possível instalar o serviço do Windows (código %1). Veja o registro da instalação.
-brazilianportuguese.NotEnrolledNote=O serviço está instalado, mas não foi iniciado porque esta máquina ainda não está registrada.
+brazilianportuguese.NotEnrolledNote=O serviço está em execução esperando que você conecte esta máquina: abra o Cenya Agent no menu Iniciar e clique em "Conectar".
+brazilianportuguese.AppShortcut=Cenya Agent
+brazilianportuguese.OpenAppToConnect=Abrir o Cenya Agent para conectar esta máquina
+brazilianportuguese.WebView2Missing=Aviso: a janela do Cenya Agent precisa do Microsoft Edge WebView2 Runtime, que não está instalado nesta máquina. O agente funciona mesmo assim. Para usar a janela, instale-o em https://developer.microsoft.com/microsoft-edge/webview2/ ("Evergreen Bootstrapper").
 brazilianportuguese.TrayTask=Mostrar o ícone de status na área de notificação
 brazilianportuguese.UpdateBackupFailed=Não foi possível guardar a versão instalada antes de atualizar (código %1). Nada foi alterado.
 brazilianportuguese.UpdateWatchdogFailed=Não foi possível criar a tarefa que vigia a atualização (código %1). Nada foi alterado.
@@ -226,17 +248,31 @@ Source: "update-watchdog.cmd"; Flags: dontcopy
 ; El icono arranca al iniciar sesión cualquier usuario de este equipo, y se
 ; quita solo al desinstalar.
 Root: HKLM; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "Cenya Agent"; ValueData: """{app}\cenya-agent-tray.exe"""; Flags: uninsdeletevalue; Tasks: tray
+; El interruptor del icono al iniciar sesión que la ventana guarda como el
+; Administrador de tareas (StartupApproved): no se crea nunca aquí, pero se
+; borra al desinstalar.
+Root: HKLM; Subkey: "Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run"; ValueType: none; ValueName: "Cenya Agent"; Flags: dontcreatekey uninsdeletevalue
 ; `cenya-agent` en cualquier consola, sin `cd` a Archivos de programa. Se quita
 ; al desinstalar en CurUninstallStepChanged: Inno no sabe quitar un trozo de un
 ; valor, y borrar el valor entero se llevaría el PATH de todo el equipo.
 Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Control\Session Manager\Environment"; ValueType: expandsz; ValueName: "Path"; ValueData: "{olddata};{app}"; Check: NeedsPathEntry
 
+[Icons]
+; La ventana, en el menú Inicio, con el mismo AppUserModelID que pone la
+; ventana al arrancar (agent/app/main.py): así el acceso directo y la ventana
+; abierta se agrupan en la barra de tareas.
+Name: "{autoprograms}\{cm:AppShortcut}"; Filename: "{app}\cenya-agent-app.exe"; WorkingDir: "{app}"; AppUserModelID: "Cenya.Agent.App"
+
 [Run]
 ; Para ver el icono ya, sin esperar al próximo inicio de sesión.
 Filename: "{app}\cenya-agent-tray.exe"; Flags: nowait postinstall skipifsilent runasoriginaluser; Tasks: tray
+; Sin conexión, la ventana se abre en «Conectar» (docs/agente-v2-instalacion.md,
+; sección 2). Como administrador, el mismo del instalador: conectar es actuar.
+Filename: "{app}\cenya-agent-app.exe"; Parameters: "--section connection"; Description: "{cm:OpenAppToConnect}"; Flags: nowait postinstall skipifsilent; Check: NotEnrolledYet
 
 [UninstallRun]
 Filename: "{sys}\taskkill.exe"; Parameters: "/im cenya-agent-tray.exe /f"; Flags: runhidden; RunOnceId: "KillTray"
+Filename: "{sys}\taskkill.exe"; Parameters: "/im cenya-agent-app.exe /f"; Flags: runhidden; RunOnceId: "KillApp"
 Filename: "{app}\cenya-agent-service.exe"; Parameters: "--wait 60 stop"; Flags: runhidden; RunOnceId: "StopService"
 ; Se despide del servidor (spec 1.7) antes de quitar el servicio. Sin red borra
 ; igual el enrolamiento y sale con 0: no bloquea la desinstalación.
@@ -280,6 +316,12 @@ end;
 function EnrollmentFile: String;
 begin
   Result := StateDir + '\enrollment.json';
+end;
+
+{ Check de [Run]: abrir la ventana en «Conectar» solo si no se pudo conectar. }
+function NotEnrolledYet: Boolean;
+begin
+  Result := not FileExists(EnrollmentFile);
 end;
 
 function PreviousDir: String;
@@ -512,12 +554,14 @@ begin
   end;
 end;
 
-{ Antes de copiar nada: un servicio o un icono en marcha tienen ficheros bloqueados. }
+{ Antes de copiar nada: un servicio, un icono o una ventana en marcha tienen
+  ficheros bloqueados (también en /UPDATE: la ventana se cierra y se abre otra vez a mano). }
 procedure StopRunningAgent;
 var
   ResultCode: Integer;
 begin
   Exec(ExpandConstant('{sys}\taskkill.exe'), '/im cenya-agent-tray.exe /f', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/im cenya-agent-app.exe /f', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Exec(ExpandConstant('{sys}\net.exe'), 'stop {#ServiceName}', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
 
@@ -572,6 +616,27 @@ begin
     '', SW_HIDE, ewWaitUntilTerminated, ResultCode, Output) and (ResultCode = 0);
   if not Result then
     Reason := OutputText(Output);
+end;
+
+{ El runtime de WebView2, como lo busca la ventana (agent/app/winsys.py,
+  webview2_version): el valor pv, no vacío ni 0.0.0.0, del cliente de
+  EdgeUpdate de WebView2 en la máquina (vista de 32 o de 64 bits) o en el
+  usuario. Solo para avisar: nunca para no instalar. }
+function WebView2VersionAt(const RootKey: Integer; const SubKey: String): Boolean;
+var
+  Version: String;
+begin
+  Result := RegQueryStringValue(RootKey, SubKey, 'pv', Version) and (Version <> '') and (Version <> '0.0.0.0');
+end;
+
+function WebView2Present: Boolean;
+var
+  Client: String;
+begin
+  Client := 'Microsoft\EdgeUpdate\Clients\' + '{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}';
+  Result := WebView2VersionAt(HKLM32, 'SOFTWARE\' + Client) or
+    WebView2VersionAt(HKLM64, 'SOFTWARE\' + Client) or
+    WebView2VersionAt(HKCU, 'Software\' + Client);
 end;
 
 function RunService(const Parameters: String): Integer;
@@ -802,13 +867,30 @@ begin
 
     InstallAgentService;
 
-    if Enrolled then
-      RunService('--wait 60 start')
-    else
-    begin
+    { Siempre en marcha: sin enrolar espera a que lo conecte la aplicación. }
+    RunService('--wait 60 start');
+    if not Enrolled then
       Log(CustomMessage('NotEnrolledNote'));
-    end;
+    if not WebView2Present then
+      Log(CustomMessage('WebView2Missing'));
   end;
+end;
+
+{ La última página dice lo que queda por hacer: conectar, si no se conectó, y
+  el aviso de WebView2 si falta. Nunca bloquea nada. }
+procedure CurPageChanged(CurPageID: Integer);
+var
+  Extra: String;
+begin
+  if CurPageID <> wpFinished then
+    Exit;
+  Extra := '';
+  if not FileExists(EnrollmentFile) then
+    Extra := Extra + #13#10#13#10 + CustomMessage('NotEnrolledNote');
+  if not WebView2Present then
+    Extra := Extra + #13#10#13#10 + CustomMessage('WebView2Missing');
+  if Extra <> '' then
+    WizardForm.FinishedLabel.Caption := WizardForm.FinishedLabel.Caption + Extra;
 end;
 
 { Siempre, haya ido bien o mal: el vigilante deja de esperar al instalador. }

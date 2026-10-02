@@ -507,14 +507,21 @@ class InstallTests(ServiceTestCase):
         self.assertIn("NETINVENTORY_AGENT_TOKEN", said)
         self.assertNotIn("nia_secreto", said)
 
-    def test_install_without_a_token_refuses_so_pywin32_removes_the_service(self) -> None:
+    def test_install_without_a_token_installs_a_service_that_waits_to_be_connected(self) -> None:
+        # Desde la 0.11 un servicio sin enrolar arranca y sirve el canal local:
+        # la aplicación lo conecta. Negarse a instalarlo dejaría al equipo sin
+        # forma de conectarse desde la ventana.
         with mock.patch.object(self.ws.enrollment_store, "load", return_value=None):
-            store, _restrict, _printed, error = self._after_install(
+            store, restrict, printed, error = self._after_install(
                 {"NETINVENTORY_URL": "https://inventario.local"}
             )
 
-        self.assertIsNotNone(error)
-        store.assert_not_called()
+        self.assertIsNone(error)
+        store.assert_called_once_with(["NETINVENTORY_URL=https://inventario.local"])
+        restrict.assert_called_once()
+        said = " ".join(str(call.args) for call in printed.call_args_list)
+        # En el idioma de la consola (aquí, sin CENYA_LANGUAGE, el de Windows).
+        self.assertTrue("esperará a que lo conectes" in said or "wait for you to connect it" in said, said)
 
     def test_install_without_a_token_variable_is_fine_when_the_machine_is_enrolled(self) -> None:
         # El camino normal desde que existe `cenya-agent enroll`: el token vive en

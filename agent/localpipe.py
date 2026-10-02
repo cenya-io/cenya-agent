@@ -152,6 +152,8 @@ _SECURITY_SQOS_PRESENT = 0x00100000
 _SECURITY_IDENTIFICATION = 0x00010000
 _BUFFER = 64 * 1024
 _READ_CHUNK = 64 * 1024
+#: Cuánto insiste un cliente si el pipe no existe antes de decir que el servicio no corre.
+NOT_FOUND_GRACE = 0.3
 
 
 def _win32() -> Any:
@@ -442,7 +444,8 @@ def connect_pipe(name: str, timeout: float = 5.0) -> PipeConnection:
     handle = None
     # El servicio deja una instancia esperando cada vez: con varios clientes
     # llegando a la vez, los demás esperan su turno (hasta `timeout`).
-    deadline = time.monotonic() + timeout
+    started = time.monotonic()
+    deadline = started + timeout
     while time.monotonic() < deadline:
         try:
             handle = w.win32file.CreateFile(name, CLIENT_ACCESS, 0, None, w.win32file.OPEN_EXISTING, flags, None)
@@ -455,6 +458,12 @@ def connect_pipe(name: str, timeout: float = 5.0) -> PipeConnection:
                     time.sleep(0.01)
                 continue
             if exc.winerror == _ERROR_FILE_NOT_FOUND:
+                # Entre que un cliente se conecta y el servicio abre la
+                # siguiente instancia pasa un instante sin ninguna: eso no es
+                # «servicio parado». Se insiste un poco antes de decirlo.
+                if time.monotonic() - started < NOT_FOUND_GRACE:
+                    time.sleep(0.03)
+                    continue
                 raise Unavailable("not_running") from None
             if exc.winerror == _ERROR_ACCESS_DENIED:
                 raise Unavailable("denied") from None

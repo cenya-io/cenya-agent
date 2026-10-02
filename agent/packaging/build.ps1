@@ -3,8 +3,9 @@
     Construye el instalador de Windows del agente de Cenya.
 
 .DESCRIPTION
-    1. PyInstaller congela el agente en agent\dist\cenya-agent (cuatro
-       ejecutables que comparten Python y librerías).
+    1. PyInstaller congela el agente en agent\dist\cenya-agent (cinco
+       ejecutables que comparten Python y librerías; el quinto es la ventana,
+       cenya-agent-app.exe, con pywebview).
     2. Baja el OpenSSH de Windows (Win32-OpenSSH, el port del equipo de
        PowerShell), comprueba su SHA-256 contra el fijado aquí abajo y deja
        `ssh.exe` con sus DLL y sus licencias en dist\cenya-agent\openssh. El
@@ -16,7 +17,7 @@
     4. Inno Setup lo empaqueta en agent\installer\Cenya-Agent-Setup-<versión>.exe.
 
     Hace falta, en el Python que se use: el agente con todos sus extras y
-    PyInstaller (`pip install .\agent[completo] pyinstaller`), y Inno Setup 6.
+    PyInstaller (`pip install .\agent[completo,gui] pyinstaller`), y Inno Setup 6.
     La versión sale de agent\__init__.py: es la misma que ve el servidor.
 
     -Unprivileged compila una variante que se instala sin ser administrador y no
@@ -74,6 +75,11 @@ try {
 
 $version = (Select-String -Path $initFile -Pattern '__version__ = "([^"]+)"').Matches[0].Groups[1].Value
 Write-Host "Cenya Agent $version"
+
+# La ventana sin pywebview no es una ventana: mejor no construir que publicar un
+# cenya-agent-app.exe que no abre. `selftest` lo vuelve a mirar en lo construido.
+& $Python -c "import webview, clr_loader, pythonnet" 2>$null
+if ($LASTEXITCODE -ne 0) { throw "Falta pywebview en este Python: pip install .\agent[completo,gui] pyinstaller" }
 
 & $Python -m PyInstaller --noconfirm --clean `
     --distpath (Join-Path $repo "agent\dist") `

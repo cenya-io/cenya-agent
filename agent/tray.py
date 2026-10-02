@@ -10,7 +10,7 @@ A left click opens the Cenya Agent window (`agent.app`), which is a process of
 its own: the tray only starts it, and the window itself makes sure there is
 never a second one (`agent.app.main` explains why two processes). The
 right-click menu does the few quick things through the local channel
-(`agent.app.channel`), the same one the window uses: run Presence, pause or
+(`agent.localclient`), the same one the window uses: run Presence, pause or
 resume, look for updates. Acting needs an elevated administrator and the tray
 runs as whoever signed in, so when the service says ``forbidden`` the tray
 offers to open the window as administrator.
@@ -42,7 +42,8 @@ import win32serviceutil
 import winerror
 
 from agent import icons, status
-from agent.app import channel, view, winsys
+from agent import localclient as channel
+from agent.app import view, winsys
 from agent.i18n import _t
 
 #: El nombre del servicio (`agent.winservice.SERVICE_NAME`). Repetido y no

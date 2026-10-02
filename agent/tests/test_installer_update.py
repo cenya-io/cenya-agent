@@ -268,12 +268,13 @@ class UpdateModeTests(unittest.TestCase):
 
 
 class SpecAndBuildTests(unittest.TestCase):
-    def test_the_frozen_build_carries_the_updater_and_leaves_room_for_the_app(self) -> None:
+    def test_the_frozen_build_carries_the_updater_and_the_app(self) -> None:
         spec = (PACKAGING / "cenya-agent.spec").read_text(encoding="utf-8")
         for module in ("agent.update", "agent.release", "agent.release_keys", "agent.settings_command"):
             with self.subTest(module=module):
                 self.assertIn(f'"{module}"', spec)
-        self.assertIn("PENDIENTE (fase 5): la aplicación de escritorio (agent/app/)", spec)
+        self.assertIn('name="cenya-agent-app"', spec)
+        self.assertNotIn("PENDIENTE (fase 5)", spec)
 
     def test_a_test_key_can_never_reach_the_published_installer(self) -> None:
         build = (PACKAGING / "build.ps1").read_text(encoding="utf-8-sig")

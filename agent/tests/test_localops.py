@@ -529,8 +529,24 @@ class NetboxExportTests(LocalServiceCase):
         self.client.upload_netbox_bundle = lambda bundle, order_id=None: uploads.append((bundle, order_id)) or {"ok": True, "import": "imp-1"}  # type: ignore[attr-defined]
         with mock.patch.object(netbox_export, "fetch_bundle", return_value={"sites": []}):
             answer = self.export(send=True)
-        self.assertEqual(answer["data"], {"import": "imp-1", "summary": {"sites": 0}})
+        self.assertEqual(
+            answer["data"],
+            {"import": "imp-1", "summary": {"sites": 0}, "review_url": "https://portal.example/settings/import/pending/imp-1/"},
+        )
         self.assertEqual(uploads, [({"sites": []}, None)])
+
+    def test_with_send_the_server_may_say_where_to_review(self) -> None:
+        for given, expected in (
+            ("/importar/revisar/imp-2/", "https://portal.example/importar/revisar/imp-2/"),
+            ("https://portal.example/x/imp-2/", "https://portal.example/x/imp-2/"),
+            # De otro sitio no: la ventana lo abriría en el navegador.
+            ("https://otro.example/x/", "https://portal.example/settings/import/pending/imp-2/"),
+            ("//otro.example/x/", "https://portal.example/settings/import/pending/imp-2/"),
+        ):
+            with self.subTest(given=given):
+                self.client.upload_netbox_bundle = lambda bundle, order_id=None: {"ok": True, "import": "imp-2", "review_url": given}  # type: ignore[attr-defined]
+                with mock.patch.object(netbox_export, "fetch_bundle", return_value={}):
+                    self.assertEqual(self.export(send=True)["data"]["review_url"], expected)
 
     def test_failures_never_carry_the_token(self) -> None:
         failures = [
@@ -622,13 +638,159 @@ class SupportBundleTests(LocalServiceCase):
 
 
 class CheckUpdateTests(LocalServiceCase):
-    def test_it_returns_what_the_server_last_said(self) -> None:
-        self.assertEqual(self.data("check_update")["offered"], None)
-        with self.runtime.shared.lock:
-            self.runtime.shared.update = {"version": "0.11.1"}
-        data = self.data("check_update")
-        self.assertEqual((data["current"], data["offered"]), ("0.11.0", "0.11.1"))
-        self.assertEqual(self.data("status")["update"], {"version": "0.11.1"})
+    ANSWER = {"ok": True, "protocol": 2, "checkin_seconds": 30, "config_etag": "e1", "config": {"tasks": TASKS_ON}}
+
+    def test_it_asks_the_server_now_and_answers_with_what_it_brought(self) -> None:
+        asked: list[dict] = []
+        answer = {**self.ANSWER, "update": {"version": "0.11.1", "url": "https://x/latest.json"}}
+        with mock.patch.object(self.client, "checkin", side_effect=lambda body: asked.append(body) or answer):
+            data = self.data("check_update")
+        self.assertEqual(len(asked), 1)  # un checkin de verdad, ahora
+        self.assertEqual((data["current"], data["offered"], data["checked"], data["pending"]), ("0.11.0", "0.11.1", True, False))
+        self.assertEqual(data["error"], "")
+        self.assertIsNotNone(data["checked_at"])
+        self.assertEqual(data["last_ok_at"], data["checked_at"])
+        self.assertIn("state", data["updater"])
+        self.assertTrue(data["auto_update"])
+        self.assertEqual(self.data("status")["update"]["version"], "0.11.1")
+
+    def test_a_checkin_that_fails_says_so(self) -> None:
+        with mock.patch.object(self.client, "checkin", side_effect=PushError("No se pudo hablar con el servidor", status=None)):
+            data = self.data("check_update")
+        self.assertFalse(data["checked"])
+        self.assertIn("No se pudo hablar", data["error"])
+        self.assertIsNone(data["offered"])
+
+    def test_a_server_that_does_not_answer_in_time_leaves_it_pending(self) -> None:
+        release = threading.Event()
+        self.service.check_update_wait = 0.2
+        with mock.patch.object(self.client, "checkin", side_effect=lambda body: release.wait(5) and self.ANSWER):
+            started = time.monotonic()
+            data = self.data("check_update")
+            self.assertLess(time.monotonic() - started, 3)
+            release.set()
+        self.assertTrue(data["pending"])
+        self.assertFalse(data["checked"])
+
+    def test_it_never_runs_alongside_the_control_threads_checkin(self) -> None:
+        inside = threading.Semaphore(0)
+        overlap: list[int] = []
+        running = [0]
+
+        def slow(body: dict) -> dict:
+            running[0] += 1
+            overlap.append(running[0])
+            time.sleep(0.2)
+            running[0] -= 1
+            return self.ANSWER
+
+        with mock.patch.object(self.client, "checkin", side_effect=slow):
+            other = threading.Thread(target=self.runtime.control.checkin_once)
+            other.start()
+            self.data("check_update")
+            other.join(5)
+        self.assertEqual(max(overlap), 1)
+
+
+class StatusForTheWindowTests(LocalServiceCase):
+    """What the desktop application asked the service for (spec 4, `status`)."""
+
+    def test_the_last_run_of_each_task_with_its_figures(self) -> None:
+        self.give_config({"tasks": TASKS_ON})
+        hosts = [{"ip": "10.0.0.1", "mac": "aa"}, {"ip": "10.0.0.2", "mac": "bb"}]
+
+        def presence(task: str, ctx: dict) -> tuple:
+            ctx["hosts"] = hosts
+            return [{"kind": "host", "ip": h["ip"]} for h in hosts], [], {"collectors": 2, "items": 2, "crashed": 0, "hosts_alive": 2}
+
+        with mock.patch("agent.runtime.tasks.run_task", side_effect=presence), mock.patch.object(
+            self.client, "push_results", return_value={"created": 1, "refreshed": 1}
+        ):
+            self.runtime.run_job(Job("presence"))
+        run = self.data("status")["last_run"]["presence"]
+        self.assertEqual(
+            {k: run[k] for k in ("task", "status", "hosts_alive", "new_hosts", "sent", "delivered", "created", "refreshed", "notes")},
+            {"task": "presence", "status": "ok", "hosts_alive": 2, "new_hosts": 2, "sent": 2, "delivered": True,
+             "created": 1, "refreshed": 1, "notes": 0},
+        )
+        self.assertTrue(run["finished_at"])
+
+    def test_a_result_left_in_the_queue_has_no_server_figures_yet(self) -> None:
+        self.give_config({"tasks": TASKS_ON})
+        with mock.patch("agent.runtime.tasks.run_task", return_value=([{"kind": "host"}], [], {"collectors": 1, "items": 1, "crashed": 0})), \
+                mock.patch.object(self.client, "push_results", side_effect=PushError("caído", status=503)):
+            self.runtime.run_job(Job("inventory", "order"))
+        run = self.data("status")["last_run"]["inventory"]
+        self.assertEqual((run["delivered"], run["created"], run["refreshed"], run["sent"]), (False, None, None, 1))
+
+    def test_the_last_good_contact_is_kept_while_the_checkins_fail(self) -> None:
+        with mock.patch.object(self.client, "checkin", return_value=CheckUpdateTests.ANSWER):
+            self.runtime.control.checkin_once()
+        good = self.data("status")["last_ok_at"]
+        self.assertIsNotNone(good)
+        with mock.patch.object(self.client, "checkin", side_effect=PushError("caído", status=503)):
+            self.runtime.control.checkin_once()
+        data = self.data("status")
+        self.assertEqual(data["connection"]["state"], "error")
+        self.assertEqual((data["last_ok_at"], data["connection"]["last_ok_at"]), (good, good))
+
+    def test_the_effective_gentleness_after_the_local_cap(self) -> None:
+        self.give_config({"tasks": TASKS_ON, "gentleness": "fast"})
+        self.assertEqual(self.data("status")["gentleness"], "fast")
+        self.data("settings.set", {"gentleness_cap": "gentle"})
+        self.assertEqual(self.data("status")["gentleness"], "gentle")
+
+    def test_where_the_log_is_and_why_there_is_no_identity(self) -> None:
+        data = self.data("status")
+        self.assertEqual(data["log_folder"], str(logs.path().parent))
+        self.assertEqual(data["enrollment"], {"state": "enrolled", "message": ""})
+        self.service.detach()
+        self.service.set_unenrolled(localops.UNTRUSTED_STATE, "apartado")
+        data = self.data("status")
+        self.assertEqual(data["enrollment"], {"state": "untrusted", "message": "apartado"})
+        self.assertEqual(data["log_folder"], str(logs.path().parent))
+        self.assertEqual(data["name"], "")
+
+
+class IndefinitePauseTests(LocalServiceCase):
+    def test_a_pause_until_resumed_has_no_end_and_resume_ends_it(self) -> None:
+        self.give_config({"tasks": TASKS_ON})
+        data = self.data("pause", {"indefinite": True})
+        self.assertEqual((data["paused_until"], data["indefinite"]), (None, True))
+        self.assertIsNone(self.runtime.next_job())
+        status = self.data("status")
+        self.assertEqual(status["state"], "paused")
+        self.assertEqual(status["pause"], {"local": None, "server": None, "until": None, "indefinite": True})
+        self.assertEqual(json.loads(local_settings.path().read_text(encoding="utf-8"))["paused_until"], "indefinite")
+        settings = self.data("settings.get")
+        self.assertEqual((settings["paused_until"], settings["paused_indefinitely"]), (None, True))
+        # Y al servidor se le dice como lo que es, no como el año 9999.
+        body, _ = self.runtime.control.body(datetime.now(timezone.utc))
+        self.assertEqual((body["state"], body["paused_until"], body["paused_indefinitely"]), ("paused", None, True))
+        self.data("resume")
+        self.assertEqual(self.runtime.next_job(), Job("presence"))
+        body, _ = self.runtime.control.body(datetime.now(timezone.utc))
+        self.assertNotIn("paused_indefinitely", body)
+
+    def test_a_dated_pause_still_has_its_limit_and_indefinite_takes_no_date(self) -> None:
+        for args in ({"seconds": 40 * 86400}, {"indefinite": True, "seconds": 60}, {"indefinite": "yes"},
+                     {"indefinite": True, "until": "2030-01-01T00:00:00+00:00"}):
+            with self.subTest(args=args):
+                self.assertEqual(self.call("pause", args)["error"], "invalid")
+        self.assertIn("hasta que lo reanudes", self.call("pause", {"seconds": 40 * 86400})["message"])
+
+
+class ReviewUrlTests(unittest.TestCase):
+    def test_built_from_the_portal_when_the_server_does_not_say(self) -> None:
+        self.assertEqual(
+            localops.review_url("https://cenya.example/sub", {"import": "0f3c-9"}),
+            "https://cenya.example/sub" + localops.NETBOX_REVIEW_PATH.format(import_id="0f3c-9"),
+        )
+
+    def test_nothing_to_open_without_a_portal_or_a_clean_id(self) -> None:
+        self.assertEqual(localops.review_url("", {"import": "x"}), "")
+        self.assertEqual(localops.review_url("https://p", {"import": "../../x"}), "")
+        self.assertEqual(localops.review_url("https://p", {}), "")
 
 
 class SessionStopTests(unittest.TestCase):

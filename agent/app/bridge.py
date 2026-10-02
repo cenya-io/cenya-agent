@@ -8,7 +8,7 @@ has. Only public methods are reachable from the page; everything else is
 underscored on purpose (pywebview also exposes public attributes).
 
 What it decides is delegated to `agent.app.view`; what it does goes through
-the channel (`agent.app.channel`) or, for the few things that are Windows'
+the channel client (`agent.localclient`) or, for the few things that are Windows'
 own, `agent.app.winsys`.
 
 **Secrets.** The NetBox token arrives as an argument, goes into one request
@@ -24,7 +24,8 @@ from datetime import datetime, timezone
 from typing import Any
 
 from agent import __version__, i18n
-from agent.app import channel, strings, view, winsys
+from agent import localclient as channel
+from agent.app import strings, view, winsys
 
 REPO_URL = "https://github.com/cenya-io/cenya-agent"
 #: «Qué hace el agente con tus datos» (CLAUDE.md, regla 7): pendiente de
@@ -83,12 +84,8 @@ class Api:
         relaunch: Callable[[str], bool] | None = None,
         opener: Callable[[str], bool] | None = None,
         initial_section: str = "",
-        enrollment_present: Callable[[], bool | None] | None = None,
-        enroll: Callable[[str], tuple[bool, str]] | None = None,
     ) -> None:
         self._client = client
-        self._enrollment_present = enrollment_present or (lambda: winsys.enrollment_present(dev))
-        self._enroll = enroll or winsys.enroll_with_cli
         self._elevated = elevated
         self._dev = dev
         if service is None or tray_startup is None:
@@ -200,11 +197,8 @@ class Api:
         except channel.ChannelError as exc:
             error_code = exc.code
         service_state = "unknown"
-        on_disk: bool | None = None
         if error_code is not None:
             service_state = self._service.query().get("state", "unknown")
-            if error_code == channel.SERVICE_DOWN:
-                on_disk = self._enrollment_present()
         return _ok(
             view=view.shell_view(
                 status,
@@ -214,7 +208,6 @@ class Api:
                 forbidden_seen=self._forbidden,
                 dev=self._dev,
                 now=self._now(),
-                enrolled_on_disk=on_disk,
             )
         )
 
@@ -350,7 +343,7 @@ class Api:
         with self._lock:
             if self._netbox.get("state") == "running":
                 return _fail("busy", view.error_message(channel.BUSY))
-            self._netbox = {"state": "running", "mode": mode, "seen": [], "portal": str((self._status or {}).get("portal") or "")}
+            self._netbox = {"state": "running", "mode": mode, "seen": []}
         args: dict[str, Any] = {"url": url.strip(), "token": token.strip(), "verify_tls": not insecure, "send": mode == "send"}
         if mode == "save":
             args["path"] = path
@@ -365,7 +358,7 @@ class Api:
         except channel.ChannelError as exc:
             result = {"state": "error", "message": view.error_message(exc.code, exc.message)}
         else:
-            summary = view.netbox_summary(data, mode, self._netbox.get("portal", ""))
+            summary = view.netbox_summary(data, mode)
             result = {"state": "done", "summary": summary, "review_url": summary["review_url"], "path": summary["path"]}
             if summary["review_url"]:
                 self._open(summary["review_url"])
@@ -493,33 +486,6 @@ class Api:
         except channel.ChannelError as exc:
             return self._error(exc)
         return self.connection()
-
-    def enroll_offline(self, text: str) -> dict[str, Any]:
-        """Conectar un equipo cuyo servicio no corre porque no está enrolado.
-
-        Hoy un servicio sin enrolamiento sale al arrancar, así que no hay canal
-        al que pedir `connect`. Se hace lo mismo que haría una persona en una
-        consola de administrador: ``cenya-agent enroll <cadena>`` (la cadena
-        como argumento, nunca por un intérprete de comandos) y después arrancar
-        el servicio desde el administrador de servicios. Nunca en desarrollo:
-        tocaría el enrolamiento de la máquina.
-        """
-        if self._dev:
-            return _fail("dev", _service_error(winsys.ServiceControlError("dev")))
-        if not self._elevated:
-            return _fail(channel.FORBIDDEN, self._perms()["why"])
-        value = str(text or "").strip()
-        if not value:
-            return _fail("invalid", strings.ui_strings()["enroll_missing"])
-        enrolled, message = self._enroll(value)
-        value = ""  # noqa: F841 - la cadena lleva un código de un solo uso
-        if not enrolled:
-            return _fail("failed", message or view.error_message("failed"))
-        try:
-            self._service.start()
-        except winsys.ServiceControlError as exc:
-            return _fail(exc.code, _enrolled_but_not_started(_service_error(exc)))
-        return _ok(message=message)
 
     def disconnect(self) -> dict[str, Any]:
         refused = self._refuse_if_readonly()
@@ -726,12 +692,6 @@ def _saved_in(path: str) -> str:
     from agent.i18n import _t
 
     return _t("Guardado en %(path)s") % {"path": path}
-
-
-def _enrolled_but_not_started(reason: str) -> str:
-    from agent.i18n import _t
-
-    return _t("El equipo ha quedado conectado, pero el servicio no ha arrancado: %(reason)s") % {"reason": reason}
 
 
 def _service_error(exc: winsys.ServiceControlError) -> str:

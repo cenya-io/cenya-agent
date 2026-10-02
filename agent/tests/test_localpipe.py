@@ -172,9 +172,9 @@ class TransportTests(unittest.TestCase):
         self.assertEqual(refused.exception.code, "busy")
 
     def test_without_a_service_the_client_says_so(self) -> None:
-        with self.assertRaises(localpipe.Unavailable) as missing:
+        with self.assertRaises(ChannelError) as missing:
             Channel(environ=self.environ)
-        self.assertEqual(missing.exception.reason, "not_running")
+        self.assertEqual(missing.exception.code, "service_down")
 
     def test_a_name_already_taken_is_not_served(self) -> None:
         self.serve()
@@ -306,11 +306,63 @@ class MainWithChannelTests(unittest.TestCase):
             main.join(15)
             self.assertFalse(main.is_alive())
 
+    def test_an_unenrolled_service_stays_up_and_is_connected_through_the_channel(self) -> None:
+        # Un equipo recién instalado: sin enrolamiento, el servicio no sale --
+        # sirve el canal, dice por qué no trabaja y espera a un `connect`.
+        from agent import __main__ as loop
+
+        class Redeemer:
+            def __init__(self, base_url: str, token: str, **kwargs: Any) -> None:
+                pass
+
+            def enroll(self, **kwargs: Any) -> dict:
+                return {"ok": True, "token": "cya_NUEVO", "name": "Nuevo"}
+
+        portal = Portal()
+        stop = threading.Event()
+        with portal_serving(portal) as port, mock.patch("agent.enroll.AgentClient", Redeemer), mock.patch(
+            "agent.enroll.identity.ensure", return_value=""
+        ), mock.patch("agent.enroll.about.build", return_value={}):
+            main = threading.Thread(target=loop.main, kwargs={"argv": [], "stop_event": stop}, daemon=True)
+            main.start()
+            self.addCleanup(lambda: (stop.set(), main.join(15)))
+            self.assertTrue(wait_for(lambda: self._status().get("enrollment", {}).get("state") == "not_enrolled"))
+            status = self._status()
+            self.assertFalse(status["enrolled"])
+            self.assertEqual(status["connection"]["state"], "not_enrolled")
+            self.assertIn("no está enrolado", status["enrollment"]["message"])
+            self.assertTrue(main.is_alive())
+            self.assertEqual(portal.seen, [])  # sin identidad no se llama a nadie
+
+            with Channel() as channel:
+                answer = channel.call("connect", {"connection": f"cenya+http://127.0.0.1:{port}/K7QF-9M2X-4TQN"})
+            self.assertEqual(answer["name"], "Nuevo")
+            self.assertTrue(wait_for(lambda: "cya_NUEVO" in portal.tokens("/api/agent/v2/checkin/")))
+            self.assertTrue(wait_for(lambda: self._status().get("enrollment", {}).get("state") == "enrolled"))
+
+            stop.set()
+            main.join(15)
+            self.assertFalse(main.is_alive())
+
+    def test_an_enrolment_set_aside_as_untrusted_is_said_and_the_service_waits(self) -> None:
+        from agent import __main__ as loop
+
+        stop = threading.Event()
+        with mock.patch("agent.store.untrusted_enrollment", return_value=True):
+            main = threading.Thread(target=loop.main, kwargs={"argv": [], "stop_event": stop}, daemon=True)
+            main.start()
+            self.addCleanup(lambda: (stop.set(), main.join(15)))
+            self.assertTrue(wait_for(lambda: self._status().get("enrollment", {}).get("state") == "untrusted"))
+            self.assertIn("no es de fiar", self._status()["enrollment"]["message"])
+            stop.set()
+            main.join(15)
+            self.assertFalse(main.is_alive())
+
     def _status(self) -> dict:
         try:
             with Channel() as channel:
                 return channel.call("status")
-        except (localpipe.Unavailable, OSError):
+        except (ChannelError, OSError):
             return {}
 
 

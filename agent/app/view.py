@@ -22,7 +22,7 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from agent.app import channel
+from agent import localclient as channel
 from agent.i18n import _t, _tn
 from agent.status import _ago
 
@@ -165,13 +165,17 @@ def normalize_status(raw: Any) -> dict[str, Any]:
     pause = status.get("pause") if isinstance(status.get("pause"), dict) else {}
     if "paused_until" not in status:
         status["paused_until"] = pause.get("until")
+    status.setdefault("paused_indefinitely", bool(pause.get("indefinite")))
     connection = dict(status["connection"]) if isinstance(status.get("connection"), dict) else {}
     state = str(connection.get("state") or "")
     connection["state"] = _CONNECTION_STATES.get(state, state)
     last = status.get("last_checkin") if isinstance(status.get("last_checkin"), dict) else {}
     at = connection.get("at") or last.get("at")
-    if connection.get("ok") is True and not connection.get("last_ok_at"):
-        connection["last_ok_at"] = at
+    # El último contacto BUENO lo guarda el servicio (spec 4, `last_ok_at`) y
+    # se conserva mientras fallan los siguientes.
+    last_ok = connection.get("last_ok_at") or status.get("last_ok_at") or (at if connection.get("ok") is True else None)
+    if last_ok:
+        connection["last_ok_at"] = last_ok
     if connection.get("ok") is False and not connection.get("last_error"):
         connection["last_error"] = str(connection.get("error") or "")
         connection.setdefault("last_error_at", at)
@@ -217,15 +221,13 @@ def shell_view(
     forbidden_seen: bool,
     dev: bool,
     now: datetime | None = None,
-    enrolled_on_disk: bool | None = None,
 ) -> dict[str, Any]:
     """Qué cara pone la ventana entera: lista, servicio parado, sin enrolar...
 
-    ``mode``: ``ready`` | ``not_enrolled`` | ``down`` | ``down_not_enrolled``
-    | ``not_installed`` | ``unreachable``. ``down_not_enrolled`` es como se ve
-    hoy un equipo sin enrolar: el servicio sale al arrancar si no tiene
-    enrolamiento, así que no hay canal y tampoco fichero de enrolamiento
-    (`enrolled_on_disk` en falso; `None` es que no se sabe).
+    ``mode``: ``ready`` | ``not_enrolled`` | ``down`` | ``not_installed`` |
+    ``unreachable``. Un servicio sin enrolar está en marcha y contesta
+    (``not_enrolled``, con el porqué en ``enrollment``): conectarlo es un
+    ``connect`` por el canal. ``down`` es solo eso, el servicio parado.
     ``tone`` es el del punto junto al nombre del equipo en la barra lateral.
     """
     may_act = status.get("may_act") if isinstance(status, dict) and isinstance(status.get("may_act"), bool) else None
@@ -239,12 +241,13 @@ def shell_view(
         "portal": "",
         "tone": NEUTRAL,
         "start_why": "",
+        "enrollment": "",
     }
     if error_code is not None:
         if service_state == "not_installed":
             view["mode"] = "not_installed"
         elif error_code == channel.SERVICE_DOWN:
-            view["mode"] = "down_not_enrolled" if enrolled_on_disk is False else "down"
+            view["mode"] = "down"
         else:
             view["mode"] = "unreachable"
             view["message"] = error_message(error_code)
@@ -261,9 +264,26 @@ def shell_view(
     view["portal"] = str(status.get("portal") or "")
     if status.get("enrolled") is False:
         view["mode"] = "not_enrolled"
+        view["tone"] = WARNING
+        view["enrollment"] = enrollment_text(status)
     else:
         view["tone"] = connection_view(status, now or datetime.now(timezone.utc))["tone"]
     return view
+
+
+def enrollment_text(status: dict[str, Any]) -> str:
+    """Por qué el servicio no tiene identidad, para una persona (spec 4, `status.enrollment`)."""
+    enrollment = status.get("enrollment") if isinstance(status.get("enrollment"), dict) else {}
+    state = str(enrollment.get("state") or "not_enrolled")
+    if state == "untrusted":
+        return _t(
+            "La conexión anterior de este equipo estaba guardada en una carpeta sin proteger y se ha apartado "
+            "por seguridad. Vuelve a conectarlo con una cadena nueva."
+        )
+    if state == "invalid":
+        # La frase del servicio dice qué falla (una dirección http:// sin permiso...).
+        return str(enrollment.get("message") or "") or _t("La configuración de este agente no es válida.")
+    return _t("El servicio está en marcha y esperando: pega una cadena de conexión para conectarlo a tu portal.")
 
 
 # --- Estado -----------------------------------------------------------------------
@@ -330,7 +350,9 @@ def pause_view(status: dict[str, Any], now: datetime) -> dict[str, Any]:
     until = parse_time(status.get("paused_until"))
     if not is_paused(status, now):
         return {"paused": False, "text": "", "detail": ""}
-    if until is None or until - now > INDEFINITE_AFTER:
+    if status.get("paused_indefinitely"):
+        text = _t("En pausa hasta que se reanude")
+    elif until is None or until - now > INDEFINITE_AFTER:
         text = _t("En pausa hasta que se reanude")
         if until is not None:
             text = _t("En pausa hasta que se reanude (como mucho, hasta el %(date)s)") % {"date": _local(until).strftime("%d/%m")}
@@ -360,11 +382,9 @@ def pause_options(now: datetime) -> list[dict[str, Any]]:
             "label": _t("Hasta mañana a las %(clock)s") % {"clock": tomorrow.strftime("%H:%M")},
             "args": {"until": tomorrow.isoformat()},
         },
-        {
-            "id": "indefinite",
-            "label": _t("Hasta que se reanude (30 días como mucho)"),
-            "args": {"until": (now + MAX_PAUSE - timedelta(minutes=1)).isoformat()},
-        },
+        # Sin plazo de verdad (spec 4, `pause` con `indefinite`): el servicio
+        # lo guarda como tal y el portal lo enseña así.
+        {"id": "indefinite", "label": _t("Hasta que se reanude"), "args": {"indefinite": True}},
     ]
 
 
@@ -430,37 +450,47 @@ def tasks_view(status: dict[str, Any], now: datetime, can_act: bool, why: str = 
     return rows
 
 
-COUNTER_KEYS = ("hosts_alive", "new_hosts", "items", "created", "refreshed")
+COUNTER_KEYS = ("hosts_alive", "new_hosts", "sent", "created", "refreshed")
+
+
+def last_runs(status: dict[str, Any]) -> list[dict[str, Any]]:
+    """Las últimas ejecuciones (spec 4, `status.last_run`: una por tarea), la más reciente primero."""
+    runs = status.get("last_run") if isinstance(status.get("last_run"), dict) else {}
+    rows = [dict(run, task=str(run.get("task") or task)) for task, run in runs.items() if isinstance(run, dict)]
+    return sorted(rows, key=lambda run: parse_time(run.get("finished_at")) or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
 
 
 def counters_view(status: dict[str, Any], now: datetime) -> dict[str, Any]:
-    last = status.get("last_run") if isinstance(status.get("last_run"), dict) else None
+    """Las cifras de la última tarea que terminó, y la cola."""
+    runs = last_runs(status)
+    last = runs[0] if runs else None
     labels = {
         "hosts_alive": _t("Equipos vivos"),
         "new_hosts": _t("Equipos nuevos"),
-        "items": _t("Hallazgos"),
+        "sent": _t("Hallazgos enviados"),
         "created": _t("Nuevos en la bandeja"),
         "refreshed": _t("Ya conocidos"),
         "outbox": _t("Envíos pendientes"),
     }
     items: list[dict[str, Any]] = []
     if last:
-        values = dict(last.get("stats") or {}) if isinstance(last.get("stats"), dict) else {}
-        for key in ("created", "refreshed"):
-            if key in last:
-                values[key] = last[key]
         for key in COUNTER_KEYS:
-            value = _as_int(values.get(key))
+            value = _as_int(last.get(key))
             if value is not None:
                 items.append({"key": key, "label": labels[key], "value": value, "tone": NEUTRAL})
     outbox = _as_int(status.get("outbox"))
     if outbox is not None:
         items.append({"key": "outbox", "label": labels["outbox"], "value": outbox, "tone": WARNING if outbox else NEUTRAL})
     caption = ""
+    note = ""
     if last:
         when = ago(last.get("finished_at"), now)
         caption = " · ".join(part for part in (task_label(str(last.get("task") or "")), when) if part)
-    return {"caption": caption, "items": items, "result": result_view(last.get("status")) if last else None}
+        if last.get("delivered") is False:
+            note = _t("El resultado espera en la cola local: el portal aún no ha dicho qué había de nuevo.")
+        elif (notes := _as_int(last.get("notes"))):
+            note = _tn("%(n)d aviso: los detalles, en Actividad.", "%(n)d avisos: los detalles, en Actividad.", notes) % {"n": notes}
+    return {"caption": caption, "items": items, "note": note, "result": result_view(last.get("status")) if last else None}
 
 
 def status_view(status: dict[str, Any], now: datetime, perms: dict[str, Any]) -> dict[str, Any]:
@@ -624,7 +654,7 @@ def netbox_progress(activity: dict[str, Any] | None, seen: list[str]) -> dict[st
     return {"seen": seen, "rows": rows, "percent": percent}
 
 
-def netbox_summary(data: dict[str, Any], mode: str, portal: str = "") -> dict[str, Any]:
+def netbox_summary(data: dict[str, Any], mode: str) -> dict[str, Any]:
     summary = data.get("summary") if isinstance(data.get("summary"), dict) else {}
     rows = [{"name": str(name).replace("_", " "), "count": count} for name, count in summary.items() if _as_int(count) is not None]
     total = sum(int(row["count"]) for row in rows)
@@ -636,7 +666,9 @@ def netbox_summary(data: dict[str, Any], mode: str, portal: str = "") -> dict[st
         "message": "",
     }
     if mode == "send":
-        view["review_url"] = safe_url(str(data.get("review_url") or "")) or (safe_url(portal.rstrip("/") + "/settings/import/") if portal else "")
+        # Dónde se revisa lo dice el servicio (spec 4, `review_url`), que ya
+        # comprobó que es del mismo portal; aquí solo se mira que se pueda abrir.
+        view["review_url"] = safe_url(str(data.get("review_url") or ""))
         view["message"] = _t("Enviado al portal. La revisión se abre en el navegador: nada se importa hasta que lo confirmes allí.")
     else:
         view["path"] = str(data.get("path") or "")
@@ -813,29 +845,63 @@ def gentleness_view(settings: dict[str, Any], status: dict[str, Any] | None) -> 
     }
 
 
+#: Lo que está haciendo el actualizador (`agent/update.py`), para una persona.
+def _updater_text(updater: dict[str, Any] | None) -> str:
+    state = str((updater or {}).get("state") or "")
+    version = str((updater or {}).get("version") or "")
+    return {
+        "downloading": _t("Descargando la versión %(version)s…"),
+        "ready": _t("La versión %(version)s está verificada: se instala en cuanto termine la tarea en curso."),
+        "installing": _t("Instalando la versión %(version)s…"),
+        "failed": _t("La actualización a %(version)s no se pudo completar; se sigue con la versión instalada."),
+    }.get(state, "") % {"version": version} if state in ("downloading", "ready", "installing", "failed") else ""
+
+
 def updates_view(settings: dict[str, Any], status: dict[str, Any] | None, check: dict[str, Any] | None) -> dict[str, Any]:
-    # `check_update` del servicio: {"current", "offered", "update", "checked_at"}.
-    installed = str((status or {}).get("version") or (check or {}).get("current") or (check or {}).get("installed") or "")
-    latest = str((check or {}).get("offered") or (check or {}).get("latest") or "")
+    """El bloque de actualizaciones: lo instalado, lo ofrecido y, tras «Buscar», lo que contestó el portal ahora.
+
+    `check` es la respuesta de `check_update` (spec 4): un checkin de verdad,
+    con ``checked`` (contestó), ``pending`` (no contestó a tiempo), ``error``
+    y el estado del actualizador.
+    """
+    installed = str((status or {}).get("version") or (check or {}).get("current") or "")
+    latest = str((check or {}).get("offered") or "")
     update = (status or {}).get("update") if isinstance((status or {}).get("update"), dict) else None
     if not latest and update:
         latest = str(update.get("version") or "")
     available = bool(latest and installed and latest != installed)
-    if check is not None and "available" in check:
-        available = bool(check["available"])
-    if available:
-        message = _t("Hay una versión nueva: %(version)s") % {"version": latest}
+    updater = (check or {}).get("updater") if isinstance((check or {}).get("updater"), dict) else None
+    if updater is None and isinstance((status or {}).get("updater"), dict):
+        updater = (status or {})["updater"]
+    auto = bool(settings.get("auto_update", True))
+    tone = NEUTRAL
+    if check is not None and check.get("pending"):
+        message, tone = _t("El portal tarda en contestar; el resultado aparecerá aquí en cuanto llegue."), INFO
+    elif check is not None and not check.get("checked") and check.get("error"):
+        message, tone = _t("No se pudo preguntar al portal: %(error)s") % {"error": check.get("error")}, WARNING
+    elif available:
+        message, tone = _t("Hay una versión nueva: %(version)s") % {"version": latest}, INFO
+        if auto:
+            message += " " + _t("Se instalará sola, sin cortar ninguna tarea.")
+        else:
+            message += " " + _t("Las actualizaciones automáticas están desactivadas en este equipo.")
     elif check is not None:
-        message = _t("Está al día.")
+        message, tone = _t("Está al día."), SUCCESS
     else:
         message = ""
+    progress = _updater_text(updater)
+    if progress:
+        tone = DANGER if (updater or {}).get("state") == "failed" else INFO
+    checked = ago((check or {}).get("checked_at"), datetime.now(timezone.utc)) if check and check.get("checked") else ""
     return {
-        "auto": bool(settings.get("auto_update", True)),
+        "auto": auto,
         "installed": installed or "—",
         "latest": latest or "—",
         "available": available,
         "message": message,
-        "tone": INFO if available else SUCCESS if message else NEUTRAL,
+        "progress": progress,
+        "checked": _t("Comprobado %(ago)s") % {"ago": checked} if checked else "",
+        "tone": tone,
     }
 
 

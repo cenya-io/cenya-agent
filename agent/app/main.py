@@ -34,7 +34,8 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from agent.app import bridge, channel, winsys
+from agent import localclient as channel
+from agent.app import bridge, winsys
 from agent.i18n import _t
 
 UI_DIR = Path(__file__).resolve().parent / "ui"

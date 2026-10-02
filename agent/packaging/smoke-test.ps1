@@ -21,12 +21,18 @@
          es >= 8.4, `cenya-agent selftest` lo da por bueno y, contra un servidor
          SSH de mentira en 127.0.0.1, entra con contraseñas con comillas, `%`,
          acentos y una barra final a través de `cenya-agent-askpass.exe`.
+      5c. La ventana (cenya-agent-app.exe): está, selftest ve su página y los
+         ficheros de pywebview, y abierta contra un canal que no existe carga
+         WebView2 de verdad (un proceso msedgewebview2 hijo suyo) sin morirse.
       6. Volver a ejecutar el instalador (actualización) conserva el enrolamiento,
          el servicio sigue en marcha y el PATH no se duplica. Repetirlo con una
          cadena ya gastada no lo toca: un equipo enrolado ignora /CONNECTION.
       7. La desinstalación se despide del servidor, quita el servicio, borra el
          token y el estado y saca la carpeta del PATH.
       8. Una cadena mala termina con el código 21 y sin dejar el servicio en marcha.
+      8b. Sin ninguna conexión: el servicio arranca y se queda en marcha sin
+         enrolar, contesta por el canal local (`cenya-agent status`) y se conecta
+         por él (`cenya-agent connect`), sin pasar por `enroll`.
 
     Con los tres instaladores de prueba (-UpdateBase, -UpdateNext,
     -UpdateBroken: versiones N, N+1 y N+2 compiladas con la clave pública de
@@ -136,6 +142,22 @@ function InstalledVersion {
     return (Get-ItemProperty -Path $uninstallKey -ErrorAction SilentlyContinue).DisplayVersion
 }
 
+# Lo que deja una actualización que no salió: el registro del instalador que
+# lanzó el agente (updates\setup-<versión>.log), el del agente y el del
+# vigilante. Se enseña EN EL MOMENTO: la desinstalación del final borra la
+# carpeta de estado, y sin esto un fallo de /UPDATE no dice dónde se paró.
+function DumpUpdateEvidence([string] $Why) {
+    Write-Host "----- evidencia: $Why"
+    $logs = @(Get-ChildItem (Join-Path $state "updates") -Filter "setup-*.log" -ErrorAction SilentlyContinue) +
+        @(Get-Item (Join-Path $state "previous\watchdog.log"), (Join-Path $state "logs\agent.log") -ErrorAction SilentlyContinue)
+    foreach ($log in $logs) {
+        Write-Host "----- $($log.FullName) (últimas líneas)"
+        Get-Content $log.FullName -Tail 60
+    }
+    Write-Host "----- carpeta de estado"
+    Get-ChildItem $state -Recurse -Depth 2 -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
+}
+
 # «Cenya-Agent-Setup-0.11.0.1.exe» -> «0.11.0.1»
 function VersionOf($Exe) {
     if ((Split-Path -Leaf $Exe) -notmatch '^Cenya-Agent-Setup-(\d+(?:\.\d+){1,3})\.exe$') { throw "No sé qué versión es $Exe" }
@@ -193,6 +215,23 @@ try {
     try { & python (Join-Path $here "ci_ssh_check.py") --ssh $sshExe --askpass $askpassExe; $loginExit = $LASTEXITCODE } finally { Pop-Location }
     Check "entra con contraseña a través del ssh.exe y el askpass instalados" ($loginExit -eq 0) "(código $loginExit)"
 
+    Write-Host "5c. La ventana de Cenya Agent"
+    $appExe = Join-Path $appDir "cenya-agent-app.exe"
+    Check "el instalador lleva cenya-agent-app.exe" (Test-Path $appExe)
+    Check "selftest ve la página y los ficheros de pywebview" ($selftest.app.executable -eq $true -and $selftest.app.page -eq $true -and $selftest.app.webview_files -eq $true) ($selftest.app | ConvertTo-Json -Compress)
+    Check "el runner tiene el runtime de WebView2" ([string]$selftest.app.webview2_runtime -ne "") ($selftest.app | ConvertTo-Json -Compress)
+    # Contra un canal que no existe: enseña «el servicio no está en marcha» y
+    # no toca el de verdad. Sin WebView2 no habría proceso msedgewebview2 hijo
+    # (la ventana enseñaría un aviso nativo, que también la mantendría viva).
+    $env:CENYA_PIPE_NAME = "CenyaAgentSmoke-" + [guid]::NewGuid().ToString("N")
+    try { $window = Start-Process -FilePath $appExe -PassThru } finally { Remove-Item Env:CENYA_PIPE_NAME -ErrorAction SilentlyContinue }
+    $engine = WaitFor { @(Get-CimInstance Win32_Process -Filter "Name='msedgewebview2.exe'" | Where-Object { $_.ParentProcessId -eq $window.Id }).Count -gt 0 } 60
+    Check "la ventana arranca y carga WebView2" ($engine -eq $true)
+    Check "y sigue abierta" (-not $window.HasExited) "(salió con $($window.ExitCode))"
+    $listening = @(Get-NetTCPConnection -OwningProcess $window.Id -ErrorAction SilentlyContinue) + @(Get-NetUDPEndpoint -OwningProcess $window.Id -ErrorAction SilentlyContinue)
+    Check "la ventana no abre ningún socket" ($listening.Count -eq 0) ($listening | Out-String)
+    if (-not $window.HasExited) { Stop-Process -Id $window.Id -Force }
+
     Write-Host "6. Actualización: no pide nada y conserva el enrolamiento"
     $exit = Install @() "setup-2.log"
     Check "la actualización termina con 0" ($exit -eq 0) "(código $exit)"
@@ -223,6 +262,33 @@ try {
     Check "termina con el código 21" ($exit -eq 21) "(código $exit)"
     $service = Get-Service -Name "CenyaAgent" -ErrorAction SilentlyContinue
     Check "el servicio no está en marcha sin enrolar" (-not $service -or $service.Status -ne "Running")
+    Uninstall
+
+    Write-Host "8b. Sin conexión: el servicio espera y se conecta por el canal"
+    $exit = Install @() "setup-4.log"
+    Check "instalar sin conexión termina con 0" ($exit -eq 0) "(código $exit)"
+    $service = Get-Service -Name "CenyaAgent" -ErrorAction SilentlyContinue
+    Check "el servicio está en marcha sin enrolar" ($service -and $service.Status -eq "Running") "($($service.Status))"
+    Check "sin enrolamiento" (-not (Test-Path $tokenFile))
+    $cli = Join-Path $appDir "cenya-agent.exe"
+    # En castellano: lo que se comprueba es la frase de quién lo hizo.
+    $env:CENYA_LANGUAGE = "es"
+    try {
+        $said = WaitFor { $text = (& $cli status 2>&1 | Out-String); if ($LASTEXITCODE -eq 0) { $text } } 60
+        Check "cenya-agent status contesta por el canal" ($null -ne $said) ((& $cli status 2>&1 | Out-String))
+        Check "y dice que no está conectado" ($said -match "No está conectado") $said
+        Start-Sleep -Seconds 5
+        $service = Get-Service -Name "CenyaAgent" -ErrorAction SilentlyContinue
+        Check "y no se para ni se reinicia" ($service -and $service.Status -eq "Running")
+        $mark = Mark
+        $said = (& $cli connect $connection 2>&1 | Out-String)
+        Check "cenya-agent connect por el canal termina con 0" ($LASTEXITCODE -eq 0) $said
+        Check "lo hizo el servicio, no la consola" ($said -match "El agente se reinicia" -and $said -notmatch "desde esta consola") $said
+    }
+    finally { Remove-Item Env:CENYA_LANGUAGE -ErrorAction SilentlyContinue }
+    Check "queda enrolado" (Test-Path $tokenFile)
+    $beat = WaitFor { Checkins $mark | Where-Object { $_.ok } | Select-Object -First 1 } 90
+    Check "y el mismo servicio hace checkin con el token nuevo" ($null -ne $beat)
     Uninstall
 
     if ($UpdateBase -and $UpdateNext -and $UpdateBroken -and $TestKey) {
@@ -275,6 +341,7 @@ try {
         StubState @{ offer = @{ version = $next }; tamper = $false; refuse = @() }
         $updated = WaitFor { Checkins $mark $next | Where-Object { $_.ok } | Select-Object -First 1 } 420
         Check "vuelve como $next" ($null -ne $updated)
+        if (-not $updated) { DumpUpdateEvidence "la actualización a $next no volvió" }
         # El primer checkin de la versión nueva aún dice «installing»: la marca
         # de sana se deja al recibir su respuesta.
         Check "informa update_state installing de $next" (@(Checkins $mark | Where-Object { $_.update_state.state -eq "installing" -and $_.update_state.version -eq $next }).Count -ge 1)
@@ -302,6 +369,7 @@ try {
         Check "la $broken se instala y no consigue checkin" ($tried -and -not $tried.ok)
         $back = WaitFor { Checkins $mark $next | Where-Object { $_.ok -and $_.update_state.error -eq "update_failed" -and $_.update_state.version -eq $broken } | Select-Object -First 1 } ($WatchdogSeconds + 300)
         Check "el vigilante vuelve a $next, que informa update_failed" ($null -ne $back)
+        if (-not $back) { DumpUpdateEvidence "la vuelta atrás desde $broken no llegó" }
         Check "queda la marca de la versión que falló" (Test-Path (Join-Path $state "updates\failed-$broken"))
         Check "Programas y características vuelve a decir $next" ((InstalledVersion) -eq $next) "($(InstalledVersion))"
         $gone = WaitFor { if (-not (TaskExists)) { $true } } 60

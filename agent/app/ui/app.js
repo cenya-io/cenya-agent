@@ -395,7 +395,7 @@ function renderNav() {
 function renderBanner() {
   const host = $("banner");
   const shell = S.shell;
-  if (!shell || !S.perms.readonly || ["down", "down_not_enrolled", "not_installed"].includes(shell.mode)) {
+  if (!shell || !S.perms.readonly || ["down", "not_installed"].includes(shell.mode)) {
     host.replaceChildren();
     return;
   }
@@ -443,7 +443,7 @@ async function refreshShell(first) {
   S.dev = v.dev;
   renderBanner();
   renderFoot();
-  const unenrolled = (mode) => mode === "not_enrolled" || mode === "down_not_enrolled";
+  const unenrolled = (mode) => mode === "not_enrolled";
   if (first) {
     if (unenrolled(v.mode)) S.section = "connection";
     return;
@@ -476,10 +476,6 @@ function mountSection() {
   head.replaceChildren();
   $("scroller").scrollTop = 0;
   const mode = S.shell ? S.shell.mode : "ready";
-  if (mode === "down_not_enrolled" && section.id === "connection") {
-    renderOfflineEnroll(content);
-    return;
-  }
   if (section.id !== "about" && mode !== "ready" && mode !== "not_enrolled") {
     renderUnavailable(content, mode);
     return;
@@ -498,21 +494,6 @@ function renderUnavailable(content, mode) {
   const shell = S.shell || {};
   if (mode === "unreachable") {
     content.append(panel({ body: errorState(shell.message, () => refreshShell()) }));
-    return;
-  }
-  if (mode === "down_not_enrolled") {
-    content.append(
-      panel({
-        body: emptyState({
-          icon: "plug",
-          tone: "accent",
-          title: T.enroll_title,
-          text: T.enroll_offline_note,
-          tall: true,
-          actions: [btn(T.enroll_button, { variant: "primary", icon: "arrow-right", onClick: () => go("connection") })],
-        }),
-      })
-    );
     return;
   }
   if (mode === "not_installed") {
@@ -542,47 +523,6 @@ function renderUnavailable(content, mode) {
   );
 }
 
-/* The machine is not enrolled and, because of that, the service is not running:
-   the channel cannot enrol it. Python runs the agent's own `enroll` command and
-   then starts the service (bridge.enroll_offline). */
-function renderOfflineEnroll(content) {
-  const text = input({ placeholder: T.enroll_placeholder, mono: true, fkey: "enroll-offline" });
-  const result = el("div", {});
-  const go_ = btn(T.enroll_offline_button, {
-    variant: "primary",
-    icon: "plug",
-    why: S.shell && S.shell.start_why ? S.shell.start_why : "",
-    onClick: async () => {
-      result.replaceChildren();
-      const r = await call("enroll_offline", text.value);
-      if (!r.ok) {
-        result.replaceChildren(resultBox("danger", r.message || T.error_title));
-        return;
-      }
-      text.value = "";
-      result.replaceChildren(resultBox("success", r.message || T.saved));
-      setTimeout(() => refreshShell(), 2000);
-    },
-  });
-  text.addEventListener("keydown", (e) => e.key === "Enter" && go_.click());
-  content.append(
-    el(
-      "div",
-      { class: "panel hero" },
-      el(
-        "div",
-        { class: "panel-body" },
-        el("div", { class: "tool-icon" }, ico("plug")),
-        el("div", {}, el("div", { class: "hero-title", text: T.enroll_title }), el("div", { class: "muted sm", text: T.enroll_body })),
-        el("div", { class: "inline-form", style: "max-width:none" }, text, go_),
-        el("div", { class: "field-hint row" }, ico("info", "icon-sm"), T.enroll_offline_note),
-        result
-      )
-    )
-  );
-  setTimeout(() => text.focus(), 0);
-}
-
 /* --- Estado --------------------------------------------------------------- */
 
 function renderStatus(content, head, id) {
@@ -593,7 +533,7 @@ function renderStatus(content, head, id) {
           icon: "plug",
           tone: "accent",
           title: T.enroll_title,
-          text: T.enroll_body,
+          text: (S.shell && S.shell.enrollment) || T.enroll_body,
           tall: true,
           actions: [btn(T.enroll_button, { variant: "primary", icon: "arrow-right", onClick: () => go("connection") })],
         }),
@@ -726,6 +666,7 @@ function renderCounters(cv) {
   return [
     el("div", { class: "panel-head" }, el("div", { class: "panel-title" }, el("span", { text: T.status_counters }), cv.caption ? el("span", { class: "panel-meta", text: cv.caption }) : null), headRight),
     body,
+    cv.note ? el("div", { class: "panel-foot", text: cv.note }) : null,
   ];
 }
 
@@ -1185,7 +1126,7 @@ function drawConnection(host, v) {
         "div",
         { class: "panel-body" },
         el("div", { class: "tool-icon" }, ico("plug")),
-        el("div", {}, el("div", { class: "hero-title", text: T.enroll_title }), el("div", { class: "muted sm", text: T.enroll_body })),
+        el("div", {}, el("div", { class: "hero-title", text: T.enroll_title }), el("div", { class: "muted sm", text: (S.shell && S.shell.enrollment) || T.enroll_body })),
         el("div", { class: "inline-form", style: "max-width:none" }, text, go),
         error
       )
@@ -1384,8 +1325,11 @@ function drawSettings(host, v) {
       el("span", { class: "sm muted" }, T.upd_installed + " ", el("span", { class: "mono", style: "color:var(--fg)", text: u.installed })),
       el("span", { class: "subtle", text: "·" }),
       el("span", { class: "sm muted" }, T.upd_latest + " ", el("span", { class: "mono", style: "color:var(--fg)", text: u.latest })),
-      u.message ? badge(u.message, u.tone, true) : null
+      u.checked ? el("span", { class: "subtle", text: "·" }) : null,
+      u.checked ? el("span", { class: "sm muted", text: u.checked }) : null
     ),
+    u.message ? el("div", { class: "field-hint upd-message tone-" + u.tone, role: "status", text: u.message }) : null,
+    u.progress ? el("div", { class: "field-hint upd-message tone-" + u.tone, role: "status", text: u.progress }) : null,
     btn(T.upd_check, { size: "sm", icon: "rotate-cw", act: true, onClick: async () => redraw(await call("check_update")) })
   );
 

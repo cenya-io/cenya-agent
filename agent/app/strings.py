@@ -60,10 +60,6 @@ def ui_strings() -> dict[str, str]:
         "enroll_placeholder": _t("cenya://portal.midominio.com/XXXX-XXXX-XXXX"),
         "enroll_button": _t("Conectar"),
         "enroll_missing": _t("Pega antes la cadena de conexión."),
-        "enroll_offline_note": _t(
-            "El servicio del agente no está en marcha porque este equipo todavía no está conectado. Al conectarlo, se arranca."
-        ),
-        "enroll_offline_button": _t("Conectar y arrancar el servicio"),
         # Estado.
         "status_connection": _t("Conexión"),
         "status_current": _t("Tarea en curso"),

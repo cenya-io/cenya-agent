@@ -69,6 +69,7 @@ goto :eof
 if not exist "%PREV%\app\cenya-agent.exe" goto no_backup
 >>"%LOG%" echo %DATE% %TIME% %TO% no ha conectado: se restaura %FROM%.
 taskkill /f /im cenya-agent-tray.exe >nul 2>&1
+taskkill /f /im cenya-agent-app.exe >nul 2>&1
 net stop CenyaAgent >nul 2>&1
 taskkill /f /im cenya-agent-service.exe >nul 2>&1
 taskkill /f /im cenya-agent.exe >nul 2>&1

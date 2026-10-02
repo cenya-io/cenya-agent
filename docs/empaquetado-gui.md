@@ -1,5 +1,13 @@
 # Empaquetado de la aplicación de escritorio (Cenya Agent)
 
+> **Hecho (02-10-2026, integración en `agent-v2-next`).** Lo que sigue era la
+> lista de lo que faltaba; está en `agent/packaging/` (spec, `entry_app.py`,
+> `.iss`, `build.ps1`, `smoke-test.ps1` sección 5c) y lo guardan
+> `agent/tests/test_installer_packaging.py`. Las traducciones de la ventana ya
+> están en los catálogos del agente. Dos cambios sobre esta nota: el cliente del
+> canal es uno solo, `agent/localclient.py` (`agent/app/channel.py` ya no
+> existe), y un equipo sin enrolar ya no tiene el servicio parado.
+
 Lo que el spec de PyInstaller (`agent/packaging/cenya-agent.spec`) y el
 instalador (`agent/packaging/cenya-agent.iss`) tienen que añadir para la
 ventana `agent/app`. No se ha tocado `agent/packaging/` desde esta rama: lo

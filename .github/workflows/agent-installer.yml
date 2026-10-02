@@ -56,7 +56,8 @@ jobs:
         shell: pwsh
         run: |
           python -m pip install --upgrade pip
-          python -m pip install "./agent[completo]" pyinstaller
+          # `gui`: pywebview y lo suyo, para congelar la ventana (cenya-agent-app.exe).
+          python -m pip install "./agent[completo,gui]" pyinstaller
           if (-not (Get-Command iscc -ErrorAction SilentlyContinue) -and -not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
             choco install innosetup --no-progress -y
           }

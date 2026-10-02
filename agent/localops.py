@@ -64,9 +64,22 @@ from agent.scheduler import TASKS
 CONNECTED = "connected"
 DISCONNECTED = "disconnected"
 
-#: Cuánto puede durar una pausa puesta en esta máquina. Más es olvidarse de
-#: que el agente está parado.
+#: Cuánto puede durar una pausa con hora puesta en esta máquina. Más es
+#: olvidarse de que el agente está parado; quien lo quiere parado sin plazo lo
+#: dice (`indefinite`), y entonces la ventana y el portal lo enseñan así.
 MAX_PAUSE = timedelta(days=30)
+#: Lo que espera `check_update` a su checkin antes de contestar con lo que haya.
+CHECK_UPDATE_WAIT = 30.0
+#: Dónde revisa una persona una lectura de NetBox subida (spec 3.4), si el
+#: servidor no lo dice en `review_url`. SUPUESTO: lo tiene que confirmar el
+#: servidor, o mandar siempre `review_url`; está en un solo sitio a propósito.
+NETBOX_REVIEW_PATH = "/settings/import/pending/{import_id}/"
+
+# Por qué un servicio no tiene identidad (`status.enrollment.state`).
+ENROLLED = "enrolled"
+NOT_ENROLLED_STATE = "not_enrolled"
+UNTRUSTED_STATE = "untrusted"
+INVALID_STATE = "invalid"
 DEFAULT_LOG_LINES = 200
 MAX_LOG_LINES = 2000
 #: Lo más que se lee del final del registro de una vez.
@@ -157,7 +170,10 @@ def settings_view(current: local_settings.Settings, locked: list[str]) -> dict[s
         "gentleness_cap": current.gentleness_cap,
         "auto_update": current.auto_update,
         "notifications": current.notifications,
-        "paused_until": current.paused_until.isoformat() if current.paused_until else None,
+        "paused_until": None if local_settings.is_indefinite(current.paused_until) else (
+            current.paused_until.isoformat() if current.paused_until else None
+        ),
+        "paused_indefinitely": local_settings.is_indefinite(current.paused_until),
         "locked": locked,
     }
 
@@ -253,8 +269,19 @@ def validate_settings(args: Mapping[str, Any], current: local_settings.Settings)
 
 
 def parse_until(args: Mapping[str, Any], now: datetime) -> datetime:
-    """`args.until` (ISO) or `args.seconds`, checked. Raises `OpError`."""
-    until_raw, seconds_raw = args.get("until"), args.get("seconds")
+    """`args.until` (ISO), `args.seconds` or `args.indefinite`, checked. Raises `OpError`.
+
+    ``{"indefinite": true}`` (sin `until` ni `seconds`) es «hasta que la
+    reanude»: devuelve `settings.PAUSE_INDEFINITE`. Es una decisión explícita,
+    así que no tiene el tope de 30 días de una pausa con hora.
+    """
+    until_raw, seconds_raw, indefinite = args.get("until"), args.get("seconds"), args.get("indefinite")
+    if indefinite is not None and not isinstance(indefinite, bool):
+        raise OpError(INVALID, _t("«indefinite» tiene que ser verdadero o falso."))
+    if indefinite:
+        if until_raw is not None or seconds_raw is not None:
+            raise OpError(INVALID, _t("Una pausa sin plazo no lleva «until» ni «seconds»."))
+        return local_settings.PAUSE_INDEFINITE
     if until_raw is not None:
         if not isinstance(until_raw, str):
             raise OpError(INVALID, _t("«until» tiene que ser una fecha ISO 8601."))
@@ -273,7 +300,11 @@ def parse_until(args: Mapping[str, Any], now: datetime) -> datetime:
     if until <= now:
         raise OpError(INVALID, _t("Esa hora ya ha pasado."))
     if until - now > MAX_PAUSE:
-        raise OpError(INVALID, _t("Una pausa no puede durar más de %(days)d días.") % {"days": MAX_PAUSE.days})
+        raise OpError(
+            INVALID,
+            _t("Una pausa con hora no puede durar más de %(days)d días; para pararlo sin plazo, pausa hasta que lo reanudes.")
+            % {"days": MAX_PAUSE.days},
+        )
     return until
 
 
@@ -526,6 +557,10 @@ class LocalService:
         #: Lo largo que corre desde el canal (exportación, sondeos), para `status`.
         self._jobs_lock = threading.Lock()
         self._jobs: dict[str, Any] = {}
+        #: Lo que espera `check_update` (las pruebas lo acortan).
+        self.check_update_wait = CHECK_UPDATE_WAIT
+        #: Sin identidad, por qué: lo dice `status` (y la ventana lo enseña).
+        self._enrollment: dict[str, str] = {"state": NOT_ENROLLED_STATE, "message": ""}
 
     # --- La sesión ------------------------------------------------------------------
 
@@ -539,6 +574,12 @@ class LocalService:
             self._session = threading.Event()
             self._change = None
             self._identity_changed.clear()
+            self._enrollment = {"state": ENROLLED, "message": ""}
+
+    def set_unenrolled(self, state: str, message: str) -> None:
+        """Sin identidad usable: por qué (`not_enrolled`, `untrusted`, `invalid`) y la frase que lo dice."""
+        with self._lock:
+            self._enrollment = {"state": state, "message": logs.scrub(message)}
 
     def detach(self) -> None:
         with self._lock:
@@ -634,16 +675,22 @@ class LocalService:
 
     def op_status(self, args: dict[str, Any], caller: Caller) -> dict[str, Any]:
         runtime, _client, config, mode = self._current()
-        enrollment = store.load(self.env())
+        env = self.env()
+        enrollment = store.load(env)
+        with self._lock:
+            why = dict(self._enrollment)
         data: dict[str, Any] = {
             "version": __version__,
             "pid": os.getpid(),
             "enrolled": runtime is not None,
+            # Sin identidad, por qué y qué hacer (spec 4): la ventana lo enseña tal cual.
+            "enrollment": why if runtime is None else {"state": ENROLLED, "message": ""},
             "protocol": mode,
             "portal": status._safe_url(config.url) if config is not None else "",
-            "name": enrollment.name if enrollment is not None else "",
+            "name": enrollment.name if enrollment is not None and runtime is not None else "",
             "may_act": caller.admin,
             "local": self.jobs(),
+            "log_folder": str(logs.path(env).parent),
         }
         if runtime is None:
             data["connection"] = {"state": "not_enrolled"}
@@ -656,7 +703,7 @@ class LocalService:
             state = "unknown"
         else:
             state = "ok" if last.get("ok") else "error"
-        data["connection"] = {"state": state, **last}
+        data["connection"] = {"state": state, **last, "last_ok_at": snapshot.get("last_ok_at")}
         data.update(snapshot)
         return data
 
@@ -735,8 +782,16 @@ class LocalService:
         until = parse_until(args, self._clock())
         self._save_settings(lambda current: replace(current, paused_until=until))
         self._wake()
-        logs.info(_t("[agente] En pausa desde esta máquina hasta %(until)s.") % {"until": until.isoformat()})
-        return {"paused_until": until.isoformat(), "server_paused_until": self._server_pause()}
+        indefinite = local_settings.is_indefinite(until)
+        if indefinite:
+            logs.info(_t("[agente] En pausa desde esta máquina hasta que se reanude."))
+        else:
+            logs.info(_t("[agente] En pausa desde esta máquina hasta %(until)s.") % {"until": until.isoformat()})
+        return {
+            "paused_until": None if indefinite else until.isoformat(),
+            "indefinite": indefinite,
+            "server_paused_until": self._server_pause(),
+        }
 
     def op_resume(self, args: dict[str, Any], caller: Caller) -> dict[str, Any]:
         self._save_settings(lambda current: replace(current, paused_until=None))
@@ -744,7 +799,7 @@ class LocalService:
         logs.info(_t("[agente] Pausa local levantada desde esta máquina."))
         # La pausa puesta desde la web no se levanta aquí: se dice, para que
         # nadie piense que el agente debería estar trabajando ya.
-        return {"paused_until": None, "server_paused_until": self._server_pause()}
+        return {"paused_until": None, "indefinite": False, "server_paused_until": self._server_pause()}
 
     def op_settings_set(self, args: dict[str, Any], caller: Caller) -> dict[str, Any]:
         env = self.env()
@@ -964,7 +1019,13 @@ class LocalService:
                     self._job("netbox_export", state="failed", finished_at=self._clock().isoformat())
                     raise OpError(FAILED, logs.scrub(str(exc))) from None
                 self._job("netbox_export", state="done", done=total, finished_at=self._clock().isoformat())
-                return {"import": (answer or {}).get("import"), "summary": summary}
+                answer = answer if isinstance(answer, dict) else {}
+                _r, _c, config, _m = self._current()
+                return {
+                    "import": answer.get("import"),
+                    "summary": summary,
+                    "review_url": review_url(config.url if config is not None else "", answer),
+                }
             assert output is not None
             try:
                 _write_atomic(output, json.dumps(bundle, ensure_ascii=False).encode("utf-8"))
@@ -1040,16 +1101,77 @@ class LocalService:
         return {"path": str(output)}
 
     def op_check_update(self, args: dict[str, Any], caller: Caller) -> dict[str, Any]:
+        """Pregunta de verdad: un checkin ahora y lo que trajo, con la espera acotada.
+
+        El checkin es el mismo que el del hilo de control (no se cruzan: ver
+        `Control.checkin_once`), y es él quien entrega a `Updater.offer` lo que
+        ofrezca el servidor. Si no contesta en `CHECK_UPDATE_WAIT` segundos, se
+        contesta con lo que se sabía y `pending`: el checkin sigue, y lo que
+        traiga se verá en `status`.
+        """
         runtime = self._need_runtime()
+        checkin = self._checkin_now()
+        _r, _c, _cfg, mode = self._current()
+        outcome: dict[str, Any] = {}
+        asked = checkin is not None and mode != "v1"
+        if asked:
+            done = threading.Event()
+
+            def ask() -> None:
+                try:
+                    answered, status_code, detail = checkin()
+                    outcome.update(answered=answered, status=status_code, error=detail)
+                except Exception as exc:  # noqa: BLE001 - checkin_once no lanza; por si acaso
+                    outcome.update(answered=False, status=None, error=type(exc).__name__)
+                finally:
+                    done.set()
+
+            threading.Thread(target=ask, name="cenya-check-update", daemon=True).start()
+            done.wait(self.check_update_wait)
         snapshot = runtime.snapshot()
         update = snapshot.get("update") or None
         offered = str(update.get("version") or "") if isinstance(update, dict) else ""
+        last = snapshot.get("last_checkin") or {}
+        answered = bool(outcome.get("answered"))
         return {
             "current": __version__,
             "offered": offered or None,
             "update": update,
-            "checked_at": (snapshot.get("last_checkin") or {}).get("at"),
+            # Si este checkin contestó; `pending` si aún no ha vuelto.
+            "checked": answered,
+            "pending": asked and not outcome,
+            "error": "" if answered or not outcome else logs.scrub(str(outcome.get("error") or "")),
+            "checked_at": last.get("at"),
+            "last_ok_at": snapshot.get("last_ok_at"),
+            "updater": snapshot.get("updater"),
+            "auto_update": local_settings.load(self.env()).auto_update,
         }
+
+
+def review_url(portal: str, answer: Mapping[str, Any]) -> str:
+    """Where a person reviews an uploaded NetBox reading (spec 3.4). Pure.
+
+    El servidor puede decirlo (`review_url`, absoluta o una ruta); si lo dice,
+    manda, siempre que sea del mismo portal: la ventana abre esto en el
+    navegador, y una dirección de otro sitio no se abre. Si no lo dice, se
+    construye con `NETBOX_REVIEW_PATH`, que es un supuesto.
+    """
+    base = urllib.parse.urlsplit(portal or "")
+    if base.scheme not in ("http", "https") or not base.netloc:
+        return ""
+    root = f"{base.scheme}://{base.netloc}{base.path.rstrip('/')}"
+    given = answer.get("review_url")
+    if isinstance(given, str) and given.strip():
+        given = given.strip()
+        if given.startswith("/") and not given.startswith("//"):
+            return f"{base.scheme}://{base.netloc}{given}"
+        parts = urllib.parse.urlsplit(given)
+        if parts.scheme in ("http", "https") and parts.netloc.lower() == base.netloc.lower():
+            return given
+    import_id = answer.get("import")
+    if not isinstance(import_id, str) or not re.fullmatch(r"[0-9A-Za-z-]{1,64}", import_id):
+        return ""
+    return root + NETBOX_REVIEW_PATH.format(import_id=import_id)
 
 
 def _output_path(raw: Any, default_name: str) -> Path:

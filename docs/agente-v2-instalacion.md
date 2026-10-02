@@ -64,6 +64,15 @@ instalador la busca en su propio nombre con
 repetida), la decodifica y enrola con ella. Si no la encuentra o no vale, no
 pregunta nada: instala y abre la aplicación en «Conectar».
 
+El servicio se arranca siempre, también sin enrolar: sin identidad sirve el
+canal local y espera (núcleo, 4.2), y la aplicación conecta el equipo por él.
+En silencio, una cadena que no se pudo canjear sale con 21 antes de instalar
+el servicio. La aplicación (`cenya-agent-app.exe`, acceso directo «Cenya
+Agent» en el menú Inicio con el AppUserModelID `Cenya.Agent.App`) necesita el
+runtime WebView2 de Microsoft: si falta, la última página y el registro lo
+avisan y la instalación sigue (el servicio no lo necesita). Desinstalar y
+`/UPDATE` cierran la ventana antes de tocar ficheros, igual que el icono.
+
 `/CONNECTION=` manda sobre el nombre. Un equipo ya enrolado ignora las dos.
 Además: `/CA=<fichero>` (certificado propio del portal), y la página del
 asistente gana ese mismo campo.

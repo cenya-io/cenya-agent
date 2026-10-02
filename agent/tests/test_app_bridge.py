@@ -16,10 +16,13 @@ from datetime import datetime, timezone
 from unittest import mock
 
 from agent import i18n
-from agent.app import bridge, channel, fake_server, winsys
+from agent import localclient as channel
+from agent.app import bridge, fake_server, winsys
 
 
 class MemoryConnection:
+    """A transport connection in memory: each line goes through the real dispatcher with the fake handlers."""
+
     def __init__(self, agent: fake_server.FakeAgent, admin: bool, wire: list) -> None:
         self.agent, self.admin, self.wire = agent, admin, wire
         self.pending: list[bytes] = []
@@ -27,9 +30,11 @@ class MemoryConnection:
     def send(self, data: bytes, timeout: float) -> None:
         self.wire.append(data)
         reply = self.agent.handle(json.loads(data), admin=self.admin)
-        self.pending.append(json.dumps(reply).encode())
+        self.pending.append(json.dumps(reply).encode() + b"\n")
 
-    def read_line(self, timeout: float) -> bytes:
+    def recv(self, timeout: float) -> bytes:
+        if not self.pending:
+            raise TimeoutError
         return self.pending.pop(0)
 
     def close(self) -> None:
@@ -250,7 +255,7 @@ class NetboxSecretTests(unittest.TestCase):
         self.assertTrue(api.netbox_start("https://netbox.local", self.TOKEN, False, "send")["ok"])
         result = self.wait(api)
         self.assertEqual(result["state"], "done")
-        self.assertTrue(opened and opened[0].startswith("https://demo.cenya.cloud/settings/import/netbox/"))
+        self.assertTrue(opened and opened[0].startswith("https://demo.cenya.cloud/settings/import/pending/"))
         # El token viajó una vez por el canal y no está en ningún otro sitio.
         self.assertEqual(sum(self.TOKEN.encode() in line for line in wire), 1)
         self.assertNotIn(self.TOKEN, json.dumps(result))
@@ -283,65 +288,30 @@ class NetboxSecretTests(unittest.TestCase):
             self.assertTrue(api.netbox_test("https://netbox.local", self.TOKEN, True)["ok"])
 
 
-class OfflineEnrolmentTests(unittest.TestCase):
-    """Un equipo sin enrolar: hoy el servicio sale al arrancar, así que no hay canal."""
+class NotEnrolledTests(unittest.TestCase):
+    """Un equipo sin enrolar: el servicio está en marcha y se conecta por el canal (spec 4, 2.7 de la integración)."""
 
-    def make(self, *, elevated: bool = True, dev: bool = False, enrolled: tuple[bool, str] = (True, "Agente «SRV» enrolado.")):
-        calls: list[str] = []
-        service = FakeService()
+    def test_the_window_says_why_and_connects_through_the_channel(self) -> None:
+        api, agent, wire, service = make("not_enrolled")
+        shell = api.shell()["view"]
+        self.assertEqual(shell["mode"], "not_enrolled")
+        self.assertIn("en marcha y esperando", shell["enrollment"])
+        result = api.connect("  cenya://acme.cenya.cloud/ABCD-EFGH-JKLM ")
+        self.assertTrue(result["ok"], result)
+        self.assertTrue(agent.enrolled)
+        self.assertEqual(service.calls, [])  # nada de arrancar servicios: ya estaba en marcha
+        self.assertEqual(api.shell()["view"]["mode"], "ready")
+        self.assertTrue(any(b'"op":"connect"' in line for line in wire))
 
-        def enroll(text: str) -> tuple[bool, str]:
-            calls.append(text)
-            return enrolled
+    def test_a_set_aside_enrolment_is_explained(self) -> None:
+        api, *_ = make("untrusted")
+        self.assertIn("sin proteger", api.shell()["view"]["enrollment"])
 
+    def test_with_the_service_down_only_starting_it_is_offered(self) -> None:
         client = channel.ChannelClient(channel.random_pipe_name())  # nadie escucha
-        api = bridge.Api(
-            client, elevated=elevated, dev=dev, service=service, tray_startup=FakeTray(),
-            enrollment_present=lambda: False, enroll=enroll,
-        )
-        return api, calls, service
-
-    def test_the_window_knows_why_the_service_is_down(self) -> None:
-        api, *_ = self.make()
-        self.assertEqual(api.shell()["view"]["mode"], "down_not_enrolled")
-
-    def test_enrol_then_start_the_service(self) -> None:
-        api, calls, service = self.make()
-        result = api.enroll_offline("  cenya://acme/ABCD-EFGH-JKLM ")
-        self.assertTrue(result["ok"])
-        self.assertEqual(calls, ["cenya://acme/ABCD-EFGH-JKLM"])
-        self.assertEqual(service.calls, ["start"])
-
-    def test_a_failed_enrolment_does_not_start_anything(self) -> None:
-        api, calls, service = self.make(enrolled=(False, "El código ya se ha usado."))
-        result = api.enroll_offline("cenya://acme/X")
-        self.assertEqual(result["message"], "El código ya se ha usado.")
-        self.assertEqual(service.calls, [])
-
-    def test_needs_elevation_and_never_runs_in_development(self) -> None:
-        for kwargs in ({"elevated": False}, {"dev": True}):
-            api, calls, service = self.make(**kwargs)
-            self.assertFalse(api.enroll_offline("cenya://acme/X")["ok"])
-            self.assertEqual(calls, [])
-
-    def test_the_cli_is_run_without_a_shell_and_its_output_scrubbed(self) -> None:
-        seen: dict = {}
-
-        def runner(command, **kwargs):
-            seen.update(command=command, **kwargs)
-            return mock.Mock(returncode=0, stdout="Agente «SRV» enrolado en https://acme.\nToken Bearer abc123\n", stderr="")
-
-        done, message = winsys.enroll_with_cli("cenya://acme/ABCD", runner=runner)
-        self.assertTrue(done)
-        self.assertIn("«SRV»", message)
-        self.assertEqual(seen["command"][-2:], ["enroll", "cenya://acme/ABCD"])
-        self.assertNotIn("shell", seen)
-
-    def test_enrolment_on_disk_is_never_looked_up_on_the_machine_in_development(self) -> None:
-        self.assertIsNone(winsys.enrollment_present(True, {}))
-        folder = fake_server.FakeAgent("idle").workdir
-        self.assertFalse(winsys.enrollment_present(True, {"CENYA_STATE_DIR": str(folder)}))
-
+        api = bridge.Api(client, elevated=True, dev=False, service=FakeService(), tray_startup=FakeTray())
+        self.assertEqual(api.shell()["view"]["mode"], "down")
+        self.assertFalse(hasattr(api, "enroll_offline"))
 
 class DevControlsTests(unittest.TestCase):
     def test_development_never_gets_the_real_controls(self) -> None:

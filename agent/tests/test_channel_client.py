@@ -1,8 +1,11 @@
-"""The local channel client (agent/app/channel.py) against the fake service.
+"""The one local channel client (agent/localclient.py), against the fake service and scripted connections.
 
 Over the real transport of the platform: a named pipe on Windows (needs
 pywin32), a Unix socket elsewhere. Always on a random name: never the pipe of
-an agent installed on the machine running the tests.
+an agent installed on the machine running the tests. The fake service itself
+serves through the real transport and dispatcher (`agent.localpipe`,
+`agent.localapi`), so these round trips are the same code paths as the
+service's.
 """
 
 from __future__ import annotations
@@ -17,7 +20,9 @@ import time
 import unittest
 from unittest import mock
 
-from agent.app import channel, fake_server
+from agent import localclient as channel
+from agent import localpipe
+from agent.app import fake_server
 
 if sys.platform == "win32":
     HAS_TRANSPORT = importlib.util.find_spec("win32file") is not None
@@ -103,6 +108,8 @@ class OverTheRealTransportTests(unittest.TestCase):
 
 
 class _Conn:
+    """A transport connection (`send`/`recv`, as `agent.localpipe` gives) that plays a script."""
+
     def __init__(self, script: list[object]) -> None:
         self.script = script
         self.sent: list[bytes] = []
@@ -110,17 +117,17 @@ class _Conn:
 
     def send(self, data: bytes, timeout: float) -> None:
         step = self.script.pop(0)
-        if isinstance(step, Exception):
+        if isinstance(step, BaseException):
             raise step
         self.sent.append(data)
 
-    def read_line(self, timeout: float) -> bytes:
+    def recv(self, timeout: float) -> bytes:
         step = self.script.pop(0)
-        if isinstance(step, Exception):
+        if isinstance(step, BaseException):
             raise step
         if callable(step):
-            return step(self.sent[-1])
-        return step  # type: ignore[return-value]
+            step = step(self.sent[-1])
+        return step + b"\n" if step else step  # type: ignore[operator]
 
     def close(self) -> None:
         self.closed = True
@@ -138,7 +145,7 @@ class RetryRulesTests(unittest.TestCase):
         return channel.ChannelClient("unused", opener=lambda address, timeout: pending.pop(0))
 
     def test_a_dead_pooled_connection_is_replaced_for_a_read(self) -> None:
-        dead = _Conn([None, _echo_ok, channel.ChannelError(channel.BROKEN)])
+        dead = _Conn([None, _echo_ok, BrokenPipeError()])
         fresh = _Conn([None, _echo_ok])
         client = self._client([dead, fresh])
         client.request("status")  # deja `dead` en la reserva
@@ -146,7 +153,7 @@ class RetryRulesTests(unittest.TestCase):
         self.assertTrue(dead.closed)
 
     def test_an_action_that_may_have_been_delivered_is_never_repeated(self) -> None:
-        first = _Conn([None, _echo_ok, None, channel.ChannelError(channel.BROKEN)])
+        first = _Conn([None, _echo_ok, None, b""])
         never = _Conn([None, _echo_ok])
         client = self._client([first, never])
         client.request("status")
@@ -155,7 +162,7 @@ class RetryRulesTests(unittest.TestCase):
         self.assertEqual(never.sent, [])
 
     def test_an_action_that_never_left_is_retried(self) -> None:
-        first = _Conn([None, _echo_ok, channel.ChannelError(channel.BROKEN)])
+        first = _Conn([None, _echo_ok, BrokenPipeError()])
         fresh = _Conn([None, _echo_ok])
         client = self._client([first, fresh])
         client.request("status")
@@ -196,7 +203,47 @@ class RetryRulesTests(unittest.TestCase):
 
     def test_the_pipe_is_opened_as_the_service_allows(self) -> None:
         # GENERIC_READ | FILE_WRITE_DATA: con GENERIC_WRITE, Windows lo negaría.
+        # Es la constante del transporte de verdad: no hay otro código que abra el pipe.
         self.assertEqual(channel.CLIENT_ACCESS, 0x80000002)
+        self.assertIs(channel.CLIENT_ACCESS, localpipe.CLIENT_ACCESS)
+
+    def test_the_real_opener_goes_through_the_transport_that_checks_the_owner(self) -> None:
+        # Sin servicio: el código es el del cliente, traducido de `localpipe.Unavailable`.
+        for reason, code in (("not_running", channel.SERVICE_DOWN), ("untrusted", channel.UNTRUSTED),
+                             ("denied", channel.ACCESS_DENIED), ("no_pywin32", channel.NO_PYWIN32)):
+            with self.subTest(reason=reason), mock.patch.object(
+                localpipe, "connect_pipe", side_effect=localpipe.Unavailable(reason)
+            ), mock.patch.object(localpipe, "connect_socket", side_effect=localpipe.Unavailable(reason)):
+                with self.assertRaises(channel.ChannelError) as caught:
+                    channel.ChannelClient(channel.random_pipe_name()).request("status")
+                self.assertEqual(caught.exception.code, code)
+
+    def test_a_reply_cut_in_pieces_is_put_back_together(self) -> None:
+        import json
+
+        def pieces(sent: bytes) -> bytes:
+            return json.dumps({"id": json.loads(sent)["id"], "ok": True, "data": {"x": 1}}).encode()
+
+        reply: list[bytes] = []
+
+        class Split(_Conn):
+            def recv(self, timeout: float) -> bytes:
+                if not reply:
+                    whole = pieces(self.sent[-1]) + b"\n"
+                    reply.extend([whole[:7], whole[7:]])
+                return reply.pop(0)
+
+        self.assertEqual(self._client([Split([None])]).request("status"), {"x": 1})
+
+    def test_a_reply_too_large_is_a_bad_response_not_a_memory_hog(self) -> None:
+        class Endless(_Conn):
+            def recv(self, timeout: float) -> bytes:
+                return b"x" * (1024 * 1024)
+
+        with mock.patch.object(channel, "MAX_RESPONSE_BYTES", 4 * 1024 * 1024):
+            with self.assertRaises(channel.ChannelError) as caught:
+                self._client([Endless([None])]).request("status")
+        self.assertEqual(caught.exception.code, channel.BAD_RESPONSE)
 
     def test_a_short_pipe_name_gets_its_prefix(self) -> None:
         if sys.platform != "win32":

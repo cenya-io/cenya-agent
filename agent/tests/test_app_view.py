@@ -7,7 +7,8 @@ import agent.tests  # noqa: F401 - castellano y entorno de pruebas
 import unittest
 from datetime import datetime, timedelta, timezone
 
-from agent.app import channel, view
+from agent import localclient as channel
+from agent.app import view
 
 NOW = datetime(2026, 10, 2, 10, 0, tzinfo=timezone.utc)
 
@@ -30,7 +31,12 @@ def status(**changes: object) -> dict:
             {"task": "presence", "every_seconds": 300, "last_status": "ok", "last_finished_at": iso(timedelta(minutes=-3)), "next_at": iso(timedelta(minutes=2))},
             {"task": "configs", "every_seconds": 0, "last_status": None},
         ],
-        "last_run": {"task": "presence", "finished_at": iso(timedelta(minutes=-3)), "status": "ok", "stats": {"hosts_alive": 41, "new_hosts": 1}, "created": 1, "refreshed": 40},
+        "last_run": {
+            "presence": {"task": "presence", "finished_at": iso(timedelta(minutes=-3)), "status": "ok", "hosts_alive": 41, "new_hosts": 1,
+                         "sent": 41, "delivered": True, "created": 1, "refreshed": 40, "notes": 0},
+            "inventory": {"task": "inventory", "finished_at": iso(timedelta(hours=-2)), "status": "partial", "hosts_alive": None,
+                          "new_hosts": None, "sent": 90, "delivered": True, "created": 0, "refreshed": 90, "notes": 2},
+        },
         "paused_until": None,
         "outbox": 0,
     }
@@ -136,12 +142,17 @@ class ShellTests(unittest.TestCase):
         self.assertIn("administrador", self.shell(None, channel.SERVICE_DOWN, "stopped", elevated=False)["start_why"])
         self.assertIn("desarrollo", self.shell(None, channel.SERVICE_DOWN, "stopped", dev=True)["start_why"])
 
-    def test_down_without_enrolment_is_its_own_state(self) -> None:
-        # Hoy un servicio sin enrolar sale al arrancar: sin canal y sin fichero.
-        v = view.shell_view(None, channel.SERVICE_DOWN, "stopped", elevated=True, forbidden_seen=False, dev=False, now=NOW, enrolled_on_disk=False)
-        self.assertEqual(v["mode"], "down_not_enrolled")
-        v = view.shell_view(None, channel.SERVICE_DOWN, "stopped", elevated=True, forbidden_seen=False, dev=False, now=NOW, enrolled_on_disk=None)
+    def test_an_unenrolled_service_answers_and_says_why(self) -> None:
+        # Desde la 0.11 un servicio sin enrolar sigue en marcha: «parado» es solo parado.
+        v = view.shell_view(None, channel.SERVICE_DOWN, "stopped", elevated=True, forbidden_seen=False, dev=False, now=NOW)
         self.assertEqual(v["mode"], "down")
+        for state, words in (("not_enrolled", "esperando"), ("untrusted", "sin proteger")):
+            with self.subTest(state=state):
+                v = self.shell({"enrolled": False, "enrollment": {"state": state, "message": "x"}}, None, "running")
+                self.assertEqual(v["mode"], "not_enrolled")
+                self.assertIn(words, v["enrollment"])
+        invalid = self.shell({"enrolled": False, "enrollment": {"state": "invalid", "message": "La dirección es http://"}}, None, "running")
+        self.assertEqual(invalid["enrollment"], "La dirección es http://")
 
     def test_not_installed_wins_over_down(self) -> None:
         self.assertEqual(self.shell(None, channel.SERVICE_DOWN, "not_installed")["mode"], "not_installed")
@@ -215,11 +226,15 @@ class PauseTests(unittest.TestCase):
         tomorrow = datetime.fromisoformat(options["tomorrow"]["args"]["until"])
         self.assertEqual(tomorrow.hour, view.TOMORROW_HOUR)
         self.assertEqual(tomorrow.date(), (NOW.astimezone() + timedelta(days=1)).date())
-        indefinite = datetime.fromisoformat(options["indefinite"]["args"]["until"])
-        # Dentro del tope del servicio (localops.MAX_PAUSE, 30 días): si no, lo rechazaría.
-        self.assertLess(indefinite - NOW, view.MAX_PAUSE)
-        self.assertGreater(indefinite - NOW, view.MAX_PAUSE - timedelta(hours=1))
-        self.assertIn("30", options["indefinite"]["label"])
+        # Sin plazo de verdad: el servicio lo guarda como tal (sin fingir 30 días).
+        self.assertEqual(options["indefinite"]["args"], {"indefinite": True})
+        self.assertNotIn("30", options["indefinite"]["label"])
+
+    def test_an_indefinite_pause_reads_as_such(self) -> None:
+        raw = {"state": "paused", "pause": {"local": None, "server": None, "until": None, "indefinite": True}}
+        v = view.pause_view(view.normalize_status(raw), NOW)
+        self.assertTrue(v["paused"])
+        self.assertEqual(v["text"], "En pausa hasta que se reanude")
 
 
 class TasksTests(unittest.TestCase):
@@ -266,9 +281,19 @@ class CountersTests(unittest.TestCase):
     def test_last_run_counters_and_outbox(self) -> None:
         c = view.counters_view(status(outbox=3), NOW)
         values = {item["key"]: item["value"] for item in c["items"]}
-        self.assertEqual(values, {"hosts_alive": 41, "new_hosts": 1, "created": 1, "refreshed": 40, "outbox": 3})
+        self.assertEqual(values, {"hosts_alive": 41, "new_hosts": 1, "sent": 41, "created": 1, "refreshed": 40, "outbox": 3})
         self.assertEqual([i for i in c["items"] if i["key"] == "outbox"][0]["tone"], view.WARNING)
         self.assertIn("Presencia", c["caption"])
+
+    def test_the_most_recent_task_is_shown_and_a_queued_result_says_so(self) -> None:
+        later = {"task": "inventory", "finished_at": iso(timedelta(minutes=-1)), "status": "partial", "sent": 7,
+                 "delivered": False, "created": None, "refreshed": None, "notes": 1}
+        data = status()
+        data["last_run"] = {**data["last_run"], "inventory": later}
+        c = view.counters_view(data, NOW)
+        self.assertIn("Inventario", c["caption"])
+        self.assertEqual({item["key"] for item in c["items"]}, {"sent", "outbox"})  # sin cifras del portal todavía
+        self.assertIn("cola local", c["note"])
 
     def test_nothing_run_yet(self) -> None:
         c = view.counters_view(status(last_run=None, outbox=None), NOW)
@@ -348,8 +373,8 @@ class NetboxTests(unittest.TestCase):
         self.assertEqual(s["review_url"], "https://acme/x/")
 
     def test_a_dangerous_review_url_is_not_opened(self) -> None:
-        s = view.netbox_summary({"summary": {}, "review_url": "javascript:alert(1)"}, "send", "https://acme.cenya.cloud")
-        self.assertEqual(s["review_url"], "https://acme.cenya.cloud/settings/import/")
+        s = view.netbox_summary({"summary": {}, "review_url": "javascript:alert(1)"}, "send")
+        self.assertEqual(s["review_url"], "")
 
     def test_summary_when_saved(self) -> None:
         s = view.netbox_summary({"summary": {"devices": 1}, "path": "C:\\x.json"}, "save")
@@ -423,11 +448,27 @@ class SettingsTests(unittest.TestCase):
         self.assertIn("normal", g["effective"])
 
     def test_updates(self) -> None:
-        u = view.updates_view({"auto_update": False}, {"version": "0.11.0"}, {"installed": "0.11.0", "latest": "0.11.1", "available": True})
+        asked = {"current": "0.11.0", "offered": "0.11.1", "checked": True, "pending": False, "error": "",
+                 "checked_at": iso(timedelta(seconds=-5)), "updater": {"state": "idle", "version": "0.11.0", "error": ""}}
+        u = view.updates_view({"auto_update": False}, {"version": "0.11.0"}, asked)
         self.assertFalse(u["auto"])
         self.assertTrue(u["available"])
         self.assertIn("0.11.1", u["message"])
-        self.assertEqual(view.updates_view({}, {"version": "0.11.1"}, {"latest": "0.11.1", "available": False})["message"], "Está al día.")
+        self.assertIn("desactivadas", u["message"])
+        self.assertTrue(u["checked"])
+        same = {**asked, "offered": None}
+        self.assertEqual(view.updates_view({}, {"version": "0.11.0"}, same)["message"], "Está al día.")
+
+    def test_an_update_check_that_failed_or_is_still_waiting_says_so(self) -> None:
+        failed = view.updates_view({}, {"version": "0.11.0"}, {"current": "0.11.0", "checked": False, "pending": False, "error": "sin red"})
+        self.assertIn("sin red", failed["message"])
+        self.assertEqual(failed["tone"], view.WARNING)
+        waiting = view.updates_view({}, {"version": "0.11.0"}, {"current": "0.11.0", "checked": False, "pending": True, "error": ""})
+        self.assertIn("tarda", waiting["message"])
+
+    def test_the_updaters_progress_is_shown(self) -> None:
+        u = view.updates_view({}, {"version": "0.11.0", "updater": {"state": "ready", "version": "0.11.1", "error": ""}}, None)
+        self.assertIn("0.11.1", u["progress"])
 
     def test_service_buttons(self) -> None:
         running = view.service_view("running", "delayed", True, "", dev=False)

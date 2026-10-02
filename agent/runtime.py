@@ -28,7 +28,7 @@ from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 from typing import Any
 
-from agent import __version__, about, logs, notes, orders, outbox, probe, status, store, tasks
+from agent import __version__, about, identity, logs, notes, orders, outbox, probe, status, store, tasks
 from agent import credentials as creds
 from agent import settings as local_settings
 from agent.client import AgentClient, PushError, result_parts
@@ -158,6 +158,15 @@ class Runtime:
         # trae el checkin. Sin él no abre ninguna credencial sellada.
         enrolled = store.load(environ)
         self.shared.agent_uuid = enrolled.uuid if enrolled is not None else ""
+        # Un agente actualizado en su sitio desde la 0.10.x está enrolado pero
+        # no tiene clave (la crea `enroll`): sin ella no recibiría nunca una
+        # credencial sellada. Se crea aquí, una vez y con la misma protección
+        # que el token (`store.write_protected` no escribe en una carpeta que no
+        # puede proteger, y `main` ya ha protegido la carpeta antes de llegar);
+        # el checkin la presenta (`Hooks.public_key`). Nunca se regenera una que exista.
+        if enrolled is not None and not once and identity.available() and not identity.path(environ).exists():
+            if identity.ensure(environ):
+                self._say(_t("[agente] Creada la clave de este agente: se presenta al portal en el próximo checkin."))
         self.scheduler = Scheduler()
         #: Guarda la cola y los vivos: los tocan los dos hilos.
         self._lock = threading.Lock()
@@ -178,6 +187,11 @@ class Runtime:
         self.tick = TICK_SECONDS
         #: Cómo fue el último checkin (`_CheckinRecorder`), bajo `_lock`.
         self.last_checkin: dict[str, Any] = {}
+        #: Cuándo fue el último checkin BUENO: se conserva mientras fallan los
+        #: siguientes («último contacto hace 3 horas» es lo que hay que ver).
+        self.last_ok_at: str | None = None
+        #: Las cifras de la última ejecución de cada tarea (spec 4, `status.last_run`).
+        self.last_runs: dict[str, dict[str, Any]] = {}
         # La actualización del propio agente (docs/agente-v2-instalacion.md, 4).
         # `--once` no se actualiza: es alguien probando a mano.
         self.updater = Updater(
@@ -209,6 +223,7 @@ class Runtime:
                 netbox_export=self._netbox_export,
                 update_offered=self.updater.offer,
                 update_state=self.updater.state,
+                public_key=lambda: identity.public_key(self._environ),
             ),
             clock=clock,
             report=report,
@@ -331,13 +346,21 @@ class Runtime:
     # --- Lo que pide el canal local (agent.localops) ----------------------------------
 
     def _note_checkin(self, ok: bool, status_code: int | None, error: str) -> None:
+        at = self._clock().isoformat()
         with self._lock:
             self.last_checkin = {
-                "at": self._clock().isoformat(),
+                "at": at,
                 "ok": ok,
                 "status": status_code,
                 "error": logs.scrub(error),
             }
+            if ok:
+                self.last_ok_at = at
+
+    def gentleness(self) -> str:
+        """La suavidad con la que trabaja ahora: la del servidor, bajada al tope local."""
+        config, _ = self.shared.config_snapshot()
+        return tasks.gentleness(config.get("gentleness"), self.settings.gentleness_cap)
 
     def snapshot(self) -> dict[str, Any]:
         """What the agent is doing now, for the local channel's `status`. Nothing secret."""
@@ -352,26 +375,40 @@ class Runtime:
         local_pause = self._local_pause()
         until = effective_pause(local_pause, server_pause)
         paused = is_paused(now, until)
+        indefinite = paused and local_settings.is_indefinite(until)
         with self._lock:
             schedule = self.scheduler.view(now)
             queued = [{"task": job.task, "trigger": job.trigger} for job in self.scheduler.queued]
             last = dict(self.last_checkin)
+            last_ok_at = self.last_ok_at
+            last_runs = {task: dict(run) for task, run in self.last_runs.items()}
         return {
             "state": "running" if activity is not None else ("paused" if paused else "idle"),
             "activity": activity,
             "schedule": schedule,
             "queued": queued,
             "pause": {
-                "local": local_pause.isoformat() if local_pause else None,
+                "local": None if local_settings.is_indefinite(local_pause) else (local_pause.isoformat() if local_pause else None),
                 "server": server_pause.isoformat() if server_pause else None,
-                "until": until.isoformat() if paused and until else None,
+                # «Hasta que se reanude» no tiene hora: `until` vacío e `indefinite`.
+                "until": until.isoformat() if paused and until and not indefinite else None,
+                "indefinite": indefinite,
             },
             "refusal": refusal,
             "has_config": has_config,
             "checkin_seconds": checkin_seconds,
             "last_checkin": last,
+            "last_ok_at": last_ok_at,
             "outbox": self.outbox.count(),
             "update": update,
+            "updater": self.updater.state(),
+            "gentleness": self.gentleness(),
+            "last_run": last_runs,
+            # La clave del agente ante el portal (spec 1.2): sin problema, `problem` vacío.
+            "identity": {
+                "server_has_key": self.control.key_confirmed,
+                "problem": dict(self.control.key_problem) if self.control.key_problem else None,
+            },
         }
 
     def queue_local(self, task: str) -> None:
@@ -610,6 +647,7 @@ class Runtime:
         }
         self.shared.set_activity(None)
         answer = self._deliver(run, items, strict=strict)
+        self._note_run(run, items, answer)
         if self._report:
             with self._lock:
                 wait = self.scheduler.seconds_until_next(self._clock())
@@ -621,6 +659,35 @@ class Runtime:
                 next_in=int(wait) if wait is not None else None,
             )
         return run
+
+    def _note_run(self, run: dict[str, Any], items: list[dict[str, Any]], answer: dict[str, Any] | None) -> None:
+        """Las cifras de esta ejecución para `status.last_run`: solo números y estados, nada de lo hallado.
+
+        `created`/`refreshed` son lo que contestó el servidor; si el resultado
+        se quedó en la cola local (`delivered` falso) no se saben todavía y van
+        vacíos, no a cero.
+        """
+        stats = run.get("stats") or {}
+
+        def number(value: Any) -> int | None:
+            return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+        entry = {
+            "task": run["task"],
+            "trigger": run.get("trigger"),
+            "started_at": run.get("started_at"),
+            "finished_at": run.get("finished_at"),
+            "status": run.get("status"),
+            "hosts_alive": number(stats.get("hosts_alive")),
+            "new_hosts": number(stats.get("new_hosts")),
+            "sent": len(items),
+            "delivered": answer is not None,
+            "created": number((answer or {}).get("created")) if answer is not None else None,
+            "refreshed": number((answer or {}).get("refreshed")) if answer is not None else None,
+            "notes": len(run.get("notes") or []),
+        }
+        with self._lock:
+            self.last_runs[run["task"]] = entry
 
     def _deliver(self, run: dict[str, Any], items: list[dict[str, Any]], *, strict: bool) -> dict[str, Any] | None:
         """Empuja el resultado; lo que no sale va a la cola local."""
