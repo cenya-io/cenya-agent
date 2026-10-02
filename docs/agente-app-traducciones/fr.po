@@ -1,0 +1,813 @@
+# Textos nuevos de la aplicación de escritorio (agent/app) y del icono (agent/tray.py), fr.
+# Para fundir en agent/translations/fr/LC_MESSAGES/cenya-agent.po (msgcat --use-first).
+# Sobran en el catálogo, y hay que quitarlos: «Ver estado», «Abrir Ajustes → Agentes»,
+# «Versión del agente: %(version)s» y «Servidor: %(url)s» (el menú viejo del icono).
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+
+msgid "%(done)d de %(total)d"
+msgstr "%(done)d sur %(total)d"
+
+msgid "10.0.5.0/24 o 10.0.5.7"
+msgstr "10.0.5.0/24 ou 10.0.5.7"
+
+msgid "192.168.1.20"
+msgstr "192.168.1.20"
+
+msgid "Abrir"
+msgstr "Ouvrir"
+
+msgid "Abrir Cenya en el navegador"
+msgstr "Ouvrir Cenya dans le navigateur"
+
+msgid "Abrir en el navegador"
+msgstr "Ouvrir dans le navigateur"
+
+msgid "Abrir la carpeta"
+msgstr "Ouvrir le dossier"
+
+msgid "Abrir la revisión"
+msgstr "Ouvrir la revue"
+
+msgid "Aceptar un certificado no válido (NetBox con certificado propio o caducado)"
+msgstr "Accepter un certificat non valide (NetBox avec un certificat auto-signé ou expiré)"
+
+msgid "Acerca de"
+msgstr "À propos"
+
+msgid "Actividad"
+msgstr "Activité"
+
+msgid "Actualizaciones"
+msgstr "Mises à jour"
+
+msgid "Ahora trabaja en modo %(level)s."
+msgstr "Il travaille actuellement en mode %(level)s."
+
+msgid "Ajustes"
+msgstr "Paramètres"
+
+msgid "Al terminar"
+msgstr "À la fin"
+
+msgid "Algo falla: el primer paso en rojo dice qué."
+msgstr "Quelque chose ne va pas : la première étape en rouge indique quoi."
+
+msgid "Analizar"
+msgstr "Analyser"
+
+msgid "Analizar una IP"
+msgstr "Analyser une IP"
+
+msgid "Apache 2.0, código abierto"
+msgstr "Apache 2.0, open source"
+
+msgid "Arrancando…"
+msgstr "Démarrage…"
+
+msgid "Arrancar con Windows"
+msgstr "Démarrer avec Windows"
+
+msgid "Autocomprobación"
+msgstr "Autotest"
+
+msgid "Automáticas"
+msgstr "Automatiques"
+
+msgid "Avance"
+msgstr "Progression"
+
+msgid "Avisa al portal, borra el enrolamiento y deja de barrer. Para volver hará falta una cadena de conexión nueva."
+msgstr "Prévient le portail, supprime l'enrôlement et arrête le balayage. Pour revenir, il faudra une nouvelle chaîne de connexion."
+
+msgid "Avisos"
+msgstr "Avertissements"
+
+msgid "Avisos de Windows"
+msgstr "Notifications Windows"
+
+msgid "Añadir"
+msgstr "Ajouter"
+
+msgid "Buscar actualizaciones"
+msgstr "Rechercher des mises à jour"
+
+msgid "Buscar ahora"
+msgstr "Rechercher maintenant"
+
+msgid "Cambiar de portal"
+msgstr "Changer de portail"
+
+msgid "Canal de desarrollo"
+msgstr "Canal de développement"
+
+msgid "Cancelar"
+msgstr "Annuler"
+
+msgid "Cargando…"
+msgstr "Chargement…"
+
+msgid "Cenya Agent necesita el componente WebView2 de Microsoft para enseñar su ventana, y no está instalado en este equipo.\n\nSe descarga gratis en https://developer.microsoft.com/microsoft-edge/webview2/ (el «Evergreen Bootstrapper»).\n\nEl agente sigue funcionando: esto solo afecta a la ventana."
+msgstr "Cenya Agent a besoin du composant WebView2 de Microsoft pour afficher sa fenêtre, et il n'est pas installé sur cet ordinateur.\n\nIl se télécharge gratuitement sur https://developer.microsoft.com/microsoft-edge/webview2/ (le « Evergreen Bootstrapper »).\n\nL'agent continue de fonctionner : cela ne concerne que la fenêtre."
+
+msgid "Cerrar"
+msgstr "Fermer"
+
+msgid "Certificado"
+msgstr "Certificat"
+
+msgid "Certificado de la empresa"
+msgstr "Certificat de l'entreprise"
+
+msgid "Colectores"
+msgstr "Collecteurs"
+
+msgid "Comprobaciones para cuando algo no va como debería."
+msgstr "Des vérifications pour quand quelque chose ne marche pas comme prévu."
+
+msgid "Comprobar"
+msgstr "Vérifier"
+
+msgid "Con el canal de desarrollo, el servicio de Windows no se toca desde aquí."
+msgstr "Avec le canal de développement, le service Windows n'est pas touché d'ici."
+
+msgid "Con errores"
+msgstr "Avec des erreurs"
+
+msgid "Conecta este equipo a Cenya"
+msgstr "Connectez cet ordinateur à Cenya"
+
+msgid "Conectado a %(portal)s"
+msgstr "Connecté à %(portal)s"
+
+msgid "Conectando con el portal…"
+msgstr "Connexion au portail…"
+
+msgid "Conectar"
+msgstr "Connecter"
+
+msgid "Conectar o cambiar de portal"
+msgstr "Connecter ou changer de portail"
+
+msgid "Conectar y arrancar el servicio"
+msgstr "Connecter et démarrer le service"
+
+msgid "Conexión"
+msgstr "Connexion"
+
+msgid "Copiado"
+msgstr "Copié"
+
+msgid "Copiar"
+msgstr "Copier"
+
+msgid "Copias de configuración"
+msgstr "Copies de configuration"
+
+msgid "Correcta"
+msgstr "Réussie"
+
+msgid "Cuántas conexiones a la vez puede abrir el agente. Puede bajar lo que diga el portal, nunca subirlo."
+msgstr "Combien de connexions l'agent peut ouvrir à la fois. Peut abaisser ce que dit le portail, jamais l'augmenter."
+
+msgid "Código fuente"
+msgstr "Code source"
+
+msgid "Desactivada"
+msgstr "Désactivée"
+
+msgid "Desconectar"
+msgstr "Déconnecter"
+
+msgid "Desconectar este equipo"
+msgstr "Déconnecter cet ordinateur"
+
+msgid "Desconectar…"
+msgstr "Déconnecter…"
+
+msgid "Desconocido"
+msgstr "Inconnu"
+
+msgid "Detener"
+msgstr "Arrêter"
+
+msgid "Detenido"
+msgstr "Arrêté"
+
+msgid "Deteniéndose…"
+msgstr "Arrêt en cours…"
+
+msgid "Dirección"
+msgstr "Adresse"
+
+msgid "Dirección de NetBox"
+msgstr "Adresse de NetBox"
+
+msgid "Ejecutar Presencia ahora"
+msgstr "Lancer Présence maintenant"
+
+msgid "Ejecutar ahora"
+msgstr "Lancer maintenant"
+
+msgid "El agente de descubrimiento de Cenya."
+msgstr "L'agent de découverte de Cenya."
+
+msgid "El agente dejará de informar a %(portal)s. Lo ya inventariado se queda en el portal."
+msgstr "L'agent cessera de rendre compte à %(portal)s. Ce qui est déjà inventorié reste dans le portail."
+
+msgid "El agente descubre la red de tu empresa y la propone en Cenya. Solo habla con el portal por HTTPS saliente: no abre puertos."
+msgstr "L'agent découvre le réseau de votre entreprise et le propose dans Cenya. Il ne parle au portail qu'en HTTPS sortant : il n'ouvre aucun port."
+
+msgid "El agente está mirando quién responde en la red."
+msgstr "L'agent regarde qui répond sur le réseau."
+
+msgid "El agente no empieza ninguna tarea hasta que el portal vuelva a aceptar resultados."
+msgstr "L'agent ne démarre aucune tâche tant que le portail n'accepte pas de nouveau des résultats."
+
+msgid "El agente no hace ping ni entra en ellas, tampoco si se pide desde el portal."
+msgstr "L'agent ne les pingue pas et ne s'y connecte pas, même si le portail le demande."
+
+msgid "El de Windows"
+msgstr "Celle de Windows"
+
+msgid "El del sistema"
+msgstr "Celui du système"
+
+msgid "El equipo ha quedado conectado, pero el servicio no ha arrancado: %(reason)s"
+msgstr "L'ordinateur est connecté, mais le service n'a pas démarré : %(reason)s"
+
+msgid "El portal de Cenya al que informa este equipo."
+msgstr "Le portail Cenya auquel cet ordinateur rend compte."
+
+msgid "El portal ha rechazado este agente"
+msgstr "Le portail a refusé cet agent"
+
+msgid "El portal ha rechazado este agente: conéctalo de nuevo."
+msgstr "Le portail a refusé cet agent : connectez-le de nouveau."
+
+msgid "El portal todavía no ha mandado la agenda de tareas."
+msgstr "Le portail n'a pas encore envoyé le planning des tâches."
+
+msgid "El registro del agente, en directo."
+msgstr "Le journal de l'agent, en direct."
+
+msgid "El servicio del agente no está en marcha"
+msgstr "Le service de l'agent n'est pas en cours d'exécution"
+
+msgid "El servicio del agente no está en marcha porque este equipo todavía no está conectado. Al conectarlo, se arranca."
+msgstr "Le service de l'agent ne tourne pas car cet ordinateur n'est pas encore connecté. Le connecter démarre le service."
+
+msgid "El servicio del agente no está en marcha."
+msgstr "Le service de l'agent n'est pas en cours d'exécution."
+
+msgid "El servicio del agente no está instalado"
+msgstr "Le service de l'agent n'est pas installé"
+
+msgid "El servicio está ocupado. Vuelve a intentarlo en unos segundos."
+msgstr "Le service est occupé. Réessayez dans quelques secondes."
+
+msgid "El servicio no ha contestado a tiempo."
+msgstr "Le service n'a pas répondu à temps."
+
+msgid "El servicio no ha podido hacerlo (%(code)s)."
+msgstr "Le service n'a pas pu le faire (%(code)s)."
+
+msgid "El servicio no se ha detenido a tiempo. Vuelve a intentarlo en un momento."
+msgstr "Le service ne s'est pas arrêté à temps. Réessayez dans un instant."
+
+msgid "El token se ha borrado de este formulario."
+msgstr "Le jeton a été effacé de ce formulaire."
+
+msgid "Elegir fichero…"
+msgstr "Choisir un fichier…"
+
+msgid "Empezó %(ago)s"
+msgstr "Commencée %(ago)s"
+
+msgid "En cola: empezará en cuanto termine la tarea en curso."
+msgstr "En file : elle démarrera dès que la tâche en cours sera terminée."
+
+msgid "En curso"
+msgstr "En cours"
+
+msgid "En directo"
+msgstr "En direct"
+
+msgid "En pausa"
+msgstr "En pause"
+
+msgid "En pausa hasta el %(date)s"
+msgstr "En pause jusqu'au %(date)s"
+
+msgid "En pausa hasta las %(clock)s"
+msgstr "En pause jusqu'à %(clock)s"
+
+msgid "En pausa hasta mañana a las %(clock)s"
+msgstr "En pause jusqu'à demain à %(clock)s"
+
+msgid "En pausa hasta que se reanude"
+msgstr "En pause jusqu'à la reprise"
+
+msgid "En pausa hasta que se reanude (como mucho, hasta el %(date)s)"
+msgstr "En pause jusqu'à la reprise (au plus tard le %(date)s)"
+
+msgid "Enviado al portal. La revisión se abre en el navegador: nada se importa hasta que lo confirmes allí."
+msgstr "Envoyé au portail. La revue s'ouvre dans le navigateur : rien n'est importé avant votre confirmation."
+
+msgid "Enviar a Cenya y revisar"
+msgstr "Envoyer à Cenya et réviser"
+
+msgid "Envíos pendientes"
+msgstr "Envois en attente"
+
+msgid "Equipo"
+msgstr "Ordinateur"
+
+msgid "Equipos nuevos"
+msgstr "Nouveaux équipements"
+
+msgid "Equipos vivos"
+msgstr "Équipements actifs"
+
+msgid "Errores"
+msgstr "Erreurs"
+
+msgid "Escribe la dirección de NetBox."
+msgstr "Saisissez l'adresse de NetBox."
+
+msgid "Escribe una red (10.0.5.0/24) o una dirección (10.0.5.7)."
+msgstr "Saisissez un réseau (10.0.5.0/24) ou une adresse (10.0.5.7)."
+
+msgid "Eso no es una dirección IP."
+msgstr "Ce n'est pas une adresse IP."
+
+msgid "Estado"
+msgstr "État"
+
+msgid "Este equipo"
+msgstr "Cet ordinateur"
+
+msgid "Este equipo aparece como"
+msgstr "Cet ordinateur apparaît comme"
+
+msgid "Este equipo dejará de informar a %(portal)s y pasará a informar al portal nuevo."
+msgstr "Cet ordinateur cessera de rendre compte à %(portal)s et rendra compte au nouveau portail."
+
+msgid "Este equipo no está conectado a ningún portal."
+msgstr "Cet ordinateur n'est connecté à aucun portail."
+
+msgid "Esto necesita permisos de administrador. ¿Abrir Cenya Agent como administrador?"
+msgstr "Cela nécessite des droits d'administrateur. Ouvrir Cenya Agent en tant qu'administrateur ?"
+
+msgid "Está al día."
+msgstr "Il est à jour."
+
+msgid "Falta algo en esta instalación"
+msgstr "Il manque quelque chose à cette installation"
+
+msgid "Falta pywebview: instala el agente con el extra [gui]."
+msgstr "pywebview est manquant : installez l'agent avec l'extra [gui]."
+
+msgid "Falta: %(names)s"
+msgstr "Manquant : %(names)s"
+
+msgid "General"
+msgstr "Général"
+
+msgid "Guardado"
+msgstr "Enregistré"
+
+msgid "Guardado en %(path)s"
+msgstr "Enregistré dans %(path)s"
+
+msgid "Guardar"
+msgstr "Enregistrer"
+
+msgid "Guardar como fichero"
+msgstr "Enregistrer dans un fichier"
+
+msgid "Guardar el paquete…"
+msgstr "Enregistrer le paquet…"
+
+msgid "Hace falta abrir Cenya Agent como administrador para hacer cambios."
+msgstr "Il faut ouvrir Cenya Agent en tant qu'administrateur pour faire des modifications."
+
+msgid "Hallazgos"
+msgstr "Découvertes"
+
+msgid "Hasta mañana a las %(clock)s"
+msgstr "Jusqu'à demain à %(clock)s"
+
+msgid "Hasta que se reanude (30 días como mucho)"
+msgstr "Jusqu'à la reprise (30 jours au plus)"
+
+msgid "Hay una versión nueva del agente: %(version)s"
+msgstr "Une nouvelle version de l'agent est disponible : %(version)s"
+
+msgid "Hay una versión nueva: %(version)s"
+msgstr "Nouvelle version disponible : %(version)s"
+
+msgid "Herramientas"
+msgstr "Outils"
+
+msgid "Hipervisores"
+msgstr "Hyperviseurs"
+
+msgid "Icono de bandeja al iniciar sesión"
+msgstr "Icône de la zone de notification à l'ouverture de session"
+
+msgid "Iconos: Lucide (licencia ISC)."
+msgstr "Icônes : Lucide (licence ISC)."
+
+msgid "Idioma"
+msgstr "Langue"
+
+msgid "Idiomas"
+msgstr "Langues"
+
+msgid "Importar de NetBox"
+msgstr "Importer depuis NetBox"
+
+msgid "Información"
+msgstr "Information"
+
+msgid "Iniciar"
+msgstr "Démarrer"
+
+msgid "Iniciar el servicio"
+msgstr "Démarrer le service"
+
+msgid "Instalación completa"
+msgstr "Installation complète"
+
+msgid "Instalada"
+msgstr "Installée"
+
+msgid "Inventario"
+msgstr "Inventaire"
+
+msgid "La dirección del proxy tiene que empezar por http:// o https://."
+msgstr "L'adresse du proxy doit commencer par http:// ou https://."
+
+msgid "La instalación de Cenya está en solo lectura"
+msgstr "L'installation de Cenya est en lecture seule"
+
+msgid "La instalación de Cenya está en solo lectura: no se guardaría nada."
+msgstr "L'installation de Cenya est en lecture seule : rien ne serait enregistré."
+
+msgid "La siguiente es %(task)s: %(when)s."
+msgstr "La prochaine est %(task)s : %(when)s."
+
+msgid "Lectura de NetBox"
+msgstr "Lecture de NetBox"
+
+msgid "Lectura terminada"
+msgstr "Lecture terminée"
+
+msgid "Leer NetBox"
+msgstr "Lire NetBox"
+
+msgid "Leer otro NetBox"
+msgstr "Lire un autre NetBox"
+
+msgid "Leyendo NetBox…"
+msgstr "Lecture de NetBox…"
+
+msgid "Librerías de Windows"
+msgstr "Bibliothèques Windows"
+
+msgid "Librerías opcionales"
+msgstr "Bibliothèques facultatives"
+
+msgid "Licencia"
+msgstr "Licence"
+
+msgid "Lo que decide quien está en esta máquina."
+msgstr "Ce que décide la personne devant cette machine."
+
+msgid "Manual"
+msgstr "Manuel"
+
+msgid "Mostrar en la carpeta"
+msgstr "Afficher dans le dossier"
+
+msgid "Nada coincide con el filtro."
+msgstr "Rien ne correspond au filtre."
+
+msgid "NetBox"
+msgstr "NetBox"
+
+msgid "NetBox contesta y acepta el token."
+msgstr "NetBox répond et accepte le jeton."
+
+msgid "Ninguna: se barre todo lo que diga el portal."
+msgstr "Aucune : tout ce que dit le portail est balayé."
+
+msgid "Ninguno"
+msgstr "Aucun"
+
+msgid "Ninguno: se usan los certificados de Windows."
+msgstr "Aucun : les certificats de Windows sont utilisés."
+
+msgid "Nivel"
+msgstr "Niveau"
+
+msgid "No barre ni usa ninguna credencial hasta que el portal lo acepte de nuevo. Si se revocó, hay que conectarlo otra vez."
+msgstr "Il ne balaie ni n'utilise aucun identifiant tant que le portail ne l'accepte pas de nouveau. S'il a été révoqué, il faut le reconnecter."
+
+msgid "No empieza ninguna tarea programada. Lo que se pida desde el portal sí se atiende."
+msgstr "Aucune tâche planifiée ne démarre. Ce qui est demandé depuis le portail est quand même traité."
+
+msgid "No encontrado"
+msgstr "Introuvable"
+
+msgid "No instalado"
+msgstr "Non installé"
+
+msgid "No se encuentra la aplicación de Cenya Agent junto a este icono."
+msgstr "L'application Cenya Agent est introuvable à côté de cette icône."
+
+msgid "No se ha podido"
+msgstr "Impossible"
+
+msgid "No se llegó a comprobar."
+msgstr "Pas vérifié."
+
+msgid "No se pudo cargar"
+msgstr "Chargement impossible"
+
+msgid "Nombre del portal"
+msgstr "Nom du portail"
+
+msgid "Nombre, puerto, certificado y token, paso a paso."
+msgstr "Nom, port, certificat et jeton, étape par étape."
+
+msgid "Normal"
+msgstr "Normale"
+
+msgid "Nuevos en la bandeja"
+msgstr "Nouveaux dans la file"
+
+msgid "Nunca"
+msgstr "Jamais"
+
+msgid "Paquete de soporte"
+msgstr "Paquet d'assistance"
+
+msgid "Para subirlo después en Ajustes → Importar → «NetBox, desde un fichero»."
+msgstr "Pour l'envoyer plus tard dans Paramètres → Importer → « NetBox, depuis un fichier »."
+
+msgid "Para todas las personas que usan este equipo."
+msgstr "Pour toutes les personnes qui utilisent cet ordinateur."
+
+msgid "Parcial"
+msgstr "Partielle"
+
+msgid "Pausar"
+msgstr "Mettre en pause"
+
+msgid "Pausar una hora"
+msgstr "Mettre en pause une heure"
+
+msgid "Pega antes la cadena de conexión."
+msgstr "Collez d'abord la chaîne de connexion."
+
+msgid "Pega el token de NetBox."
+msgstr "Collez le jeton NetBox."
+
+msgid "Pega la cadena de conexión que da el portal en Ajustes → Agentes → Añadir un agente."
+msgstr "Collez la chaîne de connexion fournie par le portail dans Paramètres → Agents → Ajouter un agent."
+
+msgid "Pega una cadena de conexión o un código del portal."
+msgstr "Collez une chaîne de connexion ou un code du portail."
+
+msgid "Ping y ARP"
+msgstr "Ping et ARP"
+
+msgid "Portal"
+msgstr "Portail"
+
+msgid "Presencia"
+msgstr "Présence"
+
+msgid "Presencia en marcha"
+msgstr "Présence en cours"
+
+msgid "Probar"
+msgstr "Tester"
+
+msgid "Probar la conexión con el portal"
+msgstr "Tester la connexion au portail"
+
+msgid "Proxy"
+msgstr "Proxy"
+
+msgid "Prueba SNMP, SSH y WinRM contra una sola dirección y dice qué pasó con cada uno."
+msgstr "Essaie SNMP, SSH et WinRM sur une seule adresse et dit ce qui s'est passé pour chacun."
+
+msgid "Próxima"
+msgstr "Prochaine"
+
+msgid "Puerto"
+msgstr "Port"
+
+msgid "Quitar"
+msgstr "Retirer"
+
+msgid "Qué está haciendo el agente en este equipo."
+msgstr "Ce que fait l'agent sur cet ordinateur."
+
+msgid "Qué hace el agente con tus datos"
+msgstr "Ce que l'agent fait de vos données"
+
+msgid "Qué puede hacer esta instalación: colectores, librerías e idiomas."
+msgstr "Ce que cette installation sait faire : collecteurs, bibliothèques et langues."
+
+msgid "Reanudar"
+msgstr "Reprendre"
+
+msgid "Red"
+msgstr "Réseau"
+
+msgid "Redes de este equipo"
+msgstr "Réseaux de cet ordinateur"
+
+msgid "Redes y direcciones que nunca se barren"
+msgstr "Réseaux et adresses jamais balayés"
+
+msgid "Reiniciar"
+msgstr "Redémarrer"
+
+msgid "Reiniciar como administrador"
+msgstr "Redémarrer en tant qu'administrateur"
+
+msgid "Reintentar"
+msgstr "Réessayer"
+
+msgid "Resultado"
+msgstr "Résultat"
+
+msgid "Rápida"
+msgstr "Rapide"
+
+msgid "SAI"
+msgstr "Onduleur"
+
+msgid "Se ha perdido la comunicación con el servicio. Vuelve a intentarlo."
+msgstr "La communication avec le service a été perdue. Réessayez."
+
+msgid "Se sube al portal y se abre la revisión en el navegador. Nada se importa hasta que lo confirmes allí."
+msgstr "Il est envoyé au portail et la revue s'ouvre dans le navigateur. Rien n'est importé avant votre confirmation."
+
+msgid "Servicio"
+msgstr "Service"
+
+msgid "Si la salida a internet pasa por una inspección TLS con una autoridad propia, indica aquí su certificado (.pem, .crt o .cer)."
+msgstr "Si l'accès à Internet passe par une inspection TLS avec une autorité propre, indiquez ici son certificat (.pem, .crt ou .cer)."
+
+msgid "Si lleva usuario y contraseña, no se vuelven a mostrar."
+msgstr "S'il contient un utilisateur et un mot de passe, ils ne sont plus affichés."
+
+msgid "Sin conexión con el portal"
+msgstr "Pas de connexion au portail"
+
+msgid "Sin ejecutar"
+msgstr "Pas exécutée"
+
+msgid "Sin el servicio, este equipo no barre la red ni informa al portal. Esta ventana se pondrá al día sola en cuanto arranque."
+msgstr "Sans le service, cet ordinateur ne balaie pas le réseau et ne rend pas compte au portail. Cette fenêtre se mettra à jour dès qu'il démarrera."
+
+msgid "Sin tareas en marcha"
+msgstr "Aucune tâche en cours"
+
+msgid "Sin tope"
+msgstr "Sans plafond"
+
+msgid "Sistema"
+msgstr "Système"
+
+msgid "Solo avisar"
+msgstr "Avertir seulement"
+
+msgid "Solo lectura — reiniciar como administrador para hacer cambios"
+msgstr "Lecture seule — redémarrer en tant qu'administrateur pour faire des modifications"
+
+msgid "Suave"
+msgstr "Douce"
+
+msgid "Suavidad máxima"
+msgstr "Douceur maximale"
+
+msgid "Tarea"
+msgstr "Tâche"
+
+msgid "Tarea en curso"
+msgstr "Tâche en cours"
+
+msgid "Tareas"
+msgstr "Tâches"
+
+msgid "Todas las tareas"
+msgstr "Toutes les tâches"
+
+msgid "Todavía no ha terminado ninguna tarea."
+msgstr "Aucune tâche n'est encore terminée."
+
+msgid "Todavía no hay nada en el registro."
+msgstr "Le journal est encore vide."
+
+msgid "Todo en orden: el agente llega al portal y el portal lo acepta."
+msgstr "Tout va bien : l'agent atteint le portail et le portail l'accepte."
+
+msgid "Todos los niveles"
+msgstr "Tous les niveaux"
+
+msgid "Token de solo lectura"
+msgstr "Jeton en lecture seule"
+
+msgid "Token del agente"
+msgstr "Jeton de l'agent"
+
+msgid "Trabajando…"
+msgstr "En cours…"
+
+msgid "Trae a Cenya lo que ya tienes en NetBox, leído desde dentro de tu red."
+msgstr "Apportez dans Cenya ce que vous avez déjà dans NetBox, lu depuis l'intérieur de votre réseau."
+
+msgid "Un aviso cuando el agente deja de poder trabajar."
+msgstr "Une notification quand l'agent ne peut plus travailler."
+
+msgid "Un fichero con el registro, los ajustes locales y el estado, sin contraseñas ni tokens, para enviarlo a soporte."
+msgstr "Un fichier avec le journal, les paramètres locaux et l'état, sans mots de passe ni jetons, à envoyer à l'assistance."
+
+msgid "Una hora"
+msgstr "Une heure"
+
+msgid "Versión"
+msgstr "Version"
+
+msgid "Vigente"
+msgstr "Actuelle"
+
+msgid "Vuelve a ejecutar el instalador de Cenya Agent para recuperarlo."
+msgstr "Relancez le programme d'installation de Cenya Agent pour le récupérer."
+
+msgid "Windows no deja a esta cuenta hablar con el servicio del agente."
+msgstr "Windows n'autorise pas ce compte à parler au service de l'agent."
+
+msgid "Windows no ha dejado hacerlo: hace falta un administrador."
+msgstr "Windows ne l'a pas permis : il faut un administrateur."
+
+msgid "Windows no ha podido hacerlo: %(detail)s"
+msgstr "Windows n'a pas pu le faire : %(detail)s"
+
+msgid "Ya conocidos"
+msgstr "Déjà connus"
+
+msgid "Ya está en la lista."
+msgstr "C'est déjà dans la liste."
+
+msgid "ahora"
+msgstr "maintenant"
+
+msgid "cenya://portal.midominio.com/XXXX-XXXX-XXXX"
+msgstr "cenya://portail.mondomaine.fr/XXXX-XXXX-XXXX"
+
+msgid "hoy, %(clock)s"
+msgstr "aujourd'hui, %(clock)s"
+
+msgid "http://proxy.midominio.local:8080"
+msgstr "http://proxy.mondomaine.local:8080"
+
+msgid "https://netbox.midominio.local"
+msgstr "https://netbox.mondomaine.local"
+
+msgid "mañana, %(clock)s"
+msgstr "demain, %(clock)s"
+
+msgid "¿Cambiar de portal?"
+msgstr "Changer de portail ?"
+
+msgid "¿Cómo se crea? En NetBox, tu usuario → API Tokens → Añadir, sin marcar «Write enabled». Se usa una vez y no se guarda."
+msgstr "Comment le créer ? Dans NetBox, votre utilisateur → API Tokens → Ajouter, sans cocher « Write enabled ». Il est utilisé une fois et n'est pas conservé."
+
+msgid "¿Desconectar este equipo?"
+msgstr "Déconnecter cet ordinateur ?"
+
+msgid "Última ejecución"
+msgstr "Dernière exécution"
+
+msgid "Último contacto %(ago)s"
+msgstr "Dernier contact %(ago)s"
+
+msgid "Último intento %(ago)s"
+msgstr "Dernière tentative %(ago)s"
+
+msgid "Último resultado"
+msgstr "Dernier résultat"
+
+msgid "%(n)d objeto leído"
+msgid_plural "%(n)d objetos leídos"
+msgstr[0] "%(n)d objet lu"
+msgstr[1] "%(n)d objets lus"

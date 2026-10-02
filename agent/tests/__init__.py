@@ -26,6 +26,11 @@ os.environ.setdefault(
 # Asignado y no `setdefault`: una máquina con la variable puesta a otro idioma
 # rompería tests que nada tienen que ver con traducir.
 os.environ["CENYA_LANGUAGE"] = "es"
+# El canal local (agent/app/channel.py): ningún test puede llegar al *named
+# pipe* del servicio de verdad instalado en la máquina. Los que hablan por el
+# canal levantan el servidor falso en un nombre al azar y lo pasan explícito.
+os.environ["CENYA_PIPE_NAME"] = r"\\.\pipe\CenyaAgentTests-nobody"
+os.environ["CENYA_SOCKET_PATH"] = os.path.join(tempfile.mkdtemp(prefix="cenya-agent-pipe-"), "nobody.sock")
 # El almacén del token (`agent/store.py`) también: sin esto, un test que carga
 # la configuración leería el enrolamiento de un agente real de esta máquina.
 os.environ["CENYA_STATE_DIR"] = tempfile.mkdtemp(prefix="cenya-agent-state-")
