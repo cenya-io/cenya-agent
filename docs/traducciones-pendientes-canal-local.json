@@ -1,0 +1,876 @@
+{
+  "%(host)s rechaza la conexión al puerto %(port)s.": {
+    "en": "%(host)s refuses the connection to port %(port)s.",
+    "de": "%(host)s lehnt die Verbindung zu Port %(port)s ab.",
+    "fr": "%(host)s refuse la connexion au port %(port)s.",
+    "pt_BR": "%(host)s recusa a conexão na porta %(port)s."
+  },
+  "%(n)d envío pendiente en la cola local.": {
+    "plural": "%(n)d envíos pendientes en la cola local.",
+    "en": [
+      "%(n)d upload pending in the local queue.",
+      "%(n)d uploads pending in the local queue."
+    ],
+    "de": [
+      "%(n)d Sendung wartet in der lokalen Warteschlange.",
+      "%(n)d Sendungen warten in der lokalen Warteschlange."
+    ],
+    "fr": [
+      "%(n)d envoi en attente dans la file locale.",
+      "%(n)d envois en attente dans la file locale."
+    ],
+    "pt_BR": [
+      "%(n)d envio pendente na fila local.",
+      "%(n)d envios pendentes na fila local."
+    ]
+  },
+  "%(n)d hora": {
+    "plural": "%(n)d horas",
+    "en": [
+      "%(n)d hour",
+      "%(n)d hours"
+    ],
+    "de": [
+      "%(n)d Stunde",
+      "%(n)d Stunden"
+    ],
+    "fr": [
+      "%(n)d heure",
+      "%(n)d heures"
+    ],
+    "pt_BR": [
+      "%(n)d hora",
+      "%(n)d horas"
+    ]
+  },
+  "%(n)d minuto": {
+    "plural": "%(n)d minutos",
+    "en": [
+      "%(n)d minute",
+      "%(n)d minutes"
+    ],
+    "de": [
+      "%(n)d Minute",
+      "%(n)d Minuten"
+    ],
+    "fr": [
+      "%(n)d minute",
+      "%(n)d minutes"
+    ],
+    "pt_BR": [
+      "%(n)d minuto",
+      "%(n)d minutos"
+    ]
+  },
+  "%(n)d segundo": {
+    "plural": "%(n)d segundos",
+    "en": [
+      "%(n)d second",
+      "%(n)d seconds"
+    ],
+    "de": [
+      "%(n)d Sekunde",
+      "%(n)d Sekunden"
+    ],
+    "fr": [
+      "%(n)d seconde",
+      "%(n)d secondes"
+    ],
+    "pt_BR": [
+      "%(n)d segundo",
+      "%(n)d segundos"
+    ]
+  },
+  "%(task)s: cada %(every)s, última %(last)s (%(status)s), próxima %(next)s": {
+    "en": "%(task)s: every %(every)s, last %(last)s (%(status)s), next %(next)s",
+    "de": "%(task)s: alle %(every)s, zuletzt %(last)s (%(status)s), nächste %(next)s",
+    "fr": "%(task)s : toutes les %(every)s, dernière %(last)s (%(status)s), prochaine %(next)s",
+    "pt_BR": "%(task)s: a cada %(every)s, última %(last)s (%(status)s), próxima %(next)s"
+  },
+  "Agente en pausa hasta las %(clock)s. La tarea en curso, si hay una, termina.": {
+    "en": "Agent paused until %(clock)s. The task in progress, if any, will finish.",
+    "de": "Agent pausiert bis %(clock)s. Eine laufende Aufgabe wird noch beendet.",
+    "fr": "Agent en pause jusqu'à %(clock)s. La tâche en cours, s'il y en a une, se termine.",
+    "pt_BR": "Agente em pausa até %(clock)s. A tarefa em andamento, se houver, termina."
+  },
+  "Ahora: en pausa hasta las %(clock)s.": {
+    "en": "Now: paused until %(clock)s.",
+    "de": "Jetzt: pausiert bis %(clock)s.",
+    "fr": "Maintenant : en pause jusqu'à %(clock)s.",
+    "pt_BR": "Agora: em pausa até %(clock)s."
+  },
+  "Ahora: esperando a la siguiente tarea.": {
+    "en": "Now: waiting for the next task.",
+    "de": "Jetzt: wartet auf die nächste Aufgabe.",
+    "fr": "Maintenant : en attente de la prochaine tâche.",
+    "pt_BR": "Agora: aguardando a próxima tarefa."
+  },
+  "Ahora: trabajando en %(task)s%(progress)s.": {
+    "en": "Now: working on %(task)s%(progress)s.",
+    "de": "Jetzt: arbeitet an %(task)s%(progress)s.",
+    "fr": "Maintenant : travaille sur %(task)s%(progress)s.",
+    "pt_BR": "Agora: trabalhando em %(task)s%(progress)s."
+  },
+  "Ajuste desconocido.": {
+    "en": "Unknown setting.",
+    "de": "Unbekannte Einstellung.",
+    "fr": "Paramètre inconnu.",
+    "pt_BR": "Configuração desconhecida."
+  },
+  "Antes tiene que llegar la configuración del servidor.": {
+    "en": "The server's configuration has to arrive first.",
+    "de": "Zuerst muss die Konfiguration vom Server ankommen.",
+    "fr": "La configuration du serveur doit d'abord arriver.",
+    "pt_BR": "Antes precisa chegar a configuração do servidor."
+  },
+  "Cenya Agent %(version)s": {
+    "en": "Cenya Agent %(version)s",
+    "de": "Cenya Agent %(version)s",
+    "fr": "Cenya Agent %(version)s",
+    "pt_BR": "Cenya Agent %(version)s"
+  },
+  "Conectado como «%(name)s» a %(portal)s (protocolo %(protocol)s).": {
+    "en": "Connected as “%(name)s” to %(portal)s (protocol %(protocol)s).",
+    "de": "Verbunden als „%(name)s“ mit %(portal)s (Protokoll %(protocol)s).",
+    "fr": "Connecté en tant que « %(name)s » à %(portal)s (protocole %(protocol)s).",
+    "pt_BR": "Conectado como “%(name)s” a %(portal)s (protocolo %(protocol)s)."
+  },
+  "Conectado como «%(name)s» a %(portal)s. El agente se reinicia con la conexión nueva.": {
+    "en": "Connected as “%(name)s” to %(portal)s. The agent restarts with the new connection.",
+    "de": "Verbunden als „%(name)s“ mit %(portal)s. Der Agent startet mit der neuen Verbindung neu.",
+    "fr": "Connecté en tant que « %(name)s » à %(portal)s. L'agent redémarre avec la nouvelle connexion.",
+    "pt_BR": "Conectado como “%(name)s” a %(portal)s. O agente reinicia com a nova conexão."
+  },
+  "Conexión con el portal:": {
+    "en": "Connection to the portal:",
+    "de": "Verbindung zum Portal:",
+    "fr": "Connexion au portail :",
+    "pt_BR": "Conexão com o portal:"
+  },
+  "Conexión: correcta (último contacto a las %(clock)s).": {
+    "en": "Connection: working (last contact at %(clock)s).",
+    "de": "Verbindung: in Ordnung (letzter Kontakt um %(clock)s).",
+    "fr": "Connexion : correcte (dernier contact à %(clock)s).",
+    "pt_BR": "Conexão: correta (último contato às %(clock)s)."
+  },
+  "Conexión: el servidor ha rechazado a este agente; hay que conectarlo de nuevo.": {
+    "en": "Connection: the server has rejected this agent; it must be connected again.",
+    "de": "Verbindung: Der Server hat diesen Agenten abgelehnt; er muss neu verbunden werden.",
+    "fr": "Connexion : le serveur a refusé cet agent ; il faut le reconnecter.",
+    "pt_BR": "Conexão: o servidor rejeitou este agente; é preciso conectá-lo de novo."
+  },
+  "Conexión: falla (%(error)s).": {
+    "en": "Connection: failing (%(error)s).",
+    "de": "Verbindung: fehlerhaft (%(error)s).",
+    "fr": "Connexion : en échec (%(error)s).",
+    "pt_BR": "Conexão: com falha (%(error)s)."
+  },
+  "Conexión: la instalación de Cenya está en solo lectura.": {
+    "en": "Connection: the Cenya installation is read-only.",
+    "de": "Verbindung: Die Cenya-Installation ist schreibgeschützt.",
+    "fr": "Connexion : l'installation Cenya est en lecture seule.",
+    "pt_BR": "Conexão: a instalação do Cenya está somente leitura."
+  },
+  "Conexión: todavía sin noticias del servidor.": {
+    "en": "Connection: no word from the server yet.",
+    "de": "Verbindung: noch keine Antwort vom Server.",
+    "fr": "Connexion : pas encore de nouvelles du serveur.",
+    "pt_BR": "Conexão: ainda sem notícias do servidor."
+  },
+  "El campo «args» tiene que ser un objeto.": {
+    "en": "The “args” field must be an object.",
+    "de": "Das Feld „args“ muss ein Objekt sein.",
+    "fr": "Le champ « args » doit être un objet.",
+    "pt_BR": "O campo “args” precisa ser um objeto."
+  },
+  "El campo «id» tiene que ser un número o un texto.": {
+    "en": "The “id” field must be a number or a string.",
+    "de": "Das Feld „id“ muss eine Zahl oder ein Text sein.",
+    "fr": "Le champ « id » doit être un nombre ou un texte.",
+    "pt_BR": "O campo “id” precisa ser um número ou um texto."
+  },
+  "El canal del agente lo ha abierto otro programa, no el servicio de Cenya: no se le envía nada. Reinicia el servicio y avisa a quien administre este equipo.": {
+    "en": "The agent's channel was opened by another program, not the Cenya service: nothing is sent to it. Restart the service and tell whoever administers this computer.",
+    "de": "Der Kanal des Agenten wurde von einem anderen Programm geöffnet, nicht vom Cenya-Dienst: Es wird nichts gesendet. Starte den Dienst neu und informiere den Administrator dieses Computers.",
+    "fr": "Le canal de l'agent a été ouvert par un autre programme, pas par le service Cenya : rien ne lui est envoyé. Redémarre le service et préviens l'administrateur de cet ordinateur.",
+    "pt_BR": "O canal do agente foi aberto por outro programa, não pelo serviço do Cenya: nada é enviado a ele. Reinicie o serviço e avise quem administra este computador."
+  },
+  "El certificado del portal es válido.": {
+    "en": "The portal's certificate is valid.",
+    "de": "Das Zertifikat des Portals ist gültig.",
+    "fr": "Le certificat du portail est valide.",
+    "pt_BR": "O certificado do portal é válido."
+  },
+  "El certificado del portal no es válido: %(reason)s": {
+    "en": "The portal's certificate is not valid: %(reason)s",
+    "de": "Das Zertifikat des Portals ist ungültig: %(reason)s",
+    "fr": "Le certificat du portail n'est pas valide : %(reason)s",
+    "pt_BR": "O certificado do portal não é válido: %(reason)s"
+  },
+  "El certificado es válido con la lista de CA de Mozilla (no con la del sistema).": {
+    "en": "The certificate is valid with Mozilla's CA list (not the system's).",
+    "de": "Das Zertifikat ist mit der CA-Liste von Mozilla gültig (nicht mit der des Systems).",
+    "fr": "Le certificat est valide avec la liste d'AC de Mozilla (pas avec celle du système).",
+    "pt_BR": "O certificado é válido com a lista de CAs da Mozilla (não com a do sistema)."
+  },
+  "El certificado se comprueba a través del proxy, en el paso siguiente.": {
+    "en": "The certificate is checked through the proxy, in the next step.",
+    "de": "Das Zertifikat wird im nächsten Schritt über den Proxy geprüft.",
+    "fr": "Le certificat est vérifié via le proxy, à l'étape suivante.",
+    "pt_BR": "O certificado é verificado pelo proxy, no próximo passo."
+  },
+  "El nombre %(host)s se resuelve.": {
+    "en": "The name %(host)s resolves.",
+    "de": "Der Name %(host)s wird aufgelöst.",
+    "fr": "Le nom %(host)s est résolu.",
+    "pt_BR": "O nome %(host)s é resolvido."
+  },
+  "El puerto %(port)s de %(host)s acepta conexiones.": {
+    "en": "Port %(port)s on %(host)s accepts connections.",
+    "de": "Port %(port)s auf %(host)s nimmt Verbindungen an.",
+    "fr": "Le port %(port)s de %(host)s accepte les connexions.",
+    "pt_BR": "A porta %(port)s de %(host)s aceita conexões."
+  },
+  "El puerto %(port)s de %(host)s no contesta.": {
+    "en": "Port %(port)s on %(host)s does not answer.",
+    "de": "Port %(port)s auf %(host)s antwortet nicht.",
+    "fr": "Le port %(port)s de %(host)s ne répond pas.",
+    "pt_BR": "A porta %(port)s de %(host)s não responde."
+  },
+  "El servicio cerró la conexión.": {
+    "en": "The service closed the connection.",
+    "de": "Der Dienst hat die Verbindung geschlossen.",
+    "fr": "Le service a fermé la connexion.",
+    "pt_BR": "O serviço fechou a conexão."
+  },
+  "El servicio contestó algo que no se entiende.": {
+    "en": "The service answered something that cannot be understood.",
+    "de": "Der Dienst hat etwas Unverständliches geantwortet.",
+    "fr": "Le service a répondu quelque chose d'incompréhensible.",
+    "pt_BR": "O serviço respondeu algo que não se entende."
+  },
+  "El servicio del agente no está en marcha en este equipo.": {
+    "en": "The agent service is not running on this computer.",
+    "de": "Der Agentendienst läuft auf diesem Computer nicht.",
+    "fr": "Le service de l'agent ne tourne pas sur cet ordinateur.",
+    "pt_BR": "O serviço do agente não está em execução neste computador."
+  },
+  "El servicio no ha contestado a tiempo.": {
+    "en": "The service did not answer in time.",
+    "de": "Der Dienst hat nicht rechtzeitig geantwortet.",
+    "fr": "Le service n'a pas répondu à temps.",
+    "pt_BR": "O serviço não respondeu a tempo."
+  },
+  "El servidor acepta a este agente.": {
+    "en": "The server accepts this agent.",
+    "de": "Der Server akzeptiert diesen Agenten.",
+    "fr": "Le serveur accepte cet agent.",
+    "pt_BR": "O servidor aceita este agente."
+  },
+  "El servidor ha rechazado a este agente: no se empieza ninguna tarea.": {
+    "en": "The server has rejected this agent: no task is started.",
+    "de": "Der Server hat diesen Agenten abgelehnt: Es wird keine Aufgabe gestartet.",
+    "fr": "Le serveur a refusé cet agent : aucune tâche n'est lancée.",
+    "pt_BR": "O servidor rejeitou este agente: nenhuma tarefa é iniciada."
+  },
+  "El servidor ha rechazado a este agente: no se usa ninguna credencial.": {
+    "en": "The server has rejected this agent: no credential is used.",
+    "de": "Der Server hat diesen Agenten abgelehnt: Es werden keine Zugangsdaten verwendet.",
+    "fr": "Le serveur a refusé cet agent : aucun identifiant n'est utilisé.",
+    "pt_BR": "O servidor rejeitou este agente: nenhuma credencial é usada."
+  },
+  "El servidor rechaza el token de este agente: hay que enrolarlo de nuevo.": {
+    "en": "The server rejects this agent's token: it must be enrolled again.",
+    "de": "Der Server lehnt das Token dieses Agenten ab: Er muss neu registriert werden.",
+    "fr": "Le serveur refuse le jeton de cet agent : il faut le réenrôler.",
+    "pt_BR": "O servidor rejeita o token deste agente: é preciso registrá-lo de novo."
+  },
+  "El servidor respondió %(status)s: %(detail)s": {
+    "en": "The server answered %(status)s: %(detail)s",
+    "de": "Der Server antwortete %(status)s: %(detail)s",
+    "fr": "Le serveur a répondu %(status)s : %(detail)s",
+    "pt_BR": "O servidor respondeu %(status)s: %(detail)s"
+  },
+  "El servidor solo habla el protocolo 1: ahí no hay tareas sueltas, solo el barrido completo.": {
+    "en": "The server only speaks protocol 1: there are no separate tasks there, only the full sweep.",
+    "de": "Der Server spricht nur Protokoll 1: Dort gibt es keine einzelnen Aufgaben, nur den vollständigen Scan.",
+    "fr": "Le serveur ne parle que le protocole 1 : pas de tâches séparées, seulement le balayage complet.",
+    "pt_BR": "O servidor só fala o protocolo 1: lá não há tarefas avulsas, só a varredura completa."
+  },
+  "El token de este agente lo fija la variable CENYA_AGENT_TOKEN: cámbiala allí.": {
+    "en": "This agent's token is set by the CENYA_AGENT_TOKEN variable: change it there.",
+    "de": "Das Token dieses Agenten wird durch die Variable CENYA_AGENT_TOKEN festgelegt: Ändere es dort.",
+    "fr": "Le jeton de cet agent est fixé par la variable CENYA_AGENT_TOKEN : modifie-la là.",
+    "pt_BR": "O token deste agente é definido pela variável CENYA_AGENT_TOKEN: altere-a lá."
+  },
+  "Error inesperado en el agente (%(type)s).": {
+    "en": "Unexpected error in the agent (%(type)s).",
+    "de": "Unerwarteter Fehler im Agenten (%(type)s).",
+    "fr": "Erreur inattendue dans l'agent (%(type)s).",
+    "pt_BR": "Erro inesperado no agente (%(type)s)."
+  },
+  "Esa dirección está excluida en este agente: no se sondea.": {
+    "en": "That address is excluded on this agent: it is not probed.",
+    "de": "Diese Adresse ist in diesem Agenten ausgeschlossen: Sie wird nicht untersucht.",
+    "fr": "Cette adresse est exclue sur cet agent : elle n'est pas sondée.",
+    "pt_BR": "Esse endereço está excluído neste agente: não é sondado."
+  },
+  "Esa hora ya ha pasado.": {
+    "en": "That time has already passed.",
+    "de": "Dieser Zeitpunkt ist bereits vorbei.",
+    "fr": "Cette heure est déjà passée.",
+    "pt_BR": "Esse horário já passou."
+  },
+  "Esta cuenta no tiene permiso para hablar con el servicio del agente.": {
+    "en": "This account is not allowed to talk to the agent service.",
+    "de": "Dieses Konto darf nicht mit dem Agentendienst sprechen.",
+    "fr": "Ce compte n'a pas le droit de parler au service de l'agent.",
+    "pt_BR": "Esta conta não tem permissão para falar com o serviço do agente."
+  },
+  "Esta instalación no puede hablar con el servicio: falta pywin32.": {
+    "en": "This installation cannot talk to the service: pywin32 is missing.",
+    "de": "Diese Installation kann nicht mit dem Dienst sprechen: pywin32 fehlt.",
+    "fr": "Cette installation ne peut pas parler au service : pywin32 manque.",
+    "pt_BR": "Esta instalação não consegue falar com o serviço: falta o pywin32."
+  },
+  "Esta instalación:": {
+    "en": "This installation:",
+    "de": "Diese Installation:",
+    "fr": "Cette installation :",
+    "pt_BR": "Esta instalação:"
+  },
+  "Esta operación solo la puede hacer un administrador.": {
+    "en": "Only an administrator can do this operation.",
+    "de": "Diese Aktion darf nur ein Administrator ausführen.",
+    "fr": "Seul un administrateur peut effectuer cette opération.",
+    "pt_BR": "Só um administrador pode fazer esta operação."
+  },
+  "Este agente no estaba conectado a ningún servidor.": {
+    "en": "This agent was not connected to any server.",
+    "de": "Dieser Agent war mit keinem Server verbunden.",
+    "fr": "Cet agent n'était connecté à aucun serveur.",
+    "pt_BR": "Este agente não estava conectado a nenhum servidor."
+  },
+  "Este agente no está enrolado.": {
+    "en": "This agent is not enrolled.",
+    "de": "Dieser Agent ist nicht registriert.",
+    "fr": "Cet agent n'est pas enrôlé.",
+    "pt_BR": "Este agente não está registrado."
+  },
+  "Este agente no está enrolado: conéctalo con una cadena de Ajustes → Agentes.": {
+    "en": "This agent is not enrolled: connect it with a string from Settings → Agents.",
+    "de": "Dieser Agent ist nicht registriert: Verbinde ihn mit einer Zeichenfolge aus Einstellungen → Agenten.",
+    "fr": "Cet agent n'est pas enrôlé : connecte-le avec une chaîne de Paramètres → Agents.",
+    "pt_BR": "Este agente não está registrado: conecte-o com uma cadeia de Configurações → Agentes."
+  },
+  "Este agente no sabe hacer todavía esa operación.": {
+    "en": "This agent cannot do that operation yet.",
+    "de": "Dieser Agent beherrscht diese Aktion noch nicht.",
+    "fr": "Cet agent ne sait pas encore faire cette opération.",
+    "pt_BR": "Este agente ainda não sabe fazer essa operação."
+  },
+  "Este agente todavía no sabe subir la exportación a Cenya: guárdala en un fichero.": {
+    "en": "This agent cannot upload the export to Cenya yet: save it to a file.",
+    "de": "Dieser Agent kann den Export noch nicht zu Cenya hochladen: Speichere ihn in einer Datei.",
+    "fr": "Cet agent ne sait pas encore envoyer l'export à Cenya : enregistre-le dans un fichier.",
+    "pt_BR": "Este agente ainda não sabe enviar a exportação ao Cenya: salve-a em um arquivo."
+  },
+  "Esto solo lo puede hacer root o la cuenta con la que corre el agente.": {
+    "en": "Only root or the account the agent runs as can do this.",
+    "de": "Das darf nur root oder das Konto, unter dem der Agent läuft.",
+    "fr": "Seul root ou le compte sous lequel tourne l'agent peut faire cela.",
+    "pt_BR": "Só o root ou a conta em que o agente roda pode fazer isso."
+  },
+  "Esto solo lo puede hacer un administrador: abre la consola con «Ejecutar como administrador».": {
+    "en": "Only an administrator can do this: open the console with “Run as administrator”.",
+    "de": "Das darf nur ein Administrator: Öffne die Konsole mit „Als Administrator ausführen“.",
+    "fr": "Seul un administrateur peut faire cela : ouvre la console avec « Exécuter en tant qu'administrateur ».",
+    "pt_BR": "Só um administrador pode fazer isso: abra o console com “Executar como administrador”."
+  },
+  "Exportando NetBox: %(step)s (%(done)s de %(total)s).": {
+    "en": "Exporting NetBox: %(step)s (%(done)s of %(total)s).",
+    "de": "NetBox wird exportiert: %(step)s (%(done)s von %(total)s).",
+    "fr": "Export de NetBox : %(step)s (%(done)s sur %(total)s).",
+    "pt_BR": "Exportando o NetBox: %(step)s (%(done)s de %(total)s)."
+  },
+  "Falló la negociación TLS (%(reason)s).": {
+    "en": "The TLS handshake failed (%(reason)s).",
+    "de": "Der TLS-Handshake ist fehlgeschlagen (%(reason)s).",
+    "fr": "La négociation TLS a échoué (%(reason)s).",
+    "pt_BR": "A negociação TLS falhou (%(reason)s)."
+  },
+  "Falta el campo «op».": {
+    "en": "The “op” field is missing.",
+    "de": "Das Feld „op“ fehlt.",
+    "fr": "Le champ « op » manque.",
+    "pt_BR": "Falta o campo “op”."
+  },
+  "Falta el token de NetBox.": {
+    "en": "The NetBox token is missing.",
+    "de": "Das NetBox-Token fehlt.",
+    "fr": "Le jeton NetBox manque.",
+    "pt_BR": "Falta o token do NetBox."
+  },
+  "Falta la URL de NetBox.": {
+    "en": "The NetBox URL is missing.",
+    "de": "Die NetBox-URL fehlt.",
+    "fr": "L'URL de NetBox manque.",
+    "pt_BR": "Falta a URL do NetBox."
+  },
+  "Falta la cadena de conexión (la de Ajustes → Agentes).": {
+    "en": "The connection string is missing (the one from Settings → Agents).",
+    "de": "Die Verbindungszeichenfolge fehlt (die aus Einstellungen → Agenten).",
+    "fr": "La chaîne de connexion manque (celle de Paramètres → Agents).",
+    "pt_BR": "Falta a cadeia de conexão (a de Configurações → Agentes)."
+  },
+  "Falta la cadena de conexión: cenya-agent connect cenya://portal.midominio.com/XXXX-XXXX-XXXX": {
+    "en": "The connection string is missing: cenya-agent connect cenya://portal.mydomain.com/XXXX-XXXX-XXXX",
+    "de": "Die Verbindungszeichenfolge fehlt: cenya-agent connect cenya://portal.meinedomain.de/XXXX-XXXX-XXXX",
+    "fr": "La chaîne de connexion manque : cenya-agent connect cenya://portail.mondomaine.fr/XXXX-XXXX-XXXX",
+    "pt_BR": "Falta a cadeia de conexão: cenya-agent connect cenya://portal.meudominio.com.br/XXXX-XXXX-XXXX"
+  },
+  "Falta «path»: la ruta completa donde dejar el fichero.": {
+    "en": "“path” is missing: the full path where the file should go.",
+    "de": "„path“ fehlt: der vollständige Pfad für die Datei.",
+    "fr": "« path » manque : le chemin complet où déposer le fichier.",
+    "pt_BR": "Falta “path”: o caminho completo onde deixar o arquivo."
+  },
+  "Falta «until» o «seconds».": {
+    "en": "“until” or “seconds” is missing.",
+    "de": "„until“ oder „seconds“ fehlt.",
+    "fr": "« until » ou « seconds » manque.",
+    "pt_BR": "Falta “until” ou “seconds”."
+  },
+  "Hay ajustes que no son válidos; no se ha cambiado nada.": {
+    "en": "Some settings are not valid; nothing has been changed.",
+    "de": "Einige Einstellungen sind ungültig; nichts wurde geändert.",
+    "fr": "Certains paramètres ne sont pas valides ; rien n'a été modifié.",
+    "pt_BR": "Há configurações inválidas; nada foi alterado."
+  },
+  "Hay demasiadas conexiones abiertas con el agente.": {
+    "en": "Too many connections are open to the agent.",
+    "de": "Es sind zu viele Verbindungen zum Agenten offen.",
+    "fr": "Trop de connexions sont ouvertes avec l'agent.",
+    "pt_BR": "Há conexões demais abertas com o agente."
+  },
+  "Hay una versión nueva del agente: %(version)s.": {
+    "en": "A new version of the agent is available: %(version)s.",
+    "de": "Eine neue Version des Agenten ist verfügbar: %(version)s.",
+    "fr": "Une nouvelle version de l'agent est disponible : %(version)s.",
+    "pt_BR": "Há uma nova versão do agente: %(version)s."
+  },
+  "Idioma no disponible: es, en, de, fr, pt_BR o vacío.": {
+    "en": "Language not available: es, en, de, fr, pt_BR or empty.",
+    "de": "Sprache nicht verfügbar: es, en, de, fr, pt_BR oder leer.",
+    "fr": "Langue non disponible : es, en, de, fr, pt_BR ou vide.",
+    "pt_BR": "Idioma indisponível: es, en, de, fr, pt_BR ou vazio."
+  },
+  "La dirección del portal no es válida.": {
+    "en": "The portal address is not valid.",
+    "de": "Die Portaladresse ist ungültig.",
+    "fr": "L'adresse du portail n'est pas valide.",
+    "pt_BR": "O endereço do portal não é válido."
+  },
+  "La dirección del proxy no es válida.": {
+    "en": "The proxy address is not valid.",
+    "de": "Die Proxy-Adresse ist ungültig.",
+    "fr": "L'adresse du proxy n'est pas valide.",
+    "pt_BR": "O endereço do proxy não é válido."
+  },
+  "La dirección no es válida.": {
+    "en": "The address is not valid.",
+    "de": "Die Adresse ist ungültig.",
+    "fr": "L'adresse n'est pas valide.",
+    "pt_BR": "O endereço não é válido."
+  },
+  "La exportación falló (%(type)s).": {
+    "en": "The export failed (%(type)s).",
+    "de": "Der Export ist fehlgeschlagen (%(type)s).",
+    "fr": "L'export a échoué (%(type)s).",
+    "pt_BR": "A exportação falhou (%(type)s)."
+  },
+  "La instalación de Cenya está en solo lectura.": {
+    "en": "The Cenya installation is read-only.",
+    "de": "Die Cenya-Installation ist schreibgeschützt.",
+    "fr": "L'installation Cenya est en lecture seule.",
+    "pt_BR": "A instalação do Cenya está somente leitura."
+  },
+  "La instalación de Cenya está en solo lectura: la tarea espera a que vuelva a aceptar resultados.": {
+    "en": "The Cenya installation is read-only: the task waits until results are accepted again.",
+    "de": "Die Cenya-Installation ist schreibgeschützt: Die Aufgabe wartet, bis wieder Ergebnisse angenommen werden.",
+    "fr": "L'installation Cenya est en lecture seule : la tâche attend que les résultats soient de nouveau acceptés.",
+    "pt_BR": "A instalação do Cenya está somente leitura: a tarefa espera até que volte a aceitar resultados."
+  },
+  "La petición es demasiado grande.": {
+    "en": "The request is too large.",
+    "de": "Die Anfrage ist zu groß.",
+    "fr": "La requête est trop grande.",
+    "pt_BR": "A solicitação é grande demais."
+  },
+  "La petición no es JSON válido.": {
+    "en": "The request is not valid JSON.",
+    "de": "Die Anfrage ist kein gültiges JSON.",
+    "fr": "La requête n'est pas du JSON valide.",
+    "pt_BR": "A solicitação não é um JSON válido."
+  },
+  "La petición tiene que ser un objeto JSON.": {
+    "en": "The request must be a JSON object.",
+    "de": "Die Anfrage muss ein JSON-Objekt sein.",
+    "fr": "La requête doit être un objet JSON.",
+    "pt_BR": "A solicitação precisa ser um objeto JSON."
+  },
+  "La respuesta del servicio es demasiado grande.": {
+    "en": "The service's answer is too large.",
+    "de": "Die Antwort des Dienstes ist zu groß.",
+    "fr": "La réponse du service est trop grande.",
+    "pt_BR": "A resposta do serviço é grande demais."
+  },
+  "La respuesta es demasiado grande para el canal local.": {
+    "en": "The answer is too large for the local channel.",
+    "de": "Die Antwort ist zu groß für den lokalen Kanal.",
+    "fr": "La réponse est trop grande pour le canal local.",
+    "pt_BR": "A resposta é grande demais para o canal local."
+  },
+  "Los ajustes se guardaron, pero la conexión no se pudo rehacer con ellos.": {
+    "en": "The settings were saved, but the connection could not be rebuilt with them.",
+    "de": "Die Einstellungen wurden gespeichert, aber die Verbindung konnte damit nicht neu aufgebaut werden.",
+    "fr": "Les paramètres ont été enregistrés, mais la connexion n'a pas pu être refaite avec eux.",
+    "pt_BR": "As configurações foram salvas, mas não foi possível refazer a conexão com elas."
+  },
+  "Modo de proxy no válido: system, manual o none.": {
+    "en": "Invalid proxy mode: system, manual or none.",
+    "de": "Ungültiger Proxy-Modus: system, manual oder none.",
+    "fr": "Mode de proxy non valide : system, manual ou none.",
+    "pt_BR": "Modo de proxy inválido: system, manual ou none."
+  },
+  "No es un fichero de certificados que se pueda leer (PEM).": {
+    "en": "It is not a readable certificate file (PEM).",
+    "de": "Das ist keine lesbare Zertifikatsdatei (PEM).",
+    "fr": "Ce n'est pas un fichier de certificats lisible (PEM).",
+    "pt_BR": "Não é um arquivo de certificados legível (PEM)."
+  },
+  "No está conectado a ningún portal: cenya-agent connect <cadena>": {
+    "en": "Not connected to any portal: cenya-agent connect <string>",
+    "de": "Mit keinem Portal verbunden: cenya-agent connect <Zeichenfolge>",
+    "fr": "Connecté à aucun portail : cenya-agent connect <chaîne>",
+    "pt_BR": "Não está conectado a nenhum portal: cenya-agent connect <cadeia>"
+  },
+  "No existe ese fichero.": {
+    "en": "That file does not exist.",
+    "de": "Diese Datei existiert nicht.",
+    "fr": "Ce fichier n'existe pas.",
+    "pt_BR": "Esse arquivo não existe."
+  },
+  "No existe la carpeta %(path)s.": {
+    "en": "The folder %(path)s does not exist.",
+    "de": "Der Ordner %(path)s existiert nicht.",
+    "fr": "Le dossier %(path)s n'existe pas.",
+    "pt_BR": "A pasta %(path)s não existe."
+  },
+  "No hay nada que cambiar.": {
+    "en": "There is nothing to change.",
+    "de": "Es gibt nichts zu ändern.",
+    "fr": "Il n'y a rien à modifier.",
+    "pt_BR": "Não há nada para alterar."
+  },
+  "No se encuentra el nombre %(host)s.": {
+    "en": "The name %(host)s cannot be found.",
+    "de": "Der Name %(host)s wird nicht gefunden.",
+    "fr": "Le nom %(host)s est introuvable.",
+    "pt_BR": "O nome %(host)s não foi encontrado."
+  },
+  "No se pudieron guardar los ajustes en %(path)s.": {
+    "en": "The settings could not be saved in %(path)s.",
+    "de": "Die Einstellungen konnten nicht in %(path)s gespeichert werden.",
+    "fr": "Les paramètres n'ont pas pu être enregistrés dans %(path)s.",
+    "pt_BR": "Não foi possível salvar as configurações em %(path)s."
+  },
+  "No se pudo hablar con el servidor: %(detail)s": {
+    "en": "Could not talk to the server: %(detail)s",
+    "de": "Konnte nicht mit dem Server sprechen: %(detail)s",
+    "fr": "Impossible de parler au serveur : %(detail)s",
+    "pt_BR": "Não foi possível falar com o servidor: %(detail)s"
+  },
+  "No se puede abrir una conexión con %(host)s:%(port)s.": {
+    "en": "A connection to %(host)s:%(port)s cannot be opened.",
+    "de": "Es kann keine Verbindung zu %(host)s:%(port)s geöffnet werden.",
+    "fr": "Impossible d'ouvrir une connexion avec %(host)s:%(port)s.",
+    "pt_BR": "Não é possível abrir uma conexão com %(host)s:%(port)s."
+  },
+  "No se puede leer el fichero de CA configurado (%(path)s).": {
+    "en": "The configured CA file cannot be read (%(path)s).",
+    "de": "Die konfigurierte CA-Datei kann nicht gelesen werden (%(path)s).",
+    "fr": "Le fichier d'AC configuré est illisible (%(path)s).",
+    "pt_BR": "Não é possível ler o arquivo de CA configurado (%(path)s)."
+  },
+  "No son redes ni direcciones válidas: %(values)s": {
+    "en": "These are not valid networks or addresses: %(values)s",
+    "de": "Keine gültigen Netze oder Adressen: %(values)s",
+    "fr": "Ce ne sont pas des réseaux ou adresses valides : %(values)s",
+    "pt_BR": "Não são redes nem endereços válidos: %(values)s"
+  },
+  "Operación desconocida: %(op)s": {
+    "en": "Unknown operation: %(op)s",
+    "de": "Unbekannte Aktion: %(op)s",
+    "fr": "Opération inconnue : %(op)s",
+    "pt_BR": "Operação desconhecida: %(op)s"
+  },
+  "Para borrar el enrolamiento sin el servicio: cenya-agent goodbye": {
+    "en": "To remove the enrolment without the service: cenya-agent goodbye",
+    "de": "Um die Registrierung ohne den Dienst zu entfernen: cenya-agent goodbye",
+    "fr": "Pour supprimer l'enrôlement sans le service : cenya-agent goodbye",
+    "pt_BR": "Para apagar o registro sem o serviço: cenya-agent goodbye"
+  },
+  "Pausa local levantada.": {
+    "en": "Local pause lifted.",
+    "de": "Lokale Pause aufgehoben.",
+    "fr": "Pause locale levée.",
+    "pt_BR": "Pausa local retirada."
+  },
+  "Registro leído directamente de %(path)s:": {
+    "en": "Log read directly from %(path)s:",
+    "de": "Protokoll direkt aus %(path)s gelesen:",
+    "fr": "Journal lu directement depuis %(path)s :",
+    "pt_BR": "Registro lido diretamente de %(path)s:"
+  },
+  "Se enrola desde esta consola; después arranca el servicio.": {
+    "en": "Enrolling from this console; start the service afterwards.",
+    "de": "Registrierung über diese Konsole; starte danach den Dienst.",
+    "fr": "Enrôlement depuis cette console ; démarre ensuite le service.",
+    "pt_BR": "O registro é feito por este console; depois inicie o serviço."
+  },
+  "Se ha avisado al servidor: este agente queda dado de baja.": {
+    "en": "The server has been told: this agent is now deregistered.",
+    "de": "Der Server wurde informiert: Dieser Agent ist abgemeldet.",
+    "fr": "Le serveur a été prévenu : cet agent est désinscrit.",
+    "pt_BR": "O servidor foi avisado: este agente fica desativado."
+  },
+  "Se ha perdido la conexión con el servicio.": {
+    "en": "The connection to the service was lost.",
+    "de": "Die Verbindung zum Dienst ist verloren gegangen.",
+    "fr": "La connexion avec le service a été perdue.",
+    "pt_BR": "A conexão com o serviço foi perdida."
+  },
+  "Se prueba la conexión desde esta consola, sin el servicio.": {
+    "en": "Testing the connection from this console, without the service.",
+    "de": "Die Verbindung wird von dieser Konsole aus getestet, ohne den Dienst.",
+    "fr": "Test de la connexion depuis cette console, sans le service.",
+    "pt_BR": "Testando a conexão a partir deste console, sem o serviço."
+  },
+  "Sigue en pausa hasta las %(clock)s: esa pausa se puso desde la web y se quita allí.": {
+    "en": "Still paused until %(clock)s: that pause was set from the web and is lifted there.",
+    "de": "Weiterhin pausiert bis %(clock)s: Diese Pause wurde im Web gesetzt und wird dort aufgehoben.",
+    "fr": "Toujours en pause jusqu'à %(clock)s : cette pause a été mise depuis le web et se lève là-bas.",
+    "pt_BR": "Continua em pausa até %(clock)s: essa pausa foi definida na web e é retirada lá."
+  },
+  "Sin TLS: la dirección es http://.": {
+    "en": "No TLS: the address is http://.",
+    "de": "Kein TLS: Die Adresse ist http://.",
+    "fr": "Pas de TLS : l'adresse est en http://.",
+    "pt_BR": "Sem TLS: o endereço é http://."
+  },
+  "Tampoco se puede leer el registro (%(path)s) desde esta cuenta.": {
+    "en": "The log (%(path)s) cannot be read from this account either.",
+    "de": "Das Protokoll (%(path)s) kann von diesem Konto aus auch nicht gelesen werden.",
+    "fr": "Le journal (%(path)s) n'est pas lisible non plus depuis ce compte.",
+    "pt_BR": "O registro (%(path)s) também não pode ser lido por esta conta."
+  },
+  "Tarea %(task)s en cola: empieza en cuanto termine la que está en curso.": {
+    "en": "Task %(task)s queued: it starts as soon as the one in progress finishes.",
+    "de": "Aufgabe %(task)s eingereiht: Sie beginnt, sobald die laufende fertig ist.",
+    "fr": "Tâche %(task)s en file : elle démarre dès que celle en cours se termine.",
+    "pt_BR": "Tarefa %(task)s na fila: começa assim que terminar a que está em andamento."
+  },
+  "Tarea desconocida. Las tareas son: %(tasks)s.": {
+    "en": "Unknown task. The tasks are: %(tasks)s.",
+    "de": "Unbekannte Aufgabe. Die Aufgaben sind: %(tasks)s.",
+    "fr": "Tâche inconnue. Les tâches sont : %(tasks)s.",
+    "pt_BR": "Tarefa desconhecida. As tarefas são: %(tasks)s."
+  },
+  "Tareas:": {
+    "en": "Tasks:",
+    "de": "Aufgaben:",
+    "fr": "Tâches :",
+    "pt_BR": "Tarefas:"
+  },
+  "Tiene que ser un objeto con «mode» y «url».": {
+    "en": "It must be an object with “mode” and “url”.",
+    "de": "Muss ein Objekt mit „mode“ und „url“ sein.",
+    "fr": "Doit être un objet avec « mode » et « url ».",
+    "pt_BR": "Precisa ser um objeto com “mode” e “url”."
+  },
+  "Tiene que ser un objeto con «subnets» y «addresses».": {
+    "en": "It must be an object with “subnets” and “addresses”.",
+    "de": "Muss ein Objekt mit „subnets“ und „addresses“ sein.",
+    "fr": "Doit être un objet avec « subnets » et « addresses ».",
+    "pt_BR": "Precisa ser um objeto com “subnets” e “addresses”."
+  },
+  "Tiene que ser una ruta.": {
+    "en": "It must be a path.",
+    "de": "Muss ein Pfad sein.",
+    "fr": "Doit être un chemin.",
+    "pt_BR": "Precisa ser um caminho."
+  },
+  "Tiene que ser verdadero o falso.": {
+    "en": "It must be true or false.",
+    "de": "Muss wahr oder falsch sein.",
+    "fr": "Doit être vrai ou faux.",
+    "pt_BR": "Precisa ser verdadeiro ou falso."
+  },
+  "Una pausa no puede durar más de %(days)d días.": {
+    "en": "A pause cannot last more than %(days)d days.",
+    "de": "Eine Pause darf nicht länger als %(days)d Tage dauern.",
+    "fr": "Une pause ne peut pas durer plus de %(days)d jours.",
+    "pt_BR": "Uma pausa não pode durar mais de %(days)d dias."
+  },
+  "Uso: cenya-agent status | run <tarea> | pause [--hours N] | resume | logs [-n N] [-f] | doctor | connect <cadena> | disconnect": {
+    "en": "Usage: cenya-agent status | run <task> | pause [--hours N] | resume | logs [-n N] [-f] | doctor | connect <string> | disconnect",
+    "de": "Verwendung: cenya-agent status | run <Aufgabe> | pause [--hours N] | resume | logs [-n N] [-f] | doctor | connect <Zeichenfolge> | disconnect",
+    "fr": "Usage : cenya-agent status | run <tâche> | pause [--hours N] | resume | logs [-n N] [-f] | doctor | connect <chaîne> | disconnect",
+    "pt_BR": "Uso: cenya-agent status | run <tarefa> | pause [--hours N] | resume | logs [-n N] [-f] | doctor | connect <cadeia> | disconnect"
+  },
+  "Valor no válido: gentle, normal, fast o vacío.": {
+    "en": "Invalid value: gentle, normal, fast or empty.",
+    "de": "Ungültiger Wert: gentle, normal, fast oder leer.",
+    "fr": "Valeur non valide : gentle, normal, fast ou vide.",
+    "pt_BR": "Valor inválido: gentle, normal, fast ou vazio."
+  },
+  "Ya hay una exportación de NetBox en marcha.": {
+    "en": "A NetBox export is already running.",
+    "de": "Ein NetBox-Export läuft bereits.",
+    "fr": "Un export NetBox est déjà en cours.",
+    "pt_BR": "Já há uma exportação do NetBox em andamento."
+  },
+  "Ya se está cambiando la conexión de este agente.": {
+    "en": "This agent's connection is already being changed.",
+    "de": "Die Verbindung dieses Agenten wird bereits geändert.",
+    "fr": "La connexion de cet agent est déjà en cours de modification.",
+    "pt_BR": "A conexão deste agente já está sendo alterada."
+  },
+  "[agente] Ajustes locales cambiados desde esta máquina: %(fields)s.": {
+    "en": "[agent] Local settings changed from this machine: %(fields)s.",
+    "de": "[Agent] Lokale Einstellungen auf diesem Rechner geändert: %(fields)s.",
+    "fr": "[agent] Paramètres locaux modifiés depuis cette machine : %(fields)s.",
+    "pt_BR": "[agente] Configurações locais alteradas nesta máquina: %(fields)s."
+  },
+  "[agente] Conectado desde esta máquina como «%(name)s» en %(url)s.": {
+    "en": "[agent] Connected from this machine as “%(name)s” at %(url)s.",
+    "de": "[Agent] Von diesem Rechner aus verbunden als „%(name)s“ mit %(url)s.",
+    "fr": "[agent] Connecté depuis cette machine en tant que « %(name)s » à %(url)s.",
+    "pt_BR": "[agente] Conectado a partir desta máquina como “%(name)s” em %(url)s."
+  },
+  "[agente] Desconectado desde esta máquina.": {
+    "en": "[agent] Disconnected from this machine.",
+    "de": "[Agent] Von diesem Rechner aus getrennt.",
+    "fr": "[agent] Déconnecté depuis cette machine.",
+    "pt_BR": "[agente] Desconectado a partir desta máquina."
+  },
+  "[agente] En pausa desde esta máquina hasta %(until)s.": {
+    "en": "[agent] Paused from this machine until %(until)s.",
+    "de": "[Agent] Von diesem Rechner aus pausiert bis %(until)s.",
+    "fr": "[agent] En pause depuis cette machine jusqu'à %(until)s.",
+    "pt_BR": "[agente] Em pausa a partir desta máquina até %(until)s."
+  },
+  "[agente] Pausa local levantada desde esta máquina.": {
+    "en": "[agent] Local pause lifted from this machine.",
+    "de": "[Agent] Lokale Pause von diesem Rechner aus aufgehoben.",
+    "fr": "[agent] Pause locale levée depuis cette machine.",
+    "pt_BR": "[agente] Pausa local retirada a partir desta máquina."
+  },
+  "[bien]": {
+    "en": "[ok]",
+    "de": "[ok]",
+    "fr": "[ok]",
+    "pt_BR": "[ok]"
+  },
+  "[canal local] %(path)s existe y no es un socket: no se toca.": {
+    "en": "[local channel] %(path)s exists and is not a socket: it is left alone.",
+    "de": "[lokaler Kanal] %(path)s existiert und ist kein Socket: Es wird nicht angefasst.",
+    "fr": "[canal local] %(path)s existe et n'est pas un socket : on n'y touche pas.",
+    "pt_BR": "[canal local] %(path)s existe e não é um socket: não é alterado."
+  },
+  "[canal local] El canal local se ha cerrado por un error: %(error)s": {
+    "en": "[local channel] The local channel closed because of an error: %(error)s",
+    "de": "[lokaler Kanal] Der lokale Kanal wurde wegen eines Fehlers geschlossen: %(error)s",
+    "fr": "[canal local] Le canal local s'est fermé à cause d'une erreur : %(error)s",
+    "pt_BR": "[canal local] O canal local foi fechado por um erro: %(error)s"
+  },
+  "[canal local] Fallo inesperado en %(op)s: %(type)s": {
+    "en": "[local channel] Unexpected failure in %(op)s: %(type)s",
+    "de": "[lokaler Kanal] Unerwarteter Fehler in %(op)s: %(type)s",
+    "fr": "[canal local] Échec inattendu dans %(op)s : %(type)s",
+    "pt_BR": "[canal local] Falha inesperada em %(op)s: %(type)s"
+  },
+  "[canal local] No se puede abrir %(name)s (%(error)s): la aplicación y los comandos locales no podrán hablar con el servicio.": {
+    "en": "[local channel] Cannot open %(name)s (%(error)s): the application and the local commands will not be able to talk to the service.",
+    "de": "[lokaler Kanal] %(name)s kann nicht geöffnet werden (%(error)s): Die Anwendung und die lokalen Befehle können nicht mit dem Dienst sprechen.",
+    "fr": "[canal local] Impossible d'ouvrir %(name)s (%(error)s) : l'application et les commandes locales ne pourront pas parler au service.",
+    "pt_BR": "[canal local] Não é possível abrir %(name)s (%(error)s): o aplicativo e os comandos locais não poderão falar com o serviço."
+  },
+  "[canal local] Sin pywin32 no hay canal local: la aplicación y los comandos locales no podrán hablar con el servicio.": {
+    "en": "[local channel] Without pywin32 there is no local channel: the application and the local commands will not be able to talk to the service.",
+    "de": "[lokaler Kanal] Ohne pywin32 gibt es keinen lokalen Kanal: Die Anwendung und die lokalen Befehle können nicht mit dem Dienst sprechen.",
+    "fr": "[canal local] Sans pywin32, pas de canal local : l'application et les commandes locales ne pourront pas parler au service.",
+    "pt_BR": "[canal local] Sem pywin32 não há canal local: o aplicativo e os comandos locais não poderão falar com o serviço."
+  },
+  "[canal local] Ya hay otro agente escuchando en %(path)s.": {
+    "en": "[local channel] Another agent is already listening on %(path)s.",
+    "de": "[lokaler Kanal] Auf %(path)s lauscht bereits ein anderer Agent.",
+    "fr": "[canal local] Un autre agent écoute déjà sur %(path)s.",
+    "pt_BR": "[canal local] Já há outro agente escutando em %(path)s."
+  },
+  "[falla]": {
+    "en": "[fail]",
+    "de": "[Fehler]",
+    "fr": "[échec]",
+    "pt_BR": "[falha]"
+  },
+  "completa (colectores, librerías y traducciones).": {
+    "en": "complete (collectors, libraries and translations).",
+    "de": "vollständig (Kollektoren, Bibliotheken und Übersetzungen).",
+    "fr": "complète (collecteurs, bibliothèques et traductions).",
+    "pt_BR": "completa (coletores, bibliotecas e traduções)."
+  },
+  "incompleta: detalle con cenya-agent selftest.": {
+    "en": "incomplete: details with cenya-agent selftest.",
+    "de": "unvollständig: Details mit cenya-agent selftest.",
+    "fr": "incomplète : détails avec cenya-agent selftest.",
+    "pt_BR": "incompleta: detalhes com cenya-agent selftest."
+  },
+  "«after» tiene que ser el cursor de una respuesta anterior.": {
+    "en": "“after” must be the cursor from an earlier answer.",
+    "de": "„after“ muss der Cursor einer früheren Antwort sein.",
+    "fr": "« after » doit être le curseur d'une réponse précédente.",
+    "pt_BR": "“after” precisa ser o cursor de uma resposta anterior."
+  },
+  "«lines» tiene que ser un número entero positivo.": {
+    "en": "“lines” must be a positive whole number.",
+    "de": "„lines“ muss eine positive ganze Zahl sein.",
+    "fr": "« lines » doit être un entier positif.",
+    "pt_BR": "“lines” precisa ser um número inteiro positivo."
+  },
+  "«path» tiene que ser una ruta completa (absoluta).": {
+    "en": "“path” must be a full (absolute) path.",
+    "de": "„path“ muss ein vollständiger (absoluter) Pfad sein.",
+    "fr": "« path » doit être un chemin complet (absolu).",
+    "pt_BR": "“path” precisa ser um caminho completo (absoluto)."
+  },
+  "«seconds» tiene que ser un número de segundos mayor que cero.": {
+    "en": "“seconds” must be a number of seconds greater than zero.",
+    "de": "„seconds“ muss eine Anzahl Sekunden größer als null sein.",
+    "fr": "« seconds » doit être un nombre de secondes supérieur à zéro.",
+    "pt_BR": "“seconds” precisa ser um número de segundos maior que zero."
+  },
+  "«until» tiene que ser una fecha ISO 8601.": {
+    "en": "“until” must be an ISO 8601 date.",
+    "de": "„until“ muss ein Datum im Format ISO 8601 sein.",
+    "fr": "« until » doit être une date ISO 8601.",
+    "pt_BR": "“until” precisa ser uma data ISO 8601."
+  },
+  "«verify_tls» y «send» tienen que ser verdadero o falso.": {
+    "en": "“verify_tls” and “send” must be true or false.",
+    "de": "„verify_tls“ und „send“ müssen wahr oder falsch sein.",
+    "fr": "« verify_tls » et « send » doivent être vrai ou faux.",
+    "pt_BR": "“verify_tls” e “send” precisam ser verdadeiro ou falso."
+  }
+}

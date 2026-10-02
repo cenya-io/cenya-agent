@@ -5,7 +5,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: cenya-agent 0.9.1\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-02 23:05+0200\n"
+"POT-Creation-Date: 2026-10-02 23:08+0200\n"
 "PO-Revision-Date: 2026-09-14 17:00+0200\n"
 "Last-Translator: NetInventory\n"
 "Language-Team: English\n"
@@ -15,14 +15,14 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
-#: agent/__main__.py:41 agent/runtime.py:89 agent/status.py:437
+#: agent/__main__.py:41 agent/runtime.py:90 agent/status.py:437
 #, python-format
 msgid "%(n)d hallazgo nuevo"
 msgid_plural "%(n)d hallazgos nuevos"
 msgstr[0] "%(n)d new finding"
 msgstr[1] "%(n)d new findings"
 
-#: agent/__main__.py:42 agent/runtime.py:90 agent/status.py:439
+#: agent/__main__.py:42 agent/runtime.py:91 agent/status.py:439
 #, python-format
 msgid "%(n)d ya conocido."
 msgid_plural "%(n)d ya conocidos."
@@ -46,31 +46,31 @@ msgstr "[agent] Sweep sent in %(batches)s: %(created)s, %(refreshed)s"
 msgid "[agente] Barrido enviado: %(created)s, %(refreshed)s"
 msgstr "[agent] Sweep sent: %(created)s, %(refreshed)s"
 
-#: agent/__main__.py:68 agent/control.py:680 agent/runtime.py:638
+#: agent/__main__.py:68 agent/control.py:687 agent/runtime.py:657
 #, python-format
 msgid "Error inesperado: %(error)s"
 msgstr "Unexpected error: %(error)s"
 
-#: agent/__main__.py:273 agent/__main__.py:371 agent/__main__.py:378
-#: agent/control.py:656 agent/runtime.py:432
+#: agent/__main__.py:285 agent/__main__.py:383 agent/__main__.py:390
+#: agent/control.py:663 agent/runtime.py:448
 #, python-format
 msgid "[agente] %(error)s"
 msgstr "[agent] %(error)s"
 
-#: agent/__main__.py:311
+#: agent/__main__.py:323
 msgid "[agente] Detenido."
 msgstr "[agent] Stopped."
 
-#: agent/__main__.py:343
+#: agent/__main__.py:355
 #, python-format
 msgid "[agente] Conectado a %(url)s con el protocolo 2."
 msgstr "[agent] Connected to %(url)s using protocol 2."
 
-#: agent/__main__.py:347
+#: agent/__main__.py:359
 msgid "[agente] El servidor solo habla el protocolo 1: se sigue con el bucle de siempre."
 msgstr "[agent] The server only speaks protocol 1: carrying on with the usual loop."
 
-#: agent/__main__.py:362
+#: agent/__main__.py:374
 #, python-format
 msgid "[agente] Empujando a %(url)s cada ~%(seconds)d s."
 msgstr "[agent] Pushing to %(url)s every ~%(seconds)d s."
@@ -116,30 +116,30 @@ msgstr "This agent is not enrolled. In Settings → Agents, generate a connectio
 msgid "La cadena de conexión no es válida: debe parecerse a cenya://portal.midominio.com/XXXX-XXXX-XXXX. Cópiala entera de Ajustes → Agentes."
 msgstr "The connection string is not valid: it should look like cenya://portal.mycompany.com/XXXX-XXXX-XXXX. Copy it whole from Settings → Agents."
 
-#: agent/control.py:369
+#: agent/control.py:375
 #, python-format
 msgid "El servidor ha rechazado este agente (%(error)s): no barre ni usa ninguna credencial hasta que lo acepte de nuevo, y le pregunta cada %(minutes)d minutos. Si se revocó, hay que enrolarlo otra vez."
 msgstr "The server has rejected this agent (%(error)s): it will not scan or use any credential until the server accepts it again, and it asks every %(minutes)d minutes. If it was revoked, it has to be enrolled again."
 
-#: agent/control.py:375
+#: agent/control.py:381
 #, python-format
 msgid "La instalación de Cenya está en solo lectura (%(error)s): el agente no empieza ninguna tarea hasta que el servidor vuelva a aceptar resultados."
 msgstr "The Cenya installation is read-only (%(error)s): the agent will not start any task until the server accepts results again."
 
-#: agent/control.py:386
+#: agent/control.py:392
 msgid "[agente] El servidor vuelve a aceptar a este agente."
 msgstr "[agent] The server accepts this agent again."
 
-#: agent/control.py:426
+#: agent/control.py:432
 msgid "[agente] Configuración nueva recibida."
 msgstr "[agent] New configuration received."
 
-#: agent/control.py:432
+#: agent/control.py:438
 #, python-format
 msgid "[agente] Hay una versión nueva del agente: %(version)s."
 msgstr "[agent] A new version of the agent is available: %(version)s."
 
-#: agent/control.py:460
+#: agent/control.py:467
 #, python-format
 msgid "[agente] Encargo recibido: %(kind)s."
 msgstr "[agent] Order received: %(kind)s."
@@ -748,7 +748,7 @@ msgstr "The server only speaks protocol 1: there are no separate tasks there, on
 msgid "El servidor ha rechazado a este agente: no se empieza ninguna tarea."
 msgstr "The server has rejected this agent: no task is started."
 
-#: agent/localops.py:720
+#: agent/localops.py:720 agent/settings_command.py:96
 #, python-format
 msgid "No se pudieron guardar los ajustes en %(path)s."
 msgstr "The settings could not be saved in %(path)s."
@@ -967,15 +967,51 @@ msgstr[1] "Exported %(n)d objects to %(path)s."
 msgid "Súbelo en Cenya: Ajustes → Importar → «NetBox, desde un fichero»."
 msgstr "Upload it in Cenya: Settings → Import → «NetBox, from a file»."
 
-#: agent/runtime.py:87
+#: agent/runtime.py:88
 #, python-format
 msgid "[agente] Tarea %(task)s enviada: %(created)s, %(refreshed)s"
 msgstr "[agent] Task %(task)s sent: %(created)s, %(refreshed)s"
 
-#: agent/runtime.py:626
+#: agent/runtime.py:645
 #, python-format
 msgid "[agente] Tarea %(task)s guardada en la cola local: se enviará cuando el servidor conteste."
 msgstr "[agent] Task %(task)s saved in the local queue: it will be sent when the server answers."
+
+#: agent/settings_command.py:42
+msgid "Uso: cenya-agent settings set ca_bundle <fichero> | set auto_update on|off | unset ca_bundle"
+msgstr "Usage: cenya-agent settings set ca_bundle <file> | set auto_update on|off | unset ca_bundle"
+
+#: agent/settings_command.py:72
+#, python-format
+msgid "No se pudo leer el certificado %(path)s: %(error)s"
+msgstr "The certificate %(path)s could not be read: %(error)s"
+
+#: agent/settings_command.py:80
+#, python-format
+msgid "%(path)s no contiene ningún certificado de CA válido (PEM o DER)."
+msgstr "%(path)s contains no valid CA certificate (PEM or DER)."
+
+#: agent/settings_command.py:87
+#, python-format
+msgid "No se pudo guardar el certificado en %(path)s: %(error)s"
+msgstr "The certificate could not be saved in %(path)s: %(error)s"
+
+#: agent/settings_command.py:90
+#, python-format
+msgid "Certificado de CA guardado en %(path)s: el agente lo usará para verificar el portal."
+msgstr "CA certificate saved in %(path)s: the agent will use it to verify the portal."
+
+#: agent/settings_command.py:118
+msgid "Certificado de CA olvidado."
+msgstr "CA certificate forgotten."
+
+#: agent/settings_command.py:126
+msgid "La actualización automática queda encendida."
+msgstr "Automatic updates are now on."
+
+#: agent/settings_command.py:126
+msgid "La actualización automática queda apagada."
+msgstr "Automatic updates are now off."
 
 #: agent/status.py:315
 msgid "hace menos de un minuto"
@@ -1090,22 +1126,22 @@ msgstr "No sweep has finished yet."
 msgid "Próximo barrido hacia las %(clock)s."
 msgstr "Next sweep around %(clock)s."
 
-#: agent/store.py:583
+#: agent/store.py:624
 #, python-format
 msgid "No se pudo guardar el enrolamiento de forma segura en %(path)s: %(error)s"
 msgstr "The enrolment could not be saved securely at %(path)s: %(error)s"
 
-#: agent/store.py:626
+#: agent/store.py:667
 #, python-format
 msgid "[agente] La carpeta %(path)s no estaba protegida: se ha apartado sin usarlo lo que otro usuario pudo dejar en ella (%(names)s), y ya queda protegida."
 msgstr "[agent] The folder %(path)s was not protected: what another user could have left in it has been set aside unused (%(names)s), and it is now protected."
 
-#: agent/store.py:655
+#: agent/store.py:696
 #, python-format
 msgid "No se pudo apartar %(path)s, que no es de fiar: %(error)s"
 msgstr "Could not set aside %(path)s, which cannot be trusted: %(error)s"
 
-#: agent/store.py:680
+#: agent/store.py:721
 #, python-format
 msgid "La carpeta %(path)s no está protegida y no se puede proteger (%(error)s): el agente no lee ni guarda en ella su token ni sus credenciales. Ejecútalo como administrador o como servicio."
 msgstr "The folder %(path)s is not protected and cannot be protected (%(error)s): the agent will not read or keep its token or credentials there. Run it as an administrator or as a service."
@@ -1140,6 +1176,89 @@ msgid ""
 msgstr ""
 "The Cenya Agent icon could not start:\n"
 "%(error)s"
+
+#: agent/update.py:489
+msgid "la firma del manifiesto no es de ninguna clave conocida"
+msgstr "the manifest signature is not from any known key"
+
+#: agent/update.py:490
+msgid "el fichero descargado no coincide con el manifiesto firmado; se ha borrado"
+msgstr "the downloaded file does not match the signed manifest; it has been deleted"
+
+#: agent/update.py:491
+msgid "el manifiesto no es válido"
+msgstr "the manifest is not valid"
+
+#: agent/update.py:492
+msgid "este agente no tiene ninguna clave de publicación configurada"
+msgstr "this agent has no release key configured"
+
+#: agent/update.py:493
+msgid "falta la librería cryptography para verificar la firma"
+msgstr "the cryptography library is missing to verify the signature"
+
+#: agent/update.py:494
+msgid "no es más nueva que la instalada"
+msgstr "it is not newer than the installed one"
+
+#: agent/update.py:495
+msgid "el manifiesto es de otra versión"
+msgstr "the manifest is for another version"
+
+#: agent/update.py:496
+msgid "no se pudo descargar"
+msgstr "it could not be downloaded"
+
+#: agent/update.py:497
+msgid "el instalador no llegó a sustituir el agente"
+msgstr "the installer never replaced the agent"
+
+#: agent/update.py:498
+msgid "no consiguió conectar y se volvió a la versión anterior"
+msgstr "it could not connect and the previous version was restored"
+
+#: agent/update.py:499
+msgid "este sistema no se actualiza solo"
+msgstr "this system does not update itself"
+
+#: agent/update.py:609
+#, python-format
+msgid "[agente] Error inesperado al actualizar: %(error)s"
+msgstr "[agent] Unexpected error while updating: %(error)s"
+
+#: agent/update.py:645
+#, python-format
+msgid "[agente] La versión %(version)s no arrancó bien y se volvió a la anterior: no se intentará de nuevo."
+msgstr "[agent] Version %(version)s did not start properly and the previous one was restored: it will not be tried again."
+
+#: agent/update.py:699
+#, python-format
+msgid "[agente] Hay una versión nueva del agente (%(version)s), pero la actualización automática está apagada en esta máquina."
+msgstr "[agent] A new agent version is available (%(version)s), but automatic updates are off on this machine."
+
+#: agent/update.py:731
+#, python-format
+msgid "[agente] Descargando la versión %(version)s del agente."
+msgstr "[agent] Downloading agent version %(version)s."
+
+#: agent/update.py:741
+#, python-format
+msgid "[agente] Versión %(version)s verificada: se instalará en cuanto no haya ninguna tarea en curso."
+msgstr "[agent] Version %(version)s verified: it will be installed as soon as no task is running."
+
+#: agent/update.py:759
+#, python-format
+msgid "[agente] Instalando la versión %(version)s; el servicio se reiniciará."
+msgstr "[agent] Installing version %(version)s; the service will restart."
+
+#: agent/update.py:870
+#, python-format
+msgid "[agente] No se actualiza a la versión %(version)s: %(reason)s."
+msgstr "[agent] Not updating to version %(version)s: %(reason)s."
+
+#: agent/update.py:1024
+msgid "Uso: cenya-agent update apply-request <carpeta de estado>"
+msgstr "Usage: cenya-agent update apply-request <state folder>"
 
 #: agent/winservice.py:163
 msgid "El bucle del agente terminó sin que nadie lo parara."

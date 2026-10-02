@@ -222,6 +222,18 @@ def main(argv: list[str] | None = None, stop_event: StopSignal | None = None) ->
         from agent import goodbye
 
         raise SystemExit(goodbye.run(args[1:]))
+    if args[:1] == ["settings"]:
+        # Un ajuste local desde una consola o el instalador (/CA=): spec 2.6.
+        from agent import settings_command
+
+        raise SystemExit(settings_command.run(args[1:]))
+    if args[:1] == ["update"]:
+        # Linux, como root, desde la unidad cenya-agent-update.service: verifica
+        # otra vez lo que pidió el agente y ejecuta install.sh --update. Antes de
+        # proteger la carpeta de estado: root no debe hacerse su dueño.
+        from agent import update
+
+        raise SystemExit(update.run(args[1:]))
     if args[:1] == ["selftest"]:
         from agent import selftest
 

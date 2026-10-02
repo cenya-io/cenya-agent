@@ -1,0 +1,10 @@
+# El vigilante de una actualización en Windows (agent/packaging/update-watchdog.cmd)
+# tiene que llegar al instalador con CRLF: con LF, cmd.exe puede no encontrar sus
+# etiquetas (`goto`), y el instalador se construye desde un checkout de Windows.
+*.cmd text eol=crlf
+# Y al revés lo de Linux: un CR al final de una línea rompe un guion de sh o una
+# unidad de systemd, aunque el fichero se haya tocado en Windows.
+*.sh text eol=lf
+agent/deploy/*.service text eol=lf
+agent/deploy/*.path text eol=lf
+agent/deploy/*.timer text eol=lf

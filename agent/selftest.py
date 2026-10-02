@@ -48,7 +48,30 @@ RUNTIME_MODULES = (
     "scheduler",
     "settings",
     "tasks",
+    # La actualización (docs/agente-v2-instalacion.md, 4) y el ajuste de la CA
+    # que usa el instalador con /CA=.
+    "update",
+    "release",
+    "release_keys",
+    "settings_command",
 )
+
+
+def release_keys_report() -> dict[str, object]:
+    """How many valid release keys this build trusts, and their short fingerprints.
+
+    No forma parte de «completa»: un agente sin claves funciona, solo que no se
+    actualiza solo. Lo mira el flujo de publicación (la versión que se publica
+    no puede llevar la clave de prueba de CI) y quien dude de una compilación.
+    """
+    from agent import release
+    from agent.release_keys import PUBLIC_KEYS
+
+    try:
+        keys = release.load_public_keys(PUBLIC_KEYS)
+    except release.ReleaseError as exc:
+        return {"count": 0, "fingerprints": [], "error": exc.code}
+    return {"count": len(keys), "fingerprints": [release.key_fingerprint(key) for key in keys]}
 
 
 def _has(module: str) -> bool:
@@ -90,6 +113,7 @@ def report() -> dict[str, object]:
         "runtime": {name: _has(f"agent.{name}") for name in RUNTIME_MODULES},
         "languages": languages,
         "ssh": ssh_report(),
+        "release_keys": release_keys_report(),
         "state_file": str(store.path()),
     }
     if sys.platform == "win32":

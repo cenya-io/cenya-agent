@@ -57,8 +57,15 @@ IDENTITY_FILE = "identity.key"
 SETTINGS_FILE = "settings.json"
 MEMORY_FILE = "memory.json"
 STATUS_FILE = "status.json"
-PRIVATE_FILES = (FILE_NAME, IDENTITY_FILE, SETTINGS_FILE, MEMORY_FILE)
-PRIVATE_FOLDERS = ("outbox", "logs")
+#: La CA propia del portal, copiada aquí por `cenya-agent settings set ca_bundle`
+#: (o el instalador con /CA=). No es un secreto, pero sí de confianza: una CA
+#: puesta por otro usuario dejaría a cualquiera hacerse pasar por el portal.
+CA_FILE = "ca.pem"
+#: Las descargas del actualizador (`agent/update.py`): lo que se va a ejecutar
+#: como administrador no puede haberlo dejado otro usuario.
+UPDATES_FOLDER = "updates"
+PRIVATE_FILES = (FILE_NAME, IDENTITY_FILE, SETTINGS_FILE, MEMORY_FILE, CA_FILE)
+PRIVATE_FOLDERS = ("outbox", "logs", UPDATES_FOLDER)
 
 #: Cómo se renombra lo que se aparta cuando la carpeta no estaba protegida:
 #: todo lo que alguien pudo dejar para que el agente lo creyera suyo. El
@@ -565,6 +572,40 @@ def write_protected(target: Path, content: str | bytes) -> None:
     except BaseException:
         tmp.unlink(missing_ok=True)
         raise
+
+
+def private_folder(target: Path) -> Path:
+    """Create `target` (if needed) closed like the rest: only SYSTEM, the Administrators
+    and the account running the agent on Windows; ``0700`` on POSIX. Raises `OSError`.
+
+    Lo que el actualizador descarga se guarda aquí y se ejecuta después: no
+    basta con heredar de la carpeta de estado, se cierra explícitamente.
+    """
+    target.mkdir(parents=True, exist_ok=True)
+    if sys.platform == "win32":
+        _apply(target, folder_sddl(_acl_runner(), owner=_is_admin()))
+    else:
+        os.chmod(target, 0o700)
+    return target
+
+
+def private_temp(folder: Path, *, prefix: str, suffix: str) -> tuple[int, Path]:
+    """A new empty file in `folder`, already closed to others, open for writing.
+
+    Como en `write_protected`: el temporal nace cerrado (``0600`` con
+    `mkstemp`, y en Windows con la DACL protegida antes de escribir nada).
+    Devuelve el descriptor y la ruta; quien llama lo cierra y lo borra si falla.
+    """
+    fd, name = tempfile.mkstemp(dir=folder, prefix=prefix, suffix=suffix)
+    tmp = Path(name)
+    if sys.platform == "win32":
+        try:
+            _restrict_windows(tmp)
+        except BaseException:
+            os.close(fd)
+            tmp.unlink(missing_ok=True)
+            raise
+    return fd, tmp
 
 
 def save(enrollment: Enrollment, environ: Mapping[str, str] | None = None) -> Path:

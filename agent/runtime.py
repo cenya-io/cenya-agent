@@ -38,6 +38,7 @@ from agent.i18n import _t, _tn
 from agent.memory import Excluded, Memory
 from agent.notes import collector_note
 from agent.scheduler import PRESENCE, TRIGGER_ORDER, Job, Scheduler, effective_pause, is_paused
+from agent.update import Fetcher, Updater
 
 MEMORY_FILE = "memory.json"
 
@@ -177,6 +178,19 @@ class Runtime:
         self.tick = TICK_SECONDS
         #: Cómo fue el último checkin (`_CheckinRecorder`), bajo `_lock`.
         self.last_checkin: dict[str, Any] = {}
+        # La actualización del propio agente (docs/agente-v2-instalacion.md, 4).
+        # `--once` no se actualiza: es alguien probando a mano.
+        self.updater = Updater(
+            base,
+            client=client,
+            fetcher=Fetcher(ca_bundle=env.ca_bundle or self.settings.ca_bundle, proxy=self.settings.proxy),
+            auto_update=lambda: local_settings.load(self._environ).auto_update,
+            busy=lambda: self.shared.activity_snapshot() is not None,
+            environ=environ,
+            enabled=not once,
+            say=self._say,
+        )
+        self.updater.startup()
         self.control = Control(
             _CheckinRecorder(client, self._note_checkin),  # type: ignore[arg-type]
             self.shared,
@@ -193,6 +207,8 @@ class Runtime:
                 test_credential=self._test_credential,
                 reseal=self._reseal,
                 netbox_export=self._netbox_export,
+                update_offered=self.updater.offer,
+                update_state=self.updater.state,
             ),
             clock=clock,
             report=report,
@@ -445,6 +461,8 @@ class Runtime:
                 # que espera en la cola se queda para cuando vuelva a aceptar.
                 return None
             server_pause = self.shared.server_paused_until
+        if self.updater.holding():
+            return None  # una actualización verificada espera a que no haya tarea en curso
         now = self._clock()
         paused = is_paused(now, effective_pause(self._local_pause(), server_pause))
         with self._lock:
@@ -458,6 +476,7 @@ class Runtime:
             # (que despierta este hilo), no a la hora de la siguiente tarea.
             has_config = self.shared.has_config and not self.shared.refusal
             server_pause = self.shared.server_paused_until
+        has_config = has_config and not self.updater.holding()
         until = effective_pause(self._local_pause(), server_pause)
         paused = is_paused(now, until)
         with self._lock:
