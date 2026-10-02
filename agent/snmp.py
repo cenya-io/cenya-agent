@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import re
-from typing import Any
+from typing import Any, Callable
 
 from agent import credentials as creds
 
@@ -307,63 +307,95 @@ async def _query_fdb(engine, host: str, auth: Auth, object_id: str) -> list[dict
 
 async def _query_host(host: str, auths: list[Auth]) -> dict[str, Any] | None:
     """One host, trying the auths in order until one answers."""
+    found = await _query_host_indexed(host, auths)
+    return found[1] if found is not None else None
+
+
+async def _query_host_indexed(host: str, auths: list[Auth]) -> tuple[int, dict[str, Any]] | None:
+    """Like ``_query_host``, plus *which* auth answered (its index in ``auths``):
+    the memory remembers it so the next inventory starts with it."""
     engine = SnmpEngine()
-    for auth in auths:
+    for index, auth in enumerate(auths):
         try:
             system = await _get(engine, host, auth, SYSTEM_OIDS)
         except Exception:  # noqa: BLE001 - timeout, refused, garbage: next auth
             continue
         if system is None:
             continue
-        columns: dict[str, dict[str, Any]] = {}
-        for key, oid in IF_OIDS.items():
-            try:
-                columns[key] = await _walk(engine, host, auth, oid)
-            except Exception:  # noqa: BLE001 - a missing table empties a column
-                columns[key] = {}
-        interfaces = []
-        for index, name in (columns["name"] or columns["descr"]).items():
-            interfaces.append(
-                {
-                    "index": index,
-                    "name": _text(name) or _text(columns["descr"].get(index, "")),
-                    "mac": _mac(columns["mac"].get(index, "")),
-                    "status": {"1": "up", "2": "down"}.get(_text(columns["status"].get(index, "")), "unknown"),
-                    "speed_mbps": _text(columns["speed"].get(index, "")),
-                }
-            )
-        try:
-            ip_to_ifindex = await _walk(engine, host, auth, IP_TO_IFINDEX_OID)
-        except Exception:  # noqa: BLE001
-            ip_to_ifindex = {}
-        # Neighbours and the forwarding table are opportunistic: a device
-        # without LLDP is not an error, it is a quieter map.
-        try:
-            neighbors = await _query_neighbors(engine, host, auth)
-        except Exception:  # noqa: BLE001
-            neighbors = []
-        try:
-            fdb = await _query_fdb(engine, host, auth, system.get("object_id", ""))
-        except Exception:  # noqa: BLE001
-            fdb = []
-        # El SAI, si lo es. Oportunista como los vecinos: un switch no contesta
-        # a la UPS-MIB y eso no es un fallo, es que no es un SAI.
-        try:
-            ups = await _get(engine, host, auth, UPS_OIDS) or {}
-        except Exception:  # noqa: BLE001
-            ups = {}
-        return {
-            "name": system.get("name", ""),
-            "description": system.get("description", ""),
-            "object_id": system.get("object_id", ""),
-            "interfaces": interfaces,
-            # ipAdEntIfIndex: the suffix is the IP, the value the ifIndex.
-            "addresses": {ip: _text(ifindex) for ip, ifindex in ip_to_ifindex.items()},
-            "neighbors": neighbors,
-            "fdb": fdb,
-            "ups": _ups_reading(ups),
-        }
+        return index, await _inventory(engine, host, auth, system)
     return None
+
+
+async def _query_ups_host(host: str, auths: list[Auth]) -> tuple[int, dict[str, Any]] | None:
+    """Solo la UPS-MIB, para la tarea `ups`: cuatro OIDs de hoja y nada más.
+
+    Es lo que corre cada pocos minutos contra los SAI ya conocidos; repetir
+    ahí la identidad, las interfaces y la tabla de reenvío sería pedir cientos
+    de OIDs para refrescar cuatro números.
+    """
+    engine = SnmpEngine()
+    for index, auth in enumerate(auths):
+        try:
+            raw = await _get(engine, host, auth, UPS_OIDS)
+        except Exception:  # noqa: BLE001 - timeout, refused, garbage: next auth
+            continue
+        if raw is None:
+            continue
+        return index, {"ups": _ups_reading(raw)}
+    return None
+
+
+async def _inventory(engine, host: str, auth: Auth, system: dict[str, str]) -> dict[str, Any]:
+    """Everything after the identity answered: interfaces, addresses,
+    neighbours, forwarding table and -- if it is one -- the UPS reading."""
+    columns: dict[str, dict[str, Any]] = {}
+    for key, oid in IF_OIDS.items():
+        try:
+            columns[key] = await _walk(engine, host, auth, oid)
+        except Exception:  # noqa: BLE001 - a missing table empties a column
+            columns[key] = {}
+    interfaces = []
+    for index, name in (columns["name"] or columns["descr"]).items():
+        interfaces.append(
+            {
+                "index": index,
+                "name": _text(name) or _text(columns["descr"].get(index, "")),
+                "mac": _mac(columns["mac"].get(index, "")),
+                "status": {"1": "up", "2": "down"}.get(_text(columns["status"].get(index, "")), "unknown"),
+                "speed_mbps": _text(columns["speed"].get(index, "")),
+            }
+        )
+    try:
+        ip_to_ifindex = await _walk(engine, host, auth, IP_TO_IFINDEX_OID)
+    except Exception:  # noqa: BLE001
+        ip_to_ifindex = {}
+    # Neighbours and the forwarding table are opportunistic: a device
+    # without LLDP is not an error, it is a quieter map.
+    try:
+        neighbors = await _query_neighbors(engine, host, auth)
+    except Exception:  # noqa: BLE001
+        neighbors = []
+    try:
+        fdb = await _query_fdb(engine, host, auth, system.get("object_id", ""))
+    except Exception:  # noqa: BLE001
+        fdb = []
+    # El SAI, si lo es. Oportunista como los vecinos: un switch no contesta
+    # a la UPS-MIB y eso no es un fallo, es que no es un SAI.
+    try:
+        ups = await _get(engine, host, auth, UPS_OIDS) or {}
+    except Exception:  # noqa: BLE001
+        ups = {}
+    return {
+        "name": system.get("name", ""),
+        "description": system.get("description", ""),
+        "object_id": system.get("object_id", ""),
+        "interfaces": interfaces,
+        # ipAdEntIfIndex: the suffix is the IP, the value the ifIndex.
+        "addresses": {ip: _text(ifindex) for ip, ifindex in ip_to_ifindex.items()},
+        "neighbors": neighbors,
+        "fdb": fdb,
+        "ups": _ups_reading(ups),
+    }
 
 
 def _ups_reading(raw: dict[str, str]) -> dict[str, Any]:
@@ -412,3 +444,49 @@ def query_hosts(hosts: list[str], auths: list[Auth]) -> dict[str, dict[str, Any]
     if not AVAILABLE or not hosts:
         return {}
     return asyncio.run(_query_all(hosts, auths))
+
+
+async def _query_plan(
+    plan: dict[str, list[Auth]],
+    concurrency: int,
+    ups_only: bool,
+    on_done: Callable[[], None] | None,
+) -> dict[str, tuple[int, dict[str, Any]]]:
+    semaphore = asyncio.Semaphore(max(1, concurrency))
+    query = _query_ups_host if ups_only else _query_host_indexed
+
+    async def bounded(host: str, auths: list[Auth]):
+        async with semaphore:
+            try:
+                return host, await query(host, auths)
+            except Exception:  # noqa: BLE001 - un equipo raro no tumba el lote
+                return host, None
+            finally:
+                if on_done is not None:
+                    try:
+                        on_done()
+                    except Exception:  # noqa: BLE001 - avisar del avance nunca rompe nada
+                        pass
+
+    answers = await asyncio.gather(*(bounded(host, auths) for host, auths in plan.items() if auths))
+    return {host: found for host, found in answers if found is not None}
+
+
+def query_plan(
+    plan: dict[str, list[Auth]],
+    *,
+    concurrency: int = CONCURRENCY,
+    ups_only: bool = False,
+    on_done: Callable[[], None] | None = None,
+) -> dict[str, tuple[int, dict[str, Any]]]:
+    """Each host with **its own** auths, in its own order: {host: (index, data)}.
+
+    The task-based path. ``query_hosts`` asks every host with the same list;
+    here the memory has already decided, host by host, what to try first and
+    what not to try at all. ``index`` says which of that host's auths answered.
+    ``ups_only`` asks the UPS-MIB and nothing else (the ``ups`` task).
+    ``on_done`` is called once per host as it finishes, for the progress bar.
+    """
+    if not AVAILABLE or not plan:
+        return {}
+    return asyncio.run(_query_plan(plan, concurrency, ups_only, on_done))

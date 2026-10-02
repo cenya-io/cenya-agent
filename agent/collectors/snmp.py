@@ -11,8 +11,8 @@ from __future__ import annotations
 
 from agent import credentials as creds
 from agent import snmp
+from agent.collectors import register, tasking
 from agent.collectors.base import Finding
-from agent.collectors import register
 from agent.notes import collector_note
 
 
@@ -35,6 +35,26 @@ def _auths(ctx: dict) -> list:
     the community and the v3 user nobody typed for fun would never be used.
     """
     return list(creds.for_kind(ctx, creds.SNMPV3)) + _communities(ctx)
+
+
+def snmp_credentials(ctx: dict) -> list[creds.Credential]:
+    """Lo mismo que ``_auths``, todo como credenciales: así la memoria recuerda
+    una comunidad igual que un usuario v3. La comunidad se identifica por su
+    número en la lista (`community-1`...), nunca por su valor."""
+    return list(creds.for_kind(ctx, creds.SNMPV3)) + [
+        creds.community(value, index) for index, value in enumerate(_communities(ctx), start=1)
+    ]
+
+
+def as_auth(credential: creds.Credential) -> snmp.Auth:
+    """De credencial a lo que entiende `agent.snmp`: una comunidad es su texto."""
+    return credential.secret if credential.kind == creds.COMMUNITY else credential
+
+
+def _device_mac(data: dict) -> str:
+    """La MAC con la que el inventario presenta al equipo: la de su primera
+    interfaz con nombre y MAC. La tarea `ups` tiene que repetir esta misma."""
+    return next((iface["mac"] for iface in data.get("interfaces") or [] if iface.get("name") and iface.get("mac")), "")
 
 
 @register
@@ -62,61 +82,157 @@ class SnmpCollector:
             # Nadie contestó al barrido. Es una respuesta legítima, no un error.
             return []
 
+        if tasking.task(ctx) is not None:
+            return self._planned(ctx, hosts)
         answers = snmp.query_hosts([host["ip"] for host in hosts], _auths(ctx))
-        findings = []
-        # MACs this sweep already knows: live hosts from the ARP table and the
-        # SNMP devices themselves. The forwarding table only proposes links for
-        # these -- a whole FDB of stranger MACs is noise, not inventory.
-        known: dict[str, dict[str, str]] = {}
-        for host in hosts:
-            if host.get("mac"):
-                known[host["mac"]] = {"ip": host["ip"], "hostname": ""}
-        device_macs: dict[str, str] = {}
-        for ip, data in answers.items():
-            interfaces = [iface for iface in data["interfaces"] if iface["name"]]
-            device_mac = next((iface["mac"] for iface in interfaces if iface["mac"]), "")
-            device_macs[ip] = device_mac
-            if device_mac:
-                known.setdefault(device_mac, {"ip": ip, "hostname": data["name"]})
+        return _inventory_findings(hosts, answers)
+
+    def _planned(self, ctx: dict, hosts: list[dict]) -> list[Finding]:
+        """Dentro de una tarea: cada equipo con sus credenciales, en el orden
+        de la memoria; `ups` solo contra los SAI ya conocidos y solo la UPS-MIB."""
+        ups_task = tasking.task(ctx) == "ups"
+        if ups_task:
+            mem = tasking.memory(ctx)
+            if mem is None:
+                # Sin memoria no se sabe quién es un SAI. No es un error: es
+                # que la tarea no tiene a quién preguntar.
+                return []
+            alive = tasking.alive_from_memory(ctx, mem.ups_hosts())
+            selected = [(ip, mac) for ip, mac, _entry in alive]
+            identities = {ip: str(entry.get("identity_mac") or "") for ip, _mac, entry in alive}
+        else:
+            selected = [
+                (host["ip"], str(host.get("mac") or "")) for host in hosts if tasking.wanted(ctx, host.get("ip", ""))
+            ]
+            identities = {}
+
+        candidates = snmp_credentials(ctx)
+        plan: dict[str, list[snmp.Auth]] = {}
+        orders: dict[str, tuple[str, list[creds.Credential], bool]] = {}
+        for ip, mac in selected:
+            order, full = tasking.plan(ctx, ip, mac, "snmp", candidates)
+            if not order:
+                continue
+            plan[ip] = [as_auth(credential) for credential in order]
+            orders[ip] = (mac, order, full)
+        if not plan:
+            return []
+
+        progress = tasking.Progress(ctx, self.name, len(plan))
+        found = snmp.query_plan(
+            plan,
+            concurrency=tasking.workers(ctx, "snmp", snmp.CONCURRENCY),
+            ups_only=ups_task,
+            on_done=progress.tick,
+        )
+        answers: dict[str, dict] = {}
+        for ip, (mac, order, full) in orders.items():
+            hit = found.get(ip)
+            credential = None
+            if hit is not None and 0 <= hit[0] < len(order):
+                credential = order[hit[0]]
+                answers[ip] = hit[1]
+            tasking.settle(ctx, ip, mac, "snmp", credential, attempted=True, full=full)
+
+        if ups_task:
+            return _ups_findings(answers, orders, identities)
 
         for ip, data in answers.items():
-            interfaces = [iface for iface in data["interfaces"] if iface["name"]]
-            device_mac = device_macs[ip]
-            identity = {"mac": device_mac} if device_mac else {"ip": ip}
-            # Which interface holds the polled IP becomes the management one.
-            management = data["addresses"].get(ip, "")
-            management_name = next(
-                (iface["name"] for iface in interfaces if iface["index"] == management), ""
+            mac = orders[ip][0]
+            # El inventario es quien descubre los SAI: lo que contesta a la
+            # UPS-MIB queda apuntado, con la MAC con la que se le presentó,
+            # para que la tarea `ups` refresque la misma fila.
+            if data.get("ups"):
+                tasking.flag(ctx, ip, mac, ups=True, identity_mac=_device_mac(data))
+            else:
+                tasking.flag(ctx, ip, mac, ups=False)
+        return _inventory_findings(hosts, answers)
+
+
+def _ups_findings(
+    answers: dict[str, dict], orders: dict[str, tuple[str, list, bool]], identities: dict[str, str]
+) -> list[Finding]:
+    """La lectura del SAI, como el mismo hallazgo `host` que dejó el inventario.
+
+    Misma identidad --la MAC guardada en la memoria-- para que el servidor
+    refresque la fila que ya existe en vez de abrir otra. Solo lo que esta
+    tarea sabe: ni nombre ni interfaces, que no ha preguntado, para no pisar
+    con vacíos lo que el inventario sí trajo.
+    """
+    findings: list[Finding] = []
+    for ip, data in answers.items():
+        reading = data.get("ups") or {}
+        if not reading:
+            # Contestó, pero ya no da los minutos: no se inventa una lectura.
+            continue
+        identity_mac = identities.get(ip, "")
+        mac = identity_mac or orders[ip][0]
+        findings.append(
+            Finding(
+                kind="host",
+                identity={"mac": identity_mac} if identity_mac else {"ip": ip},
+                payload={"ip": ip, "mac": mac, "ups": reading, "seen_by": "snmp"},
             )
-            findings.append(
-                Finding(
-                    kind="host",
-                    identity=identity,
-                    payload={
-                        "hostname": data["name"],
-                        "ip": ip,
-                        "mac": device_mac,
-                        "description": data["description"],
-                        "interfaces": [
-                            {
-                                "name": iface["name"],
-                                "mac": iface["mac"],
-                                "status": iface["status"],
-                                "speed_mbps": iface["speed_mbps"],
-                            }
-                            for iface in interfaces
-                        ],
-                        "management_interface": management_name,
-                        "seen_by": "snmp",
-                        # Solo si contestó a la UPS-MIB. Va dentro del mismo
-                        # hallazgo y no en uno aparte: un SAI es un equipo más,
-                        # y la huella tiene que seguir siendo una sola fila.
-                        **({"ups": data["ups"]} if data.get("ups") else {}),
-                    },
-                )
+        )
+    return findings
+
+
+def _inventory_findings(hosts: list[dict], answers: dict[str, dict]) -> list[Finding]:
+    """Lo que contestaron los equipos, como hallazgos `host` y `link`."""
+    findings = []
+    # MACs this sweep already knows: live hosts from the ARP table and the
+    # SNMP devices themselves. The forwarding table only proposes links for
+    # these -- a whole FDB of stranger MACs is noise, not inventory.
+    known: dict[str, dict[str, str]] = {}
+    for host in hosts:
+        if host.get("mac"):
+            known[host["mac"]] = {"ip": host["ip"], "hostname": ""}
+    device_macs: dict[str, str] = {}
+    for ip, data in answers.items():
+        interfaces = [iface for iface in data["interfaces"] if iface["name"]]
+        device_mac = next((iface["mac"] for iface in interfaces if iface["mac"]), "")
+        device_macs[ip] = device_mac
+        if device_mac:
+            known.setdefault(device_mac, {"ip": ip, "hostname": data["name"]})
+
+    for ip, data in answers.items():
+        interfaces = [iface for iface in data["interfaces"] if iface["name"]]
+        device_mac = device_macs[ip]
+        identity = {"mac": device_mac} if device_mac else {"ip": ip}
+        # Which interface holds the polled IP becomes the management one.
+        management = data["addresses"].get(ip, "")
+        management_name = next(
+            (iface["name"] for iface in interfaces if iface["index"] == management), ""
+        )
+        findings.append(
+            Finding(
+                kind="host",
+                identity=identity,
+                payload={
+                    "hostname": data["name"],
+                    "ip": ip,
+                    "mac": device_mac,
+                    "description": data["description"],
+                    "interfaces": [
+                        {
+                            "name": iface["name"],
+                            "mac": iface["mac"],
+                            "status": iface["status"],
+                            "speed_mbps": iface["speed_mbps"],
+                        }
+                        for iface in interfaces
+                    ],
+                    "management_interface": management_name,
+                    "seen_by": "snmp",
+                    # Solo si contestó a la UPS-MIB. Va dentro del mismo
+                    # hallazgo y no en uno aparte: un SAI es un equipo más,
+                    # y la huella tiene que seguir siendo una sola fila.
+                    **({"ups": data["ups"]} if data.get("ups") else {}),
+                },
             )
-            findings.extend(_links_for(ip, data, device_mac, known))
-        return findings
+        )
+        findings.extend(_links_for(ip, data, device_mac, known))
+    return findings
 
 
 def _links_for(

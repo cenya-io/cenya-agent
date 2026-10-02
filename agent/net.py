@@ -17,6 +17,7 @@ import socket
 import subprocess
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from typing import Callable
 
 PING_TIMEOUT_MS = 500
 SWEEP_WORKERS = 50
@@ -105,11 +106,31 @@ def ping(ip: str) -> bool:
     return "TTL=" in result.stdout.upper()
 
 
-def sweep(addresses: list[str]) -> list[str]:
-    """The addresses that answered, in the order they were probed."""
+def sweep(
+    addresses: list[str],
+    workers: int = SWEEP_WORKERS,
+    on_done: Callable[[], None] | None = None,
+) -> list[str]:
+    """The addresses that answered, in the order they were probed.
+
+    ``workers`` is how many pings at once (the task's gentleness);
+    ``on_done`` is called after each ping, for the progress bar, and whatever
+    it raises is swallowed: reporting progress never breaks a sweep.
+    """
+
+    def probe(ip: str) -> bool:
+        try:
+            return ping(ip)
+        finally:
+            if on_done is not None:
+                try:
+                    on_done()
+                except Exception:  # noqa: BLE001
+                    pass
+
     alive: list[str] = []
-    with ThreadPoolExecutor(max_workers=SWEEP_WORKERS) as pool:
-        for ip, answered in zip(addresses, pool.map(ping, addresses)):
+    with ThreadPoolExecutor(max_workers=max(1, int(workers))) as pool:
+        for ip, answered in zip(addresses, pool.map(probe, addresses)):
             if answered:
                 alive.append(ip)
     return alive
@@ -232,10 +253,10 @@ def port_open(ip: str, port: int, timeout: float = PORT_TIMEOUT_SECONDS) -> bool
         return False
 
 
-def hosts_listening(ips: list[str], port: int) -> list[str]:
+def hosts_listening(ips: list[str], port: int, workers: int = PORT_WORKERS) -> list[str]:
     """Los que tienen ese puerto abierto, en el orden en que se probaron."""
     if not ips:
         return []
-    with ThreadPoolExecutor(max_workers=PORT_WORKERS) as pool:
+    with ThreadPoolExecutor(max_workers=max(1, int(workers))) as pool:
         answers = pool.map(lambda ip: port_open(ip, port), ips)
         return [ip for ip, listening in zip(ips, answers) if listening]

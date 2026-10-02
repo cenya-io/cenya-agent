@@ -1,0 +1,221 @@
+"""What every collector reads from ``ctx`` when it runs inside a task.
+
+The agent 0.11 runs collectors per task (presence, inventory, configs, ups,
+hypervisors) and hands them more than the config: which hosts to touch
+(``targets``), which never to touch (``excluded``), how many at once
+(``workers``), whom to tell how far it got (``progress``) and what it learnt
+last time (``memory``). All of it optional.
+
+**Regla de oro: una clave ausente es el comportamiento de la 0.10.x.** El
+bucle del protocolo 1 no pone ninguna, y con eso cada función de aquí devuelve
+lo de siempre: todas las IP valen, las constantes de cada colector mandan,
+nadie recibe avisos y todas las credenciales se prueban en su orden. Por eso
+los tests de siempre siguen pasando sin tocarlos.
+
+Este módulo no lleva ``@register``: no es un colector.
+"""
+
+from __future__ import annotations
+
+import threading
+from datetime import datetime, timezone
+from typing import Any
+
+from agent import credentials as creds
+from agent import net
+
+
+def task(ctx: dict) -> str | None:
+    """La tarea en curso, o ``None`` en el bucle del protocolo 1."""
+    value = ctx.get("task")
+    return str(value) if value else None
+
+
+def memory(ctx: dict) -> Any:
+    """La `Memory` del agente, o ``None``."""
+    return ctx.get("memory")
+
+
+def now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def workers(ctx: dict, kind: str, default: int) -> int:
+    """Cuántas conexiones a la vez (`ping`, `login`, `snmp`). Sin `workers`
+    en el contexto, o con un valor que no sirve, la constante de siempre."""
+    table = ctx.get("workers")
+    if not isinstance(table, dict) or kind not in table:
+        return default
+    try:
+        value = int(table[kind])
+    except (TypeError, ValueError):
+        return default
+    return value if value > 0 else default
+
+
+def excluded(ctx: dict, ip: str) -> bool:
+    """¿Está fuera de límites? Una exclusión que falla al mirarla excluye:
+    ante la duda, no se toca."""
+    rules = ctx.get("excluded")
+    if rules is None:
+        return False
+    try:
+        return ip in rules
+    except Exception:  # noqa: BLE001
+        return True
+
+
+def wanted(ctx: dict, ip: str) -> bool:
+    """¿Toca este equipo en esta pasada? Ni excluido ni fuera de `targets`."""
+    if not ip:
+        return False
+    targets = ctx.get("targets")
+    if targets is not None and ip not in set(targets):
+        return False
+    return not excluded(ctx, ip)
+
+
+def listen_options(ctx: dict) -> dict[str, int]:
+    """Los argumentos extra de `net.hosts_listening`: la suavidad de la tarea.
+
+    Sin `workers` no hay ninguno y la llamada es exactamente la de antes (dos
+    argumentos), que es lo que esperan los dobles de los tests de siempre.
+    """
+    if "workers" not in ctx:
+        return {}
+    return {"workers": workers(ctx, "ping", net.PORT_WORKERS)}
+
+
+class Progress:
+    """El aviso de avance de un colector: `progress(step, done, total)`.
+
+    Llamarlo nunca lanza, aunque lo que haya detrás lance: el aviso es para el
+    icono de bandeja y el checkin, y un fallo ahí no puede costar una tarea. Se
+    llama desde los hilos de un `ThreadPoolExecutor`, así que cuenta con candado.
+    """
+
+    def __init__(self, ctx: dict, step: str, total: int) -> None:
+        self._callback = ctx.get("progress")
+        self._step = step
+        self._total = max(0, int(total))
+        self._done = 0
+        self._lock = threading.Lock()
+        self._emit(0)
+
+    def tick(self) -> None:
+        with self._lock:
+            self._done += 1
+            self._emit(self._done)
+
+    def _emit(self, done: int) -> None:
+        if not callable(self._callback):
+            return
+        try:
+            self._callback(self._step, done, self._total)
+        except Exception:  # noqa: BLE001 - avisar nunca rompe nada
+            pass
+
+
+def _guarded(call, *args, default=None, **kwargs):
+    """Una llamada a la memoria que, si falla, no se lleva el colector.
+
+    La memoria está escrita para no lanzar, pero la pone otro y es
+    prescindible: perderla una pasada cuesta una ronda de credenciales, no un
+    inventario.
+    """
+    try:
+        return call(*args, **kwargs)
+    except Exception:  # noqa: BLE001
+        return default
+
+
+def host_key(ctx: dict, ip: str, mac: str) -> str:
+    mem = memory(ctx)
+    if mem is not None and hasattr(mem, "key_for"):
+        key = _guarded(mem.key_for, ip, mac)
+        if key:
+            return key
+    return (mac or "").lower() or ip
+
+
+def plan(
+    ctx: dict, ip: str, mac: str, protocol: str, candidates: list[creds.Credential]
+) -> tuple[list[creds.Credential], bool]:
+    """Qué credenciales probar contra ese equipo, y si eso es la ronda entera.
+
+    Primero el alcance (`scope`): eso vale también sin memoria. Con memoria,
+    además, su orden y su veto de 24 h (`Memory.order_for`). El segundo valor
+    dice si la lista es todo lo que había en alcance: solo una ronda **entera**
+    fallida cuenta como tal. Si se apuntara también la de «solo la recordada»,
+    la ventana de 24 h se renovaría sola mientras esa siga fallando y las
+    demás no se volverían a probar nunca.
+    """
+    in_scope = [credential for credential in candidates if credential.covers(ip)]
+    mem = memory(ctx)
+    if mem is None:
+        return in_scope, True
+    moment = now()
+    # Apuntar el equipo antes de pedir el orden: la memoria necesita su IP para
+    # comprobar el alcance cuando la clave es una MAC.
+    _guarded(mem.note_host, ip, mac, moment)
+    key = host_key(ctx, ip, mac)
+    order = _guarded(mem.order_for, key, protocol, in_scope, moment, default=None)
+    if order is None:
+        return in_scope, True
+    return list(order), len(order) == len(in_scope)
+
+
+def settle(
+    ctx: dict,
+    ip: str,
+    mac: str,
+    protocol: str,
+    credential: creds.Credential | None,
+    *,
+    attempted: bool,
+    full: bool,
+) -> None:
+    """Apunta cómo fue: la credencial que entró, o una ronda entera fallida."""
+    mem = memory(ctx)
+    if mem is None:
+        return
+    key = host_key(ctx, ip, mac)
+    if credential is not None:
+        _guarded(mem.record_success, key, protocol, credential, now())
+    elif attempted and full:
+        _guarded(mem.record_round_failed, key, protocol, now())
+
+
+def flag(ctx: dict, ip: str, mac: str, **flags: Any) -> None:
+    """`Memory.flag` sobre el equipo de esa IP, si hay memoria."""
+    mem = memory(ctx)
+    if mem is None:
+        return
+    _guarded(mem.note_host, ip, mac, now())
+    _guarded(mem.flag, host_key(ctx, ip, mac), **flags)
+
+
+def alive_from_memory(ctx: dict, remembered: list[dict]) -> list[tuple[str, str, dict]]:
+    """Los equipos que la memoria señala y que **siguen vivos** en esta pasada.
+
+    Se casan por MAC primero (un equipo que cambió de IP sigue siendo él) y
+    por IP después. La IP que se usa es la de ahora, no la que se apuntó.
+    Devuelve ``(ip, mac, entrada)`` sin excluidos ni fuera de `targets`.
+    """
+    hosts = ctx.get("hosts") or []
+    by_mac = {str(host.get("mac") or "").lower(): host for host in hosts if host.get("mac")}
+    by_ip = {host["ip"]: host for host in hosts if host.get("ip")}
+    found: list[tuple[str, str, dict]] = []
+    seen: set[str] = set()
+    for entry in remembered:
+        host = by_mac.get(str(entry.get("mac") or "").lower()) if entry.get("mac") else None
+        if host is None:
+            host = by_ip.get(entry.get("ip", ""))
+        if host is None:
+            continue
+        ip = host["ip"]
+        if ip in seen or not wanted(ctx, ip):
+            continue
+        seen.add(ip)
+        found.append((ip, str(host.get("mac") or ""), entry))
+    return found

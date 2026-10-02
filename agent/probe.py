@@ -24,7 +24,8 @@ from typing import Any
 
 from agent import credentials as creds
 from agent import snmp, ssh, winrm
-from agent.collectors.snmp import _auths
+from agent.collectors import tasking
+from agent.collectors.snmp import as_auth, snmp_credentials
 from agent import notes
 from agent.notes import Note, probe_note
 
@@ -46,9 +47,17 @@ def report_for(ip: str, ctx: dict) -> dict[str, Any]:
     """
     report: dict[str, Any] = {}
     codes: dict[str, dict[str, Any]] = {}
+    refused = _excluded(ip, ctx)
     for name, check in (("snmp", _snmp_line), ("ssh", _ssh_line), ("winrm", _winrm_line)):
         try:
-            line = check(ip, ctx)
+            # Una dirección excluida en esta máquina no se sondea, aunque lo
+            # pida una persona desde la web: quien la excluyó está aquí, y
+            # manda. La línea lo dice para que nadie piense que no contesta.
+            line = (
+                probe_note(name, "excluded", "dirección excluida en este agente; no se sondea")
+                if refused
+                else check(ip, ctx)
+            )
         except Exception as exc:  # noqa: BLE001 - un informe a medias vale más que ninguno
             line = probe_note(
                 name, "check_failed", f"no se pudo comprobar ({type(exc).__name__})", error=type(exc).__name__
@@ -101,11 +110,32 @@ def _auth_label(auth: Any, index: int) -> str:
     return f"el usuario v3 «{auth.username}»"
 
 
+def _excluded(ip: str, ctx: dict) -> bool:
+    return tasking.excluded(ctx, ip)
+
+
+def _remember(ctx: dict, ip: str, protocol: str, credential: creds.Credential) -> None:
+    """Lo que entró, a la memoria: el próximo inventario empezará por ella.
+
+    Solo el acierto. Un sondeo es una petición explícita de una persona y
+    prueba todo lo que está en alcance, así que ni mira ni toca el veto de 24 h
+    de las rondas fallidas: no cuenta como una ronda del agente.
+    """
+    tasking.settle(ctx, ip, "", protocol, credential, attempted=True, full=False)
+
+
 def _snmp_line(ip: str, ctx: dict) -> Note:
     if not snmp.AVAILABLE:
         return probe_note("snmp", "missing_library", "sin pysnmp en el agente (pip install -r agent/requirements.txt)")
-    for index, auth in enumerate(_auths(ctx), start=1):
+    # El número es el de la lista entera (usuarios v3 delante, comunidades
+    # detrás), también para las que se saltan por alcance: así «la comunidad
+    # nº 2» es siempre la misma, se pruebe o no.
+    for index, credential in enumerate(snmp_credentials(ctx), start=1):
+        if not credential.covers(ip):
+            continue
+        auth = as_auth(credential)
         if snmp.query_hosts([ip], [auth]):
+            _remember(ctx, ip, "snmp", credential)
             text = f"contesta con {_auth_label(auth, index)}"
             if isinstance(auth, str):
                 # El número, nunca la comunidad: es un secreto.
@@ -121,6 +151,8 @@ def _ssh_line(ip: str, ctx: dict) -> Note:
     if not credentials:
         return probe_note("ssh", "open_no_credentials", "puerto 22 abierto; sin credenciales SSH configuradas", port=SSH_PORT)
     for credential in credentials:
+        if not credential.covers(ip):
+            continue
         answer = ssh.run(
             host=ip,
             username=credential.username,
@@ -130,6 +162,7 @@ def _ssh_line(ip: str, ctx: dict) -> Note:
             command="true",
         )
         if answer.connected:
+            _remember(ctx, ip, "ssh", credential)
             return probe_note(
                 "ssh", "logged_in", f"puerto abierto; entró con «{credential.username}»", username=credential.username
             )
@@ -155,6 +188,8 @@ def _winrm_line(ip: str, ctx: dict) -> Note:
         )
     last_error = ""
     for credential in credentials:
+        if not credential.covers(ip):
+            continue
         answer = winrm.query(
             host=ip,
             username=credential.username,
@@ -163,6 +198,7 @@ def _winrm_line(ip: str, ctx: dict) -> Note:
             ca_file=creds.ca_file_for(ctx, credential),
         )
         if answer.connected:
+            _remember(ctx, ip, "winrm", credential)
             return probe_note(
                 "winrm",
                 "logged_in",

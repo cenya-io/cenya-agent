@@ -22,7 +22,7 @@ from typing import Any
 
 from agent import credentials as creds
 from agent import hyperv, hypervisor, net, xcpng
-from agent.collectors import register
+from agent.collectors import register, tasking
 from agent.collectors.base import Finding
 from agent.notes import collector_note
 
@@ -65,32 +65,99 @@ class HypervisorCollector:
             return []
 
         findings: list[Finding] = []
+        progress = tasking.Progress(ctx, self.name, len(credentials))
         for credential in credentials:
-            if not credential.host:
-                # Sin dirección no hay a quién preguntar: un vCenter no se
-                # descubre solo, se escribe. Se dice cuál falla, no se calla.
-                name = credential.label or credential.username
+            try:
+                findings.extend(self._one(credential, ctx, errors))
+            finally:
+                progress.tick()
+        return findings
+
+    def _one(self, credential: creds.Credential, ctx: dict, errors: list) -> list[Finding]:
+        if not credential.host:
+            # Sin dirección no hay a quién preguntar: un vCenter no se
+            # descubre solo, se escribe. Se dice cuál falla, no se calla.
+            name = credential.label or credential.username
+            errors.append(
+                collector_note(
+                    "hypervisors",
+                    "credential_without_host",
+                    f"la credencial «{name}» no dice contra qué servidor va",
+                    credential=name,
+                )
+            )
+            return []
+        # Dentro de una tarea: exclusiones, alcance y memoria. Sin tarea (el
+        # protocolo 1) nada de esto existe y se pregunta como siempre.
+        key = ""
+        if tasking.task(ctx) is not None:
+            address = net.resolve(credential.host)
+            if tasking.excluded(ctx, credential.host) or (address and tasking.excluded(ctx, address)):
+                # Un servidor excluido en la máquina del agente no se toca, ni
+                # siquiera porque alguien haya escrito su credencial en la web.
+                # Se dice, para que nadie busque por qué no salen sus VMs.
                 errors.append(
                     collector_note(
                         "hypervisors",
-                        "credential_without_host",
-                        f"la credencial «{name}» no dice contra qué servidor va",
-                        credential=name,
+                        "excluded",
+                        f"{credential.host}: dirección excluida en este agente; no se consulta",
+                        host=credential.host,
                     )
                 )
-                continue
-            try:
-                findings.extend(self._from(credential, ctx))
-            except hypervisor.HypervisorError as exc:
-                # Un hipervisor caído o una contraseña cambiada no pueden tumbar
-                # el barrido: se anota y se sigue con el siguiente. El detalle va
-                # tal cual: lo escribe el hipervisor, o es un error de red.
-                errors.append(
-                    collector_note(
-                        "hypervisors", "failed", f"{credential.host}: {exc}", host=credential.host, detail=str(exc)
-                    )
+                return []
+            # La clave de la memoria es la dirección, salvo que el alcance de la
+            # credencial nombre al servidor por su nombre: la memoria comprueba
+            # el alcance con la clave, y tiene que ser algo que el alcance cubra.
+            key = address if address and credential.covers(address) else credential.host
+            if not self._allowed(ctx, credential, key, address):
+                return []
+        try:
+            found = self._from(credential, ctx)
+        except hypervisor.HypervisorError as exc:
+            # Un hipervisor caído o una contraseña cambiada no pueden tumbar
+            # el barrido: se anota y se sigue con el siguiente. El detalle va
+            # tal cual: lo escribe el hipervisor, o es un error de red.
+            errors.append(
+                collector_note(
+                    "hypervisors", "failed", f"{credential.host}: {exc}", host=credential.host, detail=str(exc)
                 )
-        return findings
+            )
+            self._remember(ctx, key, credential, ok=False)
+            return []
+        self._remember(ctx, key, credential, ok=True)
+        return found
+
+    @staticmethod
+    def _allowed(ctx: dict, credential: creds.Credential, key: str, address: str) -> bool:
+        """¿Toca preguntar a ese servidor con esa credencial en esta pasada?
+
+        El alcance, si la credencial lo tiene; y la memoria: una credencial que
+        nunca ha entrado y falló en las últimas 24 h espera al día siguiente (o
+        a que alguien la cambie). Una que ya entró alguna vez se prueba siempre:
+        un vCenter reiniciándose no puede dejar sin VMs el inventario un día.
+        """
+        if not credential.covers(address or credential.host):
+            return False
+        mem = tasking.memory(ctx)
+        if mem is None or not key:
+            return True
+        try:
+            return bool(mem.order_for(key, credential.kind, [credential], tasking.now()))
+        except Exception:  # noqa: BLE001 - la memoria es prescindible
+            return True
+
+    @staticmethod
+    def _remember(ctx: dict, key: str, credential: creds.Credential, *, ok: bool) -> None:
+        mem = tasking.memory(ctx)
+        if mem is None or not key:
+            return
+        try:
+            if ok:
+                mem.record_success(key, credential.kind, credential, tasking.now())
+            else:
+                mem.record_round_failed(key, credential.kind, tasking.now())
+        except Exception:  # noqa: BLE001
+            pass
 
     def _from(self, credential: creds.Credential, ctx: dict) -> list[Finding]:
         client = CLIENTS[credential.kind](
