@@ -1,0 +1,17 @@
+# La petición de actualización del agente (docs/agente-v2-instalacion.md, 4).
+#
+# El agente corre sin privilegios y no puede sustituir /opt/cenya-agent ni
+# reiniciar su propio servicio: cuando el servidor le ofrece una versión, la
+# descarga, la verifica y deja updates/request.json. Esta unidad lo ve y lanza
+# cenya-agent-update.service, que como root VUELVE a verificarlo todo con su
+# propio código y sus claves antes de ejecutar nada. Lo instala install.sh.
+
+[Unit]
+Description=Cenya agent: wait for an update request
+
+[Path]
+PathExists=/var/lib/cenya-agent/updates/request.json
+Unit=cenya-agent-update.service
+
+[Install]
+WantedBy=multi-user.target

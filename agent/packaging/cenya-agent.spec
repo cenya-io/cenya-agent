@@ -47,6 +47,12 @@ common = dict(
         "agent.tray",
         "agent.netbox_export",
         "agent.goodbye",
+        # `cenya-agent settings` (lo llama el instalador con /CA=) y la
+        # actualización: los importa __main__ dentro de una función.
+        "agent.settings_command",
+        "agent.update",
+        "agent.release",
+        "agent.release_keys",
         # Los permisos de la carpeta de estado (agent/store.py) los lee y
         # escribe pywin32 si está, importado dentro de una función.
         "win32security",
@@ -70,6 +76,13 @@ a_cli = Analysis([str(PACKAGING / "entry_agent.py")], **common)
 a_svc = Analysis([str(PACKAGING / "entry_service.py")], **common)
 a_tray = Analysis([str(PACKAGING / "entry_tray.py")], **common)
 a_askpass = Analysis([str(PACKAGING / "entry_askpass.py")], **common)
+
+# --- PENDIENTE (fase 5): la aplicación de escritorio (agent/app/) -------------
+# Cuando exista, entra aquí como un quinto Analysis/EXE (sin consola, como el
+# icono), en el MERGE y en el COLLECT de abajo, con su entry_app.py; y el
+# instalador la abrirá en «Conectar» cuando no haya conexión (contrato,
+# sección 2). Hasta entonces, nada: no se empaqueta lo que no existe.
+# ------------------------------------------------------------------------------
 
 # Un solo juego de librerías compartido: sin esto, cada ejecutable llevaría su
 # propia copia de Python y de pysnmp (tres veces el mismo peso).

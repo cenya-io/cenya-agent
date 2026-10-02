@@ -195,6 +195,10 @@ class Hooks:
     excluded: Callable[[str], bool]
     #: El servidor ha rechazado al agente (401): vaciar la cola de tareas.
     rejected: Callable[[], None] = lambda: None
+    #: Un checkin bueno, con su `update` (o `None`): decide `agent/update.py`.
+    update_offered: Callable[[Any], None] = lambda _update: None
+    #: El `update_state` del checkin (docs/agente-v2-instalacion.md, 4), o `None`.
+    update_state: Callable[[], dict[str, Any] | None] = lambda: None
 
 
 class Control:
@@ -265,6 +269,8 @@ class Control:
             "about_hash": about_hash,
             "outbox": self.outbox.count(),
         }
+        if (update_state := self._safely(self.hooks.update_state)) is not None:
+            body["update_state"] = update_state
         # El `about` entero solo si cambió desde el último que llegó, o si el
         # servidor lo pidió; el primero de cada arranque siempre va.
         if self._need_about or about_hash != self._about_sent:
@@ -410,9 +416,10 @@ class Control:
             self._safely(lambda: self.hooks.config_changed(etag))
         offered = str(update.get("version") or "") if isinstance(update, dict) else ""
         if offered and offered != self._announced_update:
-            # En la fase 1 solo se anota; actualizarse llega en la fase 6.
+            # Se anota aquí; si se actualiza o no lo decide `agent/update.py`.
             self._announced_update = offered
             self._say(_t("[agente] Hay una versión nueva del agente: %(version)s.") % {"version": offered})
+        self._safely(lambda: self.hooks.update_offered(dict(update) if isinstance(update, dict) else None))
         orders = answer.get("orders") if self._take_orders else None
         for order in orders if isinstance(orders, list) else []:
             self.handle_order(order)

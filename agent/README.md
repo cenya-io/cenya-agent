@@ -59,56 +59,78 @@ python -m agent --once
 
 Cada versión etiquetada (`agent-vX.Y.Z`) que pasa la prueba de verdad del
 instalador (`.github/workflows/agent-installer.yml`) se publica, y ya no se
-toca, como *Release* de este repositorio:
+toca, como *Release* de este repositorio
+(`docs/agente-v2-instalacion.md`, sección 1):
 
-```
-https://github.com/cenya-io/cenya-agent/releases/download/agent-v<versión>/Cenya-Agent-Setup-<versión>.exe   # Windows
-https://github.com/cenya-io/cenya-agent/releases/download/agent-v<versión>/latest.json                       # versión, URL y SHA-256
-https://github.com/cenya-io/cenya-agent/archive/refs/tags/agent-v<versión>.zip                               # Linux y el resto
-```
+| Fichero | Qué es |
+|---|---|
+| `Cenya-Agent-Setup-<versión>.exe` | El instalador de Windows |
+| `cenya-agent-<versión>.tar.gz` | El agente para Linux (la carpeta `agent/` de la etiqueta, hecho una vez y firmado) |
+| `install.sh` | Instalación y actualización en Linux, con las claves públicas dentro |
+| `latest.json` | El manifiesto: versión, y URL, SHA-256 y tamaño de cada fichero |
+| `latest.json.sig` | La firma Ed25519 del manifiesto |
 
-Lo normal es no escribir nada de eso a mano: **Ajustes → Agentes → Añadir un
-agente** enlaza a la versión exacta que corresponde a ese servidor, con el
-comando de Linux ya escrito. En Linux, en un entorno propio:
+El archivo de Linux es propio y no el `.zip` que GitHub genera para la
+etiqueta: ese se genera al vuelo y GitHub no garantiza que sus bytes (y su
+huella) sean siempre los mismos, así que no se puede firmar su SHA-256.
 
-```bash
-sudo python3 -m venv /opt/cenya-agent
-sudo /opt/cenya-agent/bin/pip install "cenya-agent[completo] @ https://github.com/cenya-io/cenya-agent/archive/refs/tags/agent-v0.10.2.zip#subdirectory=agent"
-```
+**Firmas.** Verificar es siempre lo mismo y nunca se salta un paso: la firma
+del manifiesto con una clave conocida (`agent/release_keys.py`), luego la
+huella y el tamaño del fichero que dice el manifiesto (`agent/release.py`).
+La huella sola no vale: quien cambia el fichero cambia la huella. Sin ninguna
+clave pública en `agent/release_keys.py` el agente **no se actualiza solo** y
+lo dice. El par de claves lo genera el dueño del repositorio con
+`python agent/packaging/release_key.py generate`: la privada va al secreto
+`CENYA_RELEASE_SIGNING_KEY` del repositorio y la pública a
+`agent/release_keys.py` y al servidor. Sin el secreto, el flujo publica sin
+firma y lo avisa.
 
 ## El instalador de Windows
 
 Para quien no quiere ni oír hablar de Python: **`Cenya-Agent-Setup-<versión>.exe`**.
 Lleva dentro su Python y todas las librerías (SNMP, WinRM…), y deja el agente
-funcionando como servicio de Windows con su icono de bandeja. Se ejecuta, se
-pega la cadena de conexión de Ajustes → Agentes y termina. Habla los cinco
+funcionando como servicio de Windows con su icono de bandeja. Habla los cinco
 idiomas del producto.
+
+**La conexión va en el nombre.** El instalador que se descarga desde Ajustes →
+Agentes se llama `Cenya-Agent-Setup-<versión>_<base32>.exe`: detrás del último
+`_` va la cadena de conexión en base32 (RFC 4648, minúsculas, sin relleno). El
+instalador la lee de su propio nombre (también con el « (1)» que añade el
+navegador a una descarga repetida) y enrola sin preguntar nada. Sin conexión
+en el nombre ni en la línea de comandos, la página de conexión es opcional: se
+puede dejar en blanco y enrolar después (`cenya-agent enroll <cadena>`); el
+servicio queda instalado pero parado hasta entonces.
 
 Para desplegarlo en masa (un MSP con muchas máquinas, un script, Intune), en
 silencio:
 
 ```powershell
-.\Cenya-Agent-Setup-0.10.2.exe /VERYSILENT /CONNECTION=cenya://portal.midominio.com/K7QF-9M2X-4TQN
+.\Cenya-Agent-Setup-0.11.0.exe /VERYSILENT /CONNECTION=cenya://portal.midominio.com/K7QF-9M2X-4TQN
 ```
 
 | Parámetro | Para qué |
 |---|---|
-| `/CONNECTION=…` | La cadena de conexión. Sin ella, y si el equipo no está enrolado, la pide. En un equipo ya enrolado se ignora |
+| `/CONNECTION=…` | La cadena de conexión. Manda sobre la del nombre. En un equipo ya enrolado se ignoran las dos |
+| `/CA=<fichero>` | El certificado (PEM o DER) de la CA propia del portal. Se valida, se copia a la carpeta de estado (`ca.pem`) y queda en `settings.json` **antes** de enrolar. La página del asistente tiene el mismo campo |
 | `/TASKS="!tray"` | Sin icono de bandeja: para un servidor en el que nadie inicia sesión |
 | `/DIR="D:\Cenya"` | Otra carpeta de instalación (por defecto, `Archivos de programa\Cenya Agent`) |
+| `/UPDATE` | Lo usa el propio agente al actualizarse (ver «Actualización») |
 
 **Códigos de salida** además de los de Inno Setup (0 a 8): **21** si el agente se
-instaló pero no pudo enrolarse (cadena caducada o ya usada, portal inalcanzable)
-y **22** si no se pudo instalar el servicio. Quien despliega en masa tiene que
-mirar el código: un equipo sin enrolar es un equipo sin agente.
+instaló pero no pudo enrolarse (cadena caducada o ya usada, portal inalcanzable),
+**22** si no se pudo instalar el servicio y **23** si el certificado de `/CA=`
+no se pudo aplicar. Quien despliega en masa tiene que mirar el código: un
+equipo sin enrolar es un equipo sin agente.
 
 La carpeta del agente queda en el PATH del sistema: en cualquier consola nueva,
-`cenya-agent …` funciona sin `cd`.
+`cenya-agent …` funciona sin `cd`. `cenya-agent settings set ca_bundle <fichero>`
+y `cenya-agent settings set auto_update on|off` cambian esos dos ajustes a mano.
 
 Volver a ejecutar el instalador **actualiza**: no pide nada y conserva el
 enrolamiento, aunque se repita el mismo comando con su `/CONNECTION` (un código
 de un solo uso ya está gastado). Para pasar un equipo a otro portal:
-`cenya-agent enroll <cadena> --force`. Desinstalar quita el servicio, saca la
+`cenya-agent enroll <cadena> --force`. Desinstalar **se despide del servidor**
+(`cenya-agent goodbye`; sin red borra igual), quita el servicio, saca la
 carpeta del PATH y borra el token y el estado: un secreto no se queda en una
 máquina en la que ya no hay agente.
 
@@ -129,12 +151,52 @@ entra en el agente, que sigue siendo Apache 2.0.
 
 En GitHub Actions, `.github/workflows/agent-installer.yml` lo construye y,
 sobre un Windows limpio con administrador, **lo instala de verdad contra un
-servidor de mentira**: comprueba el servicio, el latido, los permisos del token,
-la actualización, la desinstalación y el código 21 con una cadena mala
-(`agent/packaging/smoke-test.ps1`).
+servidor de mentira**: el servicio, el checkin, los permisos del token, la
+reinstalación, la desinstalación con su despedida y el código 21 con una cadena
+mala. Con una clave de PRUEBA que nace y muere en la ejecución compila además
+las versiones N, N+1 y N+2 y prueba la conexión en el nombre, `/CA=`, la
+actualización sola de N a N+1, que un instalador manipulado no se ejecuta y que
+una N+2 que nunca conecta vuelve atrás sola (`agent/packaging/smoke-test.ps1`).
 
 Aún sin firmar: Windows enseñará «Windows protegió su PC» al ejecutarlo. La firma
 de código es el siguiente paso, antes del primer cliente.
+
+## Actualización
+
+El servidor dice en el checkin a qué versión ir (`"update": {"version": …}`,
+con `"explicit": true` si alguien pulsó «Actualizar»). Con `auto_update`
+encendido en `settings.json` (lo está por defecto), o con la orden explícita,
+el agente (`agent/update.py`):
+
+1. Trae `latest.json` y su firma de la Release de esa versión y, si no llega,
+   de su propio servidor (`GET /api/agent/v2/installer/`, con el manifiesto y
+   la firma en las cabeceras). Sin claves configuradas no baja nada.
+2. Acepta solo exactamente la versión pedida y **estrictamente más nueva** que
+   la suya: nunca baja de versión.
+3. Descarga a `updates/` de su carpeta protegida, con el tope del tamaño del
+   manifiesto, y comprueba la huella. Lo que no verifica se borra y se informa
+   (`update_state` del checkin, nota `update` / `bad_signature`, `bad_hash`…).
+   Un fallo así se reintenta a la media hora; una orden explícita, ya.
+4. Espera a que no haya ninguna tarea en curso (y no empieza otra), vuelve a
+   comprobar la huella y lanza el instalador.
+
+**Windows.** El instalador en modo `/UPDATE`, desacoplado del servicio. Antes de
+sustituir nada copia la versión instalada a `%ProgramData%\Cenya\previous\app`
+y deja un vigilante: una tarea programada de un solo uso, como SYSTEM, que se
+lanza al registrarse y en cada arranque del equipo
+(`agent/packaging/update-watchdog.cmd`). Si en 10 minutos la versión nueva no
+ha hecho un checkin correcto (su marca `updates\healthy-<versión>`), restaura
+la anterior, la arranca y deja `updates\failed-<versión>`: el agente
+restaurado informa `update_failed` y no vuelve a intentar esa versión. Si no se
+pudo hacer la copia o crear el vigilante, no se sustituye nada.
+
+**Linux.** El agente corre sin privilegios y no puede tocar `/opt` ni reiniciar
+su servicio: deja `updates/request.json`, y `cenya-agent-update.path` lanza como
+root `cenya-agent update apply-request`, que **vuelve a verificarlo todo** con
+el código y las claves de la versión instalada antes de ejecutar el
+`install.sh --update` verificado. El vigilante es una unidad
+`cenya-agent-watchdog.timer` que hace lo mismo que el de Windows y sobrevive a
+un reinicio.
 
 ## Instalarlo como servicio con pip
 
@@ -154,10 +216,26 @@ dependencias son opcionales a propósito: sin ellas el agente arranca igual y
 el colector que las necesita se reporta no disponible — barrido parcial,
 nunca roto.
 
-**Linux (systemd).** Hay una unidad de ejemplo en
-[`deploy/cenya-agent.service`](deploy/cenya-agent.service):
-cópiala a `/etc/systemd/system/`, pon la URL y el token en sus `Environment=`,
-y `systemctl enable --now cenya-agent`.
+**Linux.** No hace falta pip a mano:
+
+```bash
+curl -fsSL https://github.com/cenya-io/cenya-agent/releases/latest/download/install.sh | sudo sh -s -- cenya://portal/CODIGO
+```
+
+`install.sh` (POSIX `sh`; Debian, Ubuntu y la familia RHEL, con systemd y Python
+3.10 o posterior) verifica la firma del manifiesto y la huella del archivo
+antes de instalar nada, crea `/opt/cenya-agent/<versión>` (un entorno virtual
+por versión) y el enlace `/opt/cenya-agent/current`, deja la orden
+`/usr/local/bin/cenya-agent` (con `sudo` corre como el usuario del agente),
+crea el usuario sin privilegios `cenya-agent`, instala
+[`deploy/cenya-agent.service`](deploy/cenya-agent.service) (estado en
+`/var/lib/cenya-agent` con `StateDirectory`, solo la capacidad `CAP_NET_RAW`
+que necesita el ping, `NoNewPrivileges`, `ProtectSystem=strict`,
+`ProtectHome`, `PrivateTmp`) y las unidades de la actualización, enrola si se
+le dio la cadena y arranca. `--ca FICHERO` aplica una CA propia antes de
+enrolar. Volver a ejecutarlo actualiza; `sudo sh /opt/cenya-agent/install.sh
+--uninstall` se despide del servidor y quita todo. Los registros:
+`journalctl -u cenya-agent`.
 
 **Windows (servicio).** Un servicio de verdad: aparece en `services.msc`,
 arranca sin que nadie inicie sesión y se para limpiamente. Con Python 3.12
