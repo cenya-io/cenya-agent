@@ -152,6 +152,15 @@ class Memory:
                     memory._hosts[key] = entry
         return memory
 
+    def detach(self) -> "Memory":
+        """Deja de estar atada a su fichero: lo que aprenda ya no se guarda.
+
+        Para `--once`, que corre a mano quizá junto al servicio: lee lo que el
+        servicio sabe, pero no pisa su `memory.json` con lo de una prueba.
+        """
+        self._path = None
+        return self
+
     def save(self) -> None:
         """Escribe el fichero de forma atómica. Nunca lanza.
 

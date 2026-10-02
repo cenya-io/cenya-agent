@@ -93,6 +93,7 @@ def sweep(
     report: bool = True,
     excluded: Excluded | None = None,
     memory: Memory | None = None,
+    probes: bool = True,
 ) -> int:
     """One pass over every collector. Returns how many findings were pushed.
 
@@ -107,6 +108,10 @@ def sweep(
     2.4): ningún camino toca una dirección excluida, tampoco este, y la
     memoria es la que evita repetir credenciales fallidas contra un dominio.
     `task` sigue sin ponerse: los colectores se comportan como en la 0.10.x.
+
+    `probes` apagado (`--once`) deja los «Analizar» del latido para el
+    servicio: son encargos suyos, y el servidor los da por hechos al recibir
+    el informe.
     """
     if report:
         status.sweep_started()
@@ -130,7 +135,8 @@ def sweep(
     # cada IP, con su informe por protocolo. Van en el mismo empuje que el
     # barrido; el servidor los fusiona por IP con su fila de la bandeja.
     try:
-        items.extend(probe.findings_for(ctx))
+        if probes:
+            items.extend(probe.findings_for(ctx))
     except Exception as exc:  # noqa: BLE001 - un sondeo roto no tumba el barrido
         ctx.setdefault("errors", []).append(
             collector_note("probe", "crashed", str(exc), detail=f"{type(exc).__name__}: {exc}")
@@ -242,12 +248,14 @@ def main(argv: list[str] | None = None, stop_event: StopSignal | None = None) ->
         # Un servidor caído aquí es un mensaje, no un volcado de pila: `--once`
         # es lo que alguien ejecuta a mano para comprobar que el enrolado
         # funciona, y es justo cuando la URL o el token suelen estar mal.
-        runtime = Runtime(client, config, report=False, say=_say)
+        # Sin encargos, sin la cola del servicio y con una copia de su memoria
+        # que no se guarda: `--once` puede correr con el servicio en marcha.
+        runtime = Runtime(client, config, report=False, say=_say, once=True)
         try:
             if runtime.negotiate() == V2:
                 runtime.once()
             else:
-                sweep(client, config, report=False, excluded=runtime.excluded, memory=runtime.memory)
+                sweep(client, config, report=False, excluded=runtime.excluded, memory=runtime.memory, probes=False)
         except PushError as exc:
             _say(_t("[agente] %(error)s") % {"error": exc}, error=True)
             raise SystemExit(1) from exc

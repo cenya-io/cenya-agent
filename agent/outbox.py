@@ -299,3 +299,33 @@ class Outbox:
                 reason=reason,
             )
         )
+
+
+class NullOutbox:
+    """An outbox that holds nothing and touches no folder: ``--once``'s.
+
+    `--once` es alguien probando a mano, quizá con el servicio corriendo en la
+    misma máquina. La cola de verdad es del servicio: abrirla aquí borraba sus
+    temporales a medio escribir (`_sweep_leftovers`) y la vaciaba contra el
+    servidor en el primer checkin. `--once` entrega en el acto o falla.
+    """
+
+    folder = None
+
+    def put_result(self, body: dict[str, Any]) -> bool:
+        return False
+
+    def put_order_answer(self, order_id: str, body: dict[str, Any]) -> bool:
+        return False
+
+    def count(self) -> int:
+        return 0
+
+    def order_ids(self) -> set[str]:
+        return set()
+
+    def take_notes(self) -> list[Note]:
+        return []
+
+    def drain(self, send: Callable[[Entry], object], **_kwargs: Any) -> int:
+        return 0

@@ -113,6 +113,7 @@ class Runtime:
         clock: Callable[[], datetime] = _now,
         report: bool = True,
         say: Callable[[str], None] | None = None,
+        once: bool = False,
     ) -> None:
         self.client = client
         self.env = env
@@ -127,8 +128,16 @@ class Runtime:
         #: Guarda la cola y los vivos: los tocan los dos hilos.
         self._lock = threading.Lock()
         self._hosts: list[dict[str, Any]] = []
-        self.outbox = outbox.Outbox(base / outbox.FOLDER)
+        # `--once` (`once`) puede correr con el servicio en marcha en la misma
+        # máquina: ni su cola de envíos (que vaciaría y cuyos temporales
+        # borraría) ni su memoria en disco (que pisaría) son suyas. Lee la
+        # memoria, pero trabaja sobre una copia que no guarda.
+        self.outbox: outbox.Outbox | outbox.NullOutbox = (
+            outbox.NullOutbox() if once else outbox.Outbox(base / outbox.FOLDER)
+        )
         self.memory = _load_memory(base / MEMORY_FILE)
+        if once and self.memory is not None:
+            self.memory.detach()
         self.excluded = _excluded_for(self.settings)
         self._about: tuple[float, dict[str, Any]] | None = None
         self._step_written = 0.0
@@ -149,6 +158,7 @@ class Runtime:
             ),
             clock=clock,
             report=report,
+            take_orders=not once,
         )
 
     # --- Lo que pide el canal de control --------------------------------------------

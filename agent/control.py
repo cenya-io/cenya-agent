@@ -187,6 +187,7 @@ class Control:
         *,
         clock: Callable[[], datetime] = _now,
         report: bool = True,
+        take_orders: bool = True,
     ) -> None:
         self.client = client
         self.shared = shared
@@ -194,6 +195,9 @@ class Control:
         self.hooks = hooks
         self._clock = clock
         self._report = report
+        #: `--once` no atiende encargos ni los contesta: son del servicio, que
+        #: los recibirá en su próximo checkin y los hará de verdad.
+        self._take_orders = take_orders
         self._handled: OrderedDict[str, None] = OrderedDict()
         self._handled_lock = threading.Lock()
         for order_id in outbox.order_ids():
@@ -357,7 +361,7 @@ class Control:
             # En la fase 1 solo se anota; actualizarse llega en la fase 6.
             self._announced_update = offered
             self._say(_t("[agente] Hay una versión nueva del agente: %(version)s.") % {"version": offered})
-        orders = answer.get("orders")
+        orders = answer.get("orders") if self._take_orders else None
         for order in orders if isinstance(orders, list) else []:
             self.handle_order(order)
         if changed or pause_changed:

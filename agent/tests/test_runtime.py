@@ -18,6 +18,7 @@ import threading
 import time
 import unittest
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 from unittest import mock
 
@@ -592,6 +593,37 @@ class MainTests(RuntimeTestCase):
         with serving(server) as url:
             self.run_main(url, threading.Event(), ["--once"])
         self.assertEqual([b["run"]["task"] for b in server.bodies("/api/agent/v2/results/")], ["presence", "inventory"])
+
+    def test_once_leaves_the_services_orders_outbox_and_memory_alone(self) -> None:
+        """`--once` puede correr con el servicio en marcha: antes contestaba
+        `done` a sus encargos sin hacerlos, borraba sus temporales, vaciaba su
+        cola y pisaba su memoria."""
+        from agent import outbox as outbox_module
+
+        state = Path(self.state)
+        queue = outbox_module.Outbox(state / "outbox")
+        queue.put_result({"run": {"id": "del-servicio"}, "items": [], "part": 1, "final": True})
+        in_flight = state / "outbox" / ".out-del-servicio.tmp"
+        in_flight.write_text("a medio escribir", encoding="utf-8")
+        memory_file = state / "memory.json"
+        memory_file.write_text('{"version": 1, "etag": "x", "hosts": {}}', encoding="utf-8")
+        before = memory_file.read_bytes()
+        server = Server()
+        server.orders = [
+            {"id": "o-run", "kind": "run_task", "params": {"task": "presence"}},
+            {"id": "o-probe", "kind": "probe", "params": {"ip": "192.0.2.1"}},
+        ]
+
+        with serving(server) as url:
+            self.run_main(url, threading.Event(), ["--once"])
+
+        paths = [p for p, _ in server.requests]
+        self.assertFalse([p for p in paths if p.startswith("/api/agent/v2/orders/")])
+        self.assertEqual([b["run"]["id"] for b in server.bodies("/api/agent/v2/results/")].count("del-servicio"), 0)
+        self.assertEqual([b["run"]["trigger"] for b in server.bodies("/api/agent/v2/results/")], ["schedule", "schedule"])
+        self.assertTrue(in_flight.exists())
+        self.assertEqual(outbox_module.Outbox(state / "outbox").count(), 1)
+        self.assertEqual(memory_file.read_bytes(), before)
 
     def test_once_with_protocol_1_still_sweeps(self) -> None:
         server = Server(v2=False)

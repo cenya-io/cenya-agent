@@ -558,3 +558,15 @@ class LegacySweepExclusionTests(unittest.TestCase):
         self.assertEqual(findings, [])
         client_class.assert_not_called()
         self.assertEqual([note.code for note in ctx["errors"]], ["excluded"])
+
+    def test_once_against_an_old_server_leaves_the_probes_to_the_service(self) -> None:
+        from agent import __main__ as loop
+
+        client = mock.Mock()
+        client.heartbeat.return_value = {"config": {"subnets": [], "probe_ips": ["10.9.0.9"]}}
+        client.push_findings.return_value = {"created": 0, "refreshed": 0}
+        with mock.patch.object(loop, "all_collectors", return_value=[]), \
+             mock.patch.object(loop.probe, "findings_for") as findings_for, mock.patch("builtins.print"):
+            loop.sweep(client, config.Config(url="http://localhost", token="t"), report=False, probes=False)
+
+        findings_for.assert_not_called()
