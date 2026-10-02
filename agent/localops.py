@@ -994,11 +994,19 @@ class LocalService:
             raise OpError(BUSY, _t("Ya hay una exportación de NetBox en marcha."))
         total = len(netbox_export.ENDPOINTS)
         try:
-            self._job("netbox_export", state="running", step="", done=0, total=total, started_at=self._clock().isoformat())
+            self._job(
+                "netbox_export", state="running", step="", done=0, total=total, finished=[], started_at=self._clock().isoformat()
+            )
             done = [0]
+            finished: list[str] = []
 
             def progress(path: str) -> None:
-                self._job("netbox_export", step=path, done=done[0], total=total)
+                # Las ya leídas, todas: quien mira cada segundo y medio se
+                # perdería las rápidas y la lista saldría con huecos.
+                previous = self.jobs().get("netbox_export", {}).get("step")
+                if previous:
+                    finished.append(previous)
+                self._job("netbox_export", step=path, done=done[0], total=total, finished=list(finished))
                 done[0] += 1
 
             try:

@@ -102,8 +102,8 @@ class ServiceControlTests(unittest.TestCase):
         api.start.assert_not_called()
 
     def test_the_default_api_is_the_real_service_name(self) -> None:
-        from agent import winservice  # noqa: F401 - si no importa, el nombre se vigila por texto
-
+        # El nombre de agent/winservice.py se vigila por texto (el test de
+        # abajo): importarlo aquí rompía la batería en Linux, sin pywin32.
         self.assertEqual(winsys.Win32ServiceApi().name, "CenyaAgent")
 
     def test_the_name_matches_the_service(self) -> None:

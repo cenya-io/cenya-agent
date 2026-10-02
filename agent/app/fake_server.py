@@ -607,7 +607,7 @@ class FakeAgent:
         with self._lock:
             if self.local.get("netbox_export", {}).get("state") == "running":
                 raise OpError(BUSY, "Ya hay una exportación de NetBox en marcha.")
-            self.local["netbox_export"] = {"state": "running", "step": "", "done": 0, "total": total, "started_at": _iso(self._clock())}
+            self.local["netbox_export"] = {"state": "running", "step": "", "done": 0, "total": total, "finished": [], "started_at": _iso(self._clock())}
         if bad:
             self._sleep(0.8)
             with self._lock:
@@ -616,7 +616,7 @@ class FakeAgent:
         summary: dict[str, int] = {}
         for index, (path, count) in enumerate(NETBOX_COLLECTIONS):
             with self._lock:
-                self.local["netbox_export"].update(step=path, done=index)
+                self.local["netbox_export"].update(step=path, done=index, finished=[name for name, _ in NETBOX_COLLECTIONS[:index]])
             self._sleep(0.9)
             summary[path.split("/", 1)[1].replace("-", "_")] = count
         with self._lock:

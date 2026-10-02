@@ -188,6 +188,7 @@ def normalize_status(raw: Any) -> dict[str, Any]:
             "step": export.get("step") or "",
             "done": export.get("done"),
             "total": export.get("total"),
+            "finished": export.get("finished") if isinstance(export.get("finished"), list) else None,
             "started_at": export.get("started_at"),
         }
     return status
@@ -645,6 +646,11 @@ def netbox_progress(activity: dict[str, Any] | None, seen: list[str]) -> dict[st
     percent = None
     if isinstance(activity, dict) and activity.get("task") == NETBOX_TASK:
         step = str(activity.get("step") or "")
+        # El servicio dice las ya leídas (`finished`): así no falta ninguna
+        # aunque pasara entre dos sondeos.
+        finished = [name for name in activity.get("finished") or [] if isinstance(name, str) and name]
+        if finished:
+            seen = finished + [name for name in seen if name not in finished]
         done, total = _as_int(activity.get("done")), _as_int(activity.get("total"))
         if done is not None and total:
             percent = max(0, min(100, round(100 * done / total)))
@@ -882,9 +888,9 @@ def updates_view(settings: dict[str, Any], status: dict[str, Any] | None, check:
     elif available:
         message, tone = _t("Hay una versión nueva: %(version)s") % {"version": latest}, INFO
         if auto:
-            message += " " + _t("Se instalará sola, sin cortar ninguna tarea.")
+            message += ". " + _t("Se instalará sola, sin cortar ninguna tarea.")
         else:
-            message += " " + _t("Las actualizaciones automáticas están desactivadas en este equipo.")
+            message += ". " + _t("Las actualizaciones automáticas están desactivadas en este equipo.")
     elif check is not None:
         message, tone = _t("Está al día."), SUCCESS
     else:

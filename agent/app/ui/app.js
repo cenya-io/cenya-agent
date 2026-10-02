@@ -98,6 +98,11 @@ function patch(host, data, render) {
 
 /* --- Components (the window's small design system) ---------------------- */
 
+/* Una cifra con los separadores del idioma de la ventana (1.830 en portugués, 1,830 en inglés). */
+function num(value) {
+  return Number(value).toLocaleString(document.documentElement.lang || undefined);
+}
+
 function btn(label, o = {}) {
   const variant = o.variant || "secondary";
   const cls = ["btn", "btn-" + variant, o.size ? "btn-" + o.size : "", o.iconOnly ? "btn-icon" : ""].join(" ");
@@ -578,7 +583,10 @@ function renderOverview(v, apply) {
       { class: "grow" },
       el("div", { class: "status-title", text: c.title }),
       c.detail ? el("div", { class: "status-detail selectable", text: c.detail }) : null,
-      el("div", { class: "status-since" }, c.since, v.update ? el("span", { class: "tone-info", text: (c.since ? " · " : "") + v.update }) : null)
+      el("div", { class: "status-since" }, c.since, v.update ? el("span", { class: "tone-info", text: (c.since ? " · " : "") + v.update }) : null),
+      // La pausa, debajo del portal y no al lado: al lado estrechaba el título
+      // hasta partirlo en dos líneas (y en alemán, en tres).
+      v.pause.paused ? el("div", { class: "status-badges" }, badge(v.pause.text, "warning", true)) : null
     )
   );
   let right;
@@ -586,7 +594,6 @@ function renderOverview(v, apply) {
     right = el(
       "div",
       { class: "row" },
-      badge(v.pause.text, "warning", true),
       btn(T.resume, {
         variant: "primary",
         icon: "play",
@@ -659,8 +666,9 @@ function renderCounters(cv) {
   const body = cv.items.length
     ? el(
         "div",
-        { class: "kpis" },
-        cv.items.map((k) => el("div", { class: "kpi" }, el("div", { class: "kpi-label", text: k.label }), el("div", { class: "kpi-value", "data-tone": k.tone, text: k.value.toLocaleString() })))
+        // Dos columnas con 2 o 4 cifras: con tres, la cuarta quedaba sola en su fila.
+        { class: "kpis", "data-cols": cv.items.length === 2 || cv.items.length === 4 ? "2" : "3" },
+        cv.items.map((k) => el("div", { class: "kpi" }, el("div", { class: "kpi-label", text: k.label }), el("div", { class: "kpi-value", "data-tone": k.tone, text: num(k.value) })))
       )
     : el("div", { class: "panel-body muted sm", text: T.no_counters });
   return [
@@ -911,7 +919,7 @@ function showProgress(host, id, first) {
           "div",
           { class: "panel-body stack" },
           resultBox("success", sm.message),
-          el("ul", { class: "checklist" }, sm.rows.map((row) => el("li", {}, ico("check", "tone-success"), el("span", { class: "mono", text: row.name }), el("span", { class: "count", text: Number(row.count).toLocaleString() })))),
+          el("ul", { class: "checklist" }, sm.rows.map((row) => el("li", {}, ico("check", "tone-success"), el("span", { class: "mono", text: row.name }), el("span", { class: "count", text: num(row.count) })))),
           el("div", { class: "form-actions" }, ending, btn(T.nb_again, { variant: "ghost", icon: "rotate-cw", onClick: reset }))
         ),
       ];
@@ -1365,6 +1373,7 @@ function drawSettings(host, v) {
       if (!report(r)) return;
       T = r.strings;
       S.filters = r.filters;
+      if (r.lang) document.documentElement.lang = r.lang;
       renderNav();
       renderBanner();
       mountSection();
@@ -1424,6 +1433,8 @@ async function start() {
   const r = await call("init");
   if (!r.ok) return;
   T = r.strings;
+  // El idioma de la página: lectores de pantalla, guiones y el formato de las cifras.
+  if (r.lang) document.documentElement.lang = r.lang;
   S.version = r.version;
   S.dev = r.dev;
   S.filters = r.filters;

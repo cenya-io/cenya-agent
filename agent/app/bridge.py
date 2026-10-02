@@ -181,6 +181,7 @@ class Api:
                 pass
         return _ok(
             strings=strings.ui_strings(),
+            lang=_page_language(),
             version=__version__,
             dev=self._dev,
             elevated=self._elevated,
@@ -611,7 +612,7 @@ class Api:
             except channel.ChannelError as exc:
                 return self._error(exc)
         self._apply_language(code)
-        return _ok(strings=strings.ui_strings(), filters=view.log_filters())
+        return _ok(strings=strings.ui_strings(), lang=_page_language(), filters=view.log_filters())
 
     def check_update(self) -> dict[str, Any]:
         refused = self._refuse_if_readonly()
@@ -674,6 +675,12 @@ class Api:
                 "repo": REPO_URL.removeprefix("https://"),
             }
         )
+
+
+def _page_language() -> str:
+    """La etiqueta BCP 47 del idioma en el que habla la ventana (`pt-BR`): `lang` de la página y formato de cifras."""
+    first = i18n.accept_language().split(",")[0].strip()
+    return first or "es"
 
 
 def _invalid_ip() -> str:

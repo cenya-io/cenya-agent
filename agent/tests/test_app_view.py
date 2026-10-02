@@ -350,6 +350,14 @@ class LogTests(unittest.TestCase):
 
 
 class NetboxTests(unittest.TestCase):
+    def test_progress_lists_every_collection_read_even_between_two_polls(self) -> None:
+        raw = {"local": {"netbox_export": {"state": "running", "step": "dcim/cables", "done": 5, "total": 9,
+                                           "finished": ["dcim/sites", "dcim/racks", "dcim/device-types", "dcim/devices", "dcim/interfaces"]}}}
+        progress = view.netbox_progress(view.normalize_status(raw)["activity"], ["dcim/device-types"])
+        self.assertEqual([row["name"] for row in progress["rows"]][:2], ["dcim/sites", "dcim/racks"])  # en su orden
+        self.assertEqual(len(progress["rows"]), 6)
+        self.assertEqual(progress["rows"][-1], {"name": "dcim/cables", "state": "reading"})
+
     def test_form_errors(self) -> None:
         self.assertTrue(view.netbox_form_error("", "t"))
         self.assertTrue(view.netbox_form_error("netbox.local", "t"))

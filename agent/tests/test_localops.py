@@ -521,6 +521,8 @@ class NetboxExportTests(LocalServiceCase):
         self.assertNotIn(self.NB_TOKEN, target.read_text(encoding="utf-8"))
         self.assertEqual(seen[1]["step"], "/api/dcim/devices/")
         self.assertEqual(seen[1]["state"], "running")
+        # Las ya leídas, todas, para que la ventana no enseñe huecos.
+        self.assertEqual((seen[0]["finished"], seen[1]["finished"]), ([], ["/api/dcim/sites/"]))
         self.assertEqual(self.service.jobs()["netbox_export"]["state"], "done")
         self.assert_no_token_anywhere()
 
