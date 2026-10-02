@@ -11,6 +11,7 @@ Etiqueta `agent-vX.Y.Z`. Ficheros:
 |---|---|
 | `Cenya-Agent-Setup-X.Y.Z.exe` | Instalador de Windows |
 | `install.sh` | Instalación y actualización en Linux |
+| `cenya-agent-X.Y.Z.tar.gz` | El código del agente para Linux (`git archive` de `agent/`) |
 | `latest.json` | El manifiesto |
 | `latest.json.sig` | Firma Ed25519 del manifiesto |
 
@@ -24,13 +25,17 @@ Etiqueta `agent-vX.Y.Z`. Ficheros:
   "sha256": "<hex del .exe>",
   "files": {
     "windows": {"url": "…/Cenya-Agent-Setup-0.11.0.exe", "sha256": "<hex>", "size": 15000000},
-    "linux":   {"url": "https://github.com/cenya-io/cenya-agent/archive/refs/tags/agent-v0.11.0.zip", "sha256": "<hex>", "size": 900000},
+    "linux":   {"url": "…/cenya-agent-0.11.0.tar.gz", "sha256": "<hex>", "size": 900000},
     "install.sh": {"url": "…/install.sh", "sha256": "<hex>", "size": 4000}
   }
 }
 ```
 
 `url` y `sha256` de primer nivel se conservan (los lee quien ya los leía).
+
+El fichero de Linux es un archivo propio y no el zip que GitHub genera de la
+etiqueta: aquel se genera al vuelo y GitHub no garantiza que sus bytes no
+cambien, así que su huella no se puede firmar.
 
 `latest.json.sig`: la firma Ed25519, en base64 estándar, de **los bytes
 exactos** de `latest.json`. La clave privada es un secreto del repositorio
@@ -81,7 +86,10 @@ Al desinstalar: `cenya-agent goodbye` antes de quitar el servicio.
 
 - El servidor dice a qué versión ir en el checkin:
   `"update": {"version": "0.11.1"}` (cuando la política del agente es
-  automática, o alguien pulsó «Actualizar»). `null` = quédate.
+  automática, o alguien pulsó «Actualizar»). `null` = quédate. Con
+  `"explicit": true` (lo pidió una persona) el agente no mira su ajuste local
+  `auto_update` ni la espera entre reintentos; el servidor deja de mandarlo
+  cuando ve esa versión en `installing` o `failed`.
 - El agente, con `auto_update` local encendido (o con la orden explícita):
   1. Trae el manifiesto y su firma (de este repositorio; si no llega, de su
      servidor) y los verifica con `agent/release_keys.py`.
@@ -101,8 +109,13 @@ Al desinstalar: `cenya-agent goodbye` antes de quitar el servicio.
   `systemd` temporal) restaura la anterior, arranca el servicio y deja
   constancia: el agente restaurado informa `update_failed` con la versión que
   falló y no la vuelve a intentar.
-- Estado en el checkin: el agente añade
-  `"update_state": {"state": "idle|downloading|ready|installing|failed", "version": "…", "error": "…"}`.
+- Estado en el checkin, en cada uno: el agente añade
+  `"update_state": {"state": "idle|downloading|ready|installing|failed", "version": "…", "error": "<código>", "note": {nota con código, colector `update`}}`.
+  Códigos: `bad_signature`, `bad_hash`, `bad_manifest`, `no_keys`,
+  `no_crypto`, `not_newer`, `wrong_version`, `download_failed`,
+  `install_failed`, `update_failed`, `unsupported`. **Definitivos** (esa
+  versión no se reintenta, ni con orden explícita): `update_failed` e
+  `install_failed`. Los demás se reintentan solos a los 30 minutos.
 - Un fichero que no verifica se borra y se anota (`update` / `bad_signature`
   o `bad_hash`). Nunca se ejecuta nada sin verificar.
 
@@ -117,4 +130,8 @@ e instala desde el archivo de la etiqueta, enlaza `/opt/cenya-agent/current`,
 deja `/usr/local/bin/cenya-agent`, instala la unidad systemd
 (`StateDirectory=cenya-agent`, usuario propio sin privilegios, las
 capacidades justas para el ping), enrola si se le dio la cadena y arranca.
+El agente corre sin privilegios, así que no se actualiza él: deja una
+petición en `updates/request.json` y una unidad `cenya-agent-update.path` la
+recoge como root, que **vuelve a verificar** firma, versión y huellas con el
+código y las claves ya instalados antes de ejecutar nada.
 Volver a ejecutarlo actualiza. `--uninstall` se despide y quita todo.
