@@ -15,6 +15,7 @@ que algo va mal y parar es la respuesta correcta.
 from __future__ import annotations
 
 import json
+import os
 import ssl
 import urllib.error
 import urllib.request
@@ -109,11 +110,77 @@ def _opener_for(ca_bundle: str) -> urllib.request.OpenerDirector:
     return urllib.request.build_opener(_NoRedirects, urllib.request.HTTPSHandler(context=context))
 
 
+def _mozilla_roots() -> str:
+    """The list of public root CAs that ships with the agent, or "" without it.
+
+    `certifi` is Mozilla's list, the same one browsers on Linux and macOS use.
+    It is optional on purpose: the plain `python -m agent` install has no
+    dependencies, and there the fallback below simply does not exist.
+    """
+    try:
+        import certifi
+    except ImportError:
+        return ""
+    path = certifi.where()
+    return path if os.path.exists(path) else ""
+
+
+def _fallback_opener() -> urllib.request.OpenerDirector | None:
+    """An opener that trusts Mozilla's roots instead of the operating system's."""
+    roots = _mozilla_roots()
+    if not roots:
+        return None
+    return _opener_for(roots)
+
+
+def _is_certificate_failure(exc: urllib.error.URLError) -> bool:
+    """A connection that got as far as the certificate and did not trust it."""
+    return not isinstance(exc, urllib.error.HTTPError) and isinstance(exc.reason, ssl.SSLCertVerificationError)
+
+
 class AgentClient:
     def __init__(self, base_url: str, token: str, *, ca_bundle: str = "") -> None:
         self.base_url = base_url.rstrip("/")
         self.token = token
         self._opener = _opener_for(ca_bundle)
+        # Only without a CA of the company's own. With one, that is the answer
+        # the operator chose, and a second opinion would undo it.
+        self._may_fall_back = not ca_bundle
+
+    def _open(self, request: urllib.request.Request) -> Any:
+        """Open the request, trusting what the operating system trusts.
+
+        On Windows, Python reads the system certificate store, which keeps old
+        certificates around (expired cross-signed roots, intermediates left by
+        earlier chains). OpenSSL can choose one of those and refuse a perfectly
+        good Let's Encrypt certificate with «certificate has expired», while the
+        browser and PowerShell, which build the chain their own way, accept it.
+        Seen on the first Windows install against Cenya Cloud (01-10-2026): the
+        same machine enrolled at once with Mozilla's list.
+
+        So, only when the *certificate check* fails, one more try against
+        Mozilla's roots. Verification is never switched off, and a company's own
+        CA (`ca_bundle`) is never second-guessed. If the second try fails too,
+        the first error is the one reported: it names the real problem.
+        """
+        try:
+            return self._opener.open(request, timeout=TIMEOUT_SECONDS)
+        except urllib.error.URLError as exc:
+            if not (self._may_fall_back and _is_certificate_failure(exc)):
+                raise
+            fallback = _fallback_opener()
+            if fallback is None:
+                raise
+            try:
+                response = fallback.open(request, timeout=TIMEOUT_SECONDS)
+            except urllib.error.HTTPError:
+                # The handshake worked: the server's own answer is the answer.
+                self._opener, self._may_fall_back = fallback, False
+                raise
+            except (urllib.error.URLError, TimeoutError, OSError):
+                raise exc from None
+            self._opener, self._may_fall_back = fallback, False
+            return response
 
     def heartbeat(self, *, version: str, hostname: str) -> dict[str, Any]:
         return self._post("/api/agent/heartbeat/", {"version": version, "hostname": hostname})
@@ -164,7 +231,7 @@ class AgentClient:
             method="POST",
         )
         try:
-            with self._opener.open(request, timeout=TIMEOUT_SECONDS) as response:
+            with self._open(request) as response:
                 answer = json.loads(response.read().decode())
         except urllib.error.HTTPError as exc:
             body = exc.read().decode(errors="replace") if exc.fp else ""

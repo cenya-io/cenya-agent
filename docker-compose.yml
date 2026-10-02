@@ -1,0 +1,35 @@
+# El agente de Cenya en un contenedor (solo Linux: ver el aviso de red).
+#
+#   CENYA_CONNECTION=cenya://portal.midominio.com/XXXX-XXXX-XXXX docker compose up -d
+#
+# La cadena (Ajustes -> Agentes -> Añadir un agente) se canjea la primera vez y
+# el token queda en el volumen `agent_state`: los reinicios no la vuelven a gastar.
+services:
+  agent:
+    build: .
+    # `network_mode: host` y no la red puente de Docker. Sin esto el barrido
+    # recorre la subred interna del propio Docker (172.x) y la caché ARP que
+    # lee es la del contenedor: no encuentra nada de la red de la empresa.
+    #
+    # Solo funciona así en Linux. En Docker Desktop (Windows/Mac) el modo host
+    # no da acceso a la LAN real; ahí, el instalador de Windows o `cenya-agent`
+    # directamente en un equipo de esa red.
+    network_mode: host
+    environment:
+      CENYA_CONNECTION: ${CENYA_CONNECTION:-}
+      # Solo para sobrescribir la dirección del portal que dice la cadena de
+      # conexión (un portal que cambió de dirección).
+      CENYA_URL: ${CENYA_AGENT_URL:-}
+      CENYA_STATE_DIR: /var/lib/cenya-agent
+      # Solo si el portal tiene un certificado propio. La ruta es dentro del
+      # contenedor: monta el fichero con un volumen y descomenta las dos líneas.
+      # CENYA_CA_BUNDLE: /certs/ca.pem
+    volumes:
+      # Donde el agente guarda su token tras enrolarse. Sin este volumen, cada
+      # reinicio intentaría gastar otra vez un código que ya no vale.
+      - agent_state:/var/lib/cenya-agent
+    #   - ./ca.pem:/certs/ca.pem:ro
+    restart: unless-stopped
+
+volumes:
+  agent_state:

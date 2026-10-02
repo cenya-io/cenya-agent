@@ -20,6 +20,8 @@
 
 from pathlib import Path
 
+from PyInstaller.utils.hooks import collect_data_files
+
 REPO = Path(SPECPATH).resolve().parent.parent
 AGENT = REPO / "agent"
 PACKAGING = AGENT / "packaging"
@@ -28,7 +30,10 @@ common = dict(
     pathex=[str(REPO)],
     # Los catálogos de traducción: `agent/i18n.py` los lee de `agent/translations`
     # junto a sí mismo, y dentro del instalador esa carpeta tiene que existir.
-    datas=[(str(AGENT / "translations"), "agent/translations")],
+    # Y la lista de CA públicas de certifi, la segunda opinión del agente
+    # cuando el almacén de Windows rechaza un certificado bueno
+    # (agent/client.py::AgentClient._open).
+    datas=[(str(AGENT / "translations"), "agent/translations")] + collect_data_files("certifi"),
     # El servicio y el icono viven en sus propios ejecutables, pero `selftest`
     # corre en el de la línea de comandos y tiene que poder ver las librerías
     # de Windows para decir la verdad sobre ellas. Compartido por MERGE: no pesa.
@@ -40,6 +45,7 @@ common = dict(
         "win32service",
         "servicemanager",
         "win32gui",
+        "certifi",
     ],
     # Lo que el agente nunca usa y pesa: una interfaz gráfica de Tk, las
     # pruebas de unittest de terceros...
