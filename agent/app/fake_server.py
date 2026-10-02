@@ -689,6 +689,9 @@ class FakeServer:
     def __init__(self, agent: FakeAgent, address: str | None = None, *, admin: bool = True) -> None:
         self.agent = agent
         self.address = address or channel.random_pipe_name()
+        if sys.platform == "win32" and not self.address.startswith(channel.PIPE_PREFIX):
+            # Un nombre suelto («CenyaAgentDev-x») es un pipe, como en `--pipe` de la ventana.
+            self.address = channel.PIPE_PREFIX + self.address
         if channel.is_default_address(self.address):
             raise ValueError("the fake server never serves the real agent's pipe")
         self.admin = admin
