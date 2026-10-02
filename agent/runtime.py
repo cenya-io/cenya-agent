@@ -226,7 +226,7 @@ class Runtime:
         """
         try:
             body, about_hash = self.control.body(self._clock())
-            answer = self.client.checkin(body)
+            answer = self.control.exchange(body)
         except PushError as exc:
             if exc.status == 404 and self.control.speaks_only_protocol_1():
                 return V1

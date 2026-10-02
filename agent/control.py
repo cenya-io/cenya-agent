@@ -31,10 +31,11 @@ from __future__ import annotations
 import ipaddress
 import socket
 import threading
+import time
 from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from agent import __version__, logs, notes, status
@@ -65,6 +66,10 @@ _REFUSALS = {401: REFUSED_UNAUTHORIZED, 402: REFUSED_READ_ONLY}
 #: Con el token rechazado se sigue preguntando, pero despacio: si alguien lo
 #: arregla en la web el agente vuelve solo, y mientras tanto no martillea.
 REJECTED_CHECKIN_SECONDS = 300
+
+#: El viaje de ida y vuelta más largo con el que todavía se fía de la medida
+#: de la diferencia de relojes (`Control.exchange`).
+MAX_SKEW_TRIP_SECONDS = 5.0
 
 #: «Analizar» a la vez, como mucho. Los demás esperan su turno (y se contestan).
 MAX_PROBES = 2
@@ -141,6 +146,9 @@ class Shared:
         #: rotundo: `REFUSED_UNAUTHORIZED` (401, token revocado o no válido),
         #: `REFUSED_READ_ONLY` (402, instalación en solo lectura), o "".
         self.refusal = ""
+        #: Hora del servidor menos hora de esta máquina (`Control.exchange`).
+        #: Solo para traducir su `paused_until`; la cola caduca con el reloj local.
+        self.clock_offset = timedelta(0)
         #: Despierta al hilo de tareas: llegó un encargo, una configuración o
         #: un cambio de pausa, y no tiene sentido esperar al siguiente minuto.
         self.wake = threading.Event()
@@ -271,7 +279,7 @@ class Control:
         """
         try:
             body, about_hash = self.body(self._clock())
-            answer = self.client.checkin(body)
+            answer = self.exchange(body)
         except PushError as exc:
             if exc.status == 404 and self.speaks_only_protocol_1():
                 self.gone = True
@@ -287,6 +295,28 @@ class Control:
             return False
         self.accept(answer, body, about_hash)
         return True
+
+    def exchange(self, body: dict[str, Any]) -> Any:
+        """The check-in itself, timed: a quick answer also says how far the clocks are apart.
+
+        `server_time` y el reloj de esta máquina pueden no coincidir (un
+        servidor sin NTP, una máquina con la hora mal): la pausa puesta desde
+        la web (`paused_until`) está en la hora del servidor, y aplicarla tal
+        cual con otra hora alargaba o acortaba la pausa. Solo se fía de la
+        medida si el viaje fue corto: con uno largo, la mitad del viaje ya es
+        más error que la diferencia que se quiere medir.
+        """
+        before_wall = self._clock()
+        before = time.monotonic()
+        answer = self.client.checkin(body)
+        trip = time.monotonic() - before
+        if isinstance(answer, dict) and trip <= MAX_SKEW_TRIP_SECONDS:
+            server_time = parse_moment(answer.get("server_time"))
+            if server_time is not None:
+                local_then = before_wall + timedelta(seconds=trip / 2)
+                with self.shared.lock:
+                    self.shared.clock_offset = server_time - local_then
+        return answer
 
     def speaks_only_protocol_1(self) -> bool:
         """After a 404 on ``v2/checkin``: is this a protocol-1 server? Never raises.
@@ -366,7 +396,11 @@ class Control:
                 self.shared.config, self.shared.config_etag = dict(config), etag
                 self.shared.has_config = changed = True
             previous_pause = self.shared.server_paused_until
-            self.shared.server_paused_until = parse_moment(answer.get("paused_until"))
+            server_pause = parse_moment(answer.get("paused_until"))
+            # A la hora de esta máquina: el servidor la dice en la suya.
+            self.shared.server_paused_until = (
+                server_pause - self.shared.clock_offset if server_pause is not None else None
+            )
             pause_changed = previous_pause != self.shared.server_paused_until
             self.shared.checkin_seconds = bound_checkin(answer.get("checkin_seconds"), self.shared.checkin_seconds)
             update = answer.get("update")

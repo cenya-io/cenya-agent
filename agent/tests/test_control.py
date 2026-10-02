@@ -11,6 +11,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 from agent import control
 from agent.client import PushError
@@ -154,6 +155,36 @@ class ApplyTests(ControlTestCase):
         ctl.apply({"paused_until": None, "update": None})
         self.assertIsNone(self.shared.server_paused_until)
         self.assertIsNone(self.shared.update)
+
+
+class ServerTimeTests(ControlTestCase):
+    """The server's `paused_until` is in the server's clock; this machine's may differ."""
+
+    def answer_two_hours_behind(self) -> dict:
+        server_now = NOW - timedelta(hours=2)
+        return {"ok": True, "protocol": 2, "server_time": server_now.isoformat(),
+                "paused_until": (server_now + timedelta(minutes=30)).isoformat()}
+
+    def test_a_server_pause_is_applied_in_this_machines_clock(self) -> None:
+        self.client.answers = [self.answer_two_hours_behind()]
+        ctl = self.control()
+
+        self.assertTrue(ctl.checkin_once())
+
+        until = self.shared.server_paused_until
+        self.assertLess(abs((until - (NOW + timedelta(minutes=30))).total_seconds()), 1)
+        # Sin corregir, la pausa ya habría «caducado» hace hora y media.
+        self.assertEqual(ctl.body(NOW)[0]["state"], "paused")
+
+    def test_a_slow_round_trip_is_not_trusted_to_measure_the_clocks(self) -> None:
+        self.client.answers = [self.answer_two_hours_behind()]
+        ctl = self.control()
+
+        with mock.patch("agent.control.time.monotonic", side_effect=[0.0, 30.0]):
+            self.assertTrue(ctl.checkin_once())
+
+        self.assertEqual(self.shared.clock_offset, timedelta(0))
+        self.assertEqual(self.shared.server_paused_until, NOW - timedelta(hours=1, minutes=30))
 
 
 class OrderTests(ControlTestCase):

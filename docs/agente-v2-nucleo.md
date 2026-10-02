@@ -107,6 +107,10 @@ Respuesta:
   entero en el siguiente checkin.
 - `paused_until`: pausa puesta **desde la web**. El agente está en pausa hasta
   la más tardía de las dos (local y de servidor).
+- `server_time`: la hora del servidor. Si el checkin fue rápido (ida y vuelta
+  de 5 s o menos), el agente apunta la diferencia con su reloj y la usa para
+  pasar el `paused_until` del servidor a su propia hora. Solo para eso: la cola
+  local caduca con el reloj de la máquina.
 - `update`: `null` o `{"version": "0.11.1"}`. En la fase 1 el agente solo lo
   registra; actualizarse es de la fase 6.
 - `checkin_seconds`: el agente lo acota a [10, 300].
