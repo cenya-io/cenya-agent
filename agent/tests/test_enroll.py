@@ -136,21 +136,23 @@ class StoreTests(unittest.TestCase):
         self.assertIsNone(store.load(self.env))
 
     def test_on_windows_it_drops_inheritance_and_names_groups_by_sid(self) -> None:
-        calls: list[list[str]] = []
+        written: list[tuple[Path, str]] = []
+        backend = mock.Mock(write_sddl=lambda target, sddl: written.append((target, sddl)))
 
-        def fake_run(command, **_kwargs):
-            calls.append(command)
-            return mock.Mock(returncode=0, stdout="", stderr="")
-
-        with mock.patch.object(store.subprocess, "run", fake_run):
+        with mock.patch.object(store, "_backend", return_value=backend), mock.patch.object(
+            store, "_is_admin", return_value=False
+        ), mock.patch.object(store, "_runner_sid", return_value="S-1-5-21-1-2-3-1001"):
             store._restrict_windows(Path("C:/x/enrollment.json"))
 
-        command = calls[0]
-        self.assertEqual(command[0], "icacls")
-        self.assertIn("/inheritance:r", command)
+        target, sddl = written[0]
+        self.assertEqual(target, Path("C:/x/enrollment.json"))
+        # «P»: protegida, nada heredado de la carpeta de arriba.
+        self.assertTrue(sddl.startswith("D:P("))
         # Por SID, no por nombre: «Administradores» no se llama así en otro idioma.
-        self.assertIn("*S-1-5-18:F", command)
-        self.assertIn("*S-1-5-32-544:F", command)
+        self.assertIn("(A;;FA;;;SY)", sddl)
+        self.assertIn("(A;;FA;;;BA)", sddl)
+        self.assertIn("(A;;FA;;;S-1-5-21-1-2-3-1001)", sddl)
+        self.assertNotIn("BU", sddl)
 
     def test_the_default_place_depends_on_the_platform(self) -> None:
         with mock.patch.object(store.sys, "platform", "win32"):
@@ -163,12 +165,16 @@ class FakeClient:
 
     answer: dict | Exception = {"ok": True, "token": "cya_nuevo", "name": "CPD"}
     calls: list[dict] = []
+    extras: list[dict] = []
 
-    def __init__(self, base_url: str, token: str, *, ca_bundle: str = "") -> None:
+    def __init__(self, base_url: str, token: str, *, ca_bundle: str = "", proxy: object = None) -> None:
         self.base_url, self.token, self.ca_bundle = base_url, token, ca_bundle
 
-    def enroll(self, *, code: str, hostname: str, version: str) -> dict:
+    def enroll(self, *, code: str, hostname: str, version: str, public_key: str = "", about: dict | None = None) -> dict:
         FakeClient.calls.append({"url": self.base_url, "token": self.token, "code": code})
+        # Lo nuevo del protocolo 2 (spec 1.1), aparte: los tests de antes
+        # comparan las llamadas enteras y no tienen por qué saber de ello.
+        FakeClient.extras.append({"public_key": public_key, "about": about})
         if isinstance(FakeClient.answer, Exception):
             raise FakeClient.answer
         return FakeClient.answer
@@ -180,9 +186,24 @@ class RedeemTests(unittest.TestCase):
         self.env = {"CENYA_STATE_DIR": self.dir}
         FakeClient.answer = {"ok": True, "token": "cya_nuevo", "name": "CPD"}
         FakeClient.calls = []
+        FakeClient.extras = []
         patcher = mock.patch.object(enroll, "AgentClient", FakeClient)
         patcher.start()
         self.addCleanup(patcher.stop)
+
+    def test_protocol_2_sends_the_public_key_and_the_about(self) -> None:
+        """Spec 1.1: la clave pública (si hay `cryptography`) y la presentación."""
+        from agent import identity
+
+        enroll.redeem(f"cenya://portal/{CODE}", self.env)
+
+        extra = FakeClient.extras[0]
+        self.assertEqual(extra["about"]["agent_version"], enroll.__version__)
+        if identity.available():
+            self.assertTrue(extra["public_key"].startswith("-----BEGIN PUBLIC KEY-----"))
+            self.assertEqual(extra["public_key"], identity.public_key(self.env))
+        else:
+            self.assertEqual(extra["public_key"], "")
 
     def test_redeeming_saves_the_token_the_server_gave(self) -> None:
         saved = enroll.redeem(f"cenya://portal/{CODE}", self.env)
@@ -456,6 +477,6 @@ class RenamedNamesTests(unittest.TestCase):
         )
         self.assertEqual(pyproject["project"]["name"], "cenya-agent")
         self.assertEqual(
-            set(pyproject["project"]["scripts"]), {"cenya-agent", "cenya-agent-service"}
+            set(pyproject["project"]["scripts"]), {"cenya-agent", "cenya-agent-service", "cenya-agent-askpass"}
         )
         self.assertEqual(set(pyproject["project"]["gui-scripts"]), {"cenya-agent-tray"})

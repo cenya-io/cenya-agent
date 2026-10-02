@@ -92,6 +92,45 @@ class Answer:
     connected: bool
     data: dict[str, Any] | None = None
     error: str = ""
+    #: No se llegó a autenticar (nada contestó, TLS no se fió, falta la
+    #: librería). Solo cuando es seguro: ante la duda, `False` (spec 2.3).
+    unreachable: bool = False
+
+
+#: Lo que dicen `requests`/`urllib3`/pywinrm cuando no llegan a mandar la
+#: credencial. En minúsculas, sobre el texto del error.
+_BEFORE_AUTH = (
+    "failed to establish a new connection",
+    "connection refused",
+    "no route to host",
+    "network is unreachable",
+    "name or service not known",
+    "getaddrinfo failed",
+    "nodename nor servname",
+    "connecttimeout",
+    "connect timeout",
+    "certificate verify failed",
+    "requests_ntlm",
+    "not installed",
+)
+
+
+def before_auth(exc: BaseException) -> bool:
+    """Whether a pywinrm exception happened before any credential was sent."""
+    name = type(exc).__name__
+    text = f"{name}: {exc}".lower()
+    if name == "InvalidCredentialsError" or "401" in text or "unauthorized" in text or "credentials" in text:
+        return False
+    if name in ("ConnectTimeout", "SSLError"):
+        return True
+    return any(phrase in text for phrase in _BEFORE_AUTH)
+
+
+def outcome(answer: Answer) -> str:
+    """El veredicto de un intento para el límite de credenciales (`agent.memory`)."""
+    if answer.connected:
+        return "ok"
+    return "unreachable" if answer.unreachable else "auth_failed"
 
 
 def endpoint(host: str, port: int = 0) -> str:
@@ -118,7 +157,7 @@ def query(
     red puede quedarse con la contraseña de administrador del dominio.
     """
     if not AVAILABLE:
-        return Answer(connected=False, error="falta pywinrm")
+        return Answer(connected=False, error="falta pywinrm", unreachable=True)
     last_error = ""
     for transport in TRANSPORTS:
         try:
@@ -134,14 +173,19 @@ def query(
             result = session.run_ps(SCRIPT)
         except Exception as exc:  # noqa: BLE001 - pywinrm lanza de todo: HTTP, TLS, WSMan
             last_error = f"{type(exc).__name__}: {exc}"
-            continue
+            if before_auth(exc):
+                continue
+            # Con la clave rechazada (o sin saber si llegó), no se repite por
+            # otro transporte: sería otro inicio de sesión fallido de la misma
+            # cuenta, y en un dominio eso acerca el bloqueo.
+            return Answer(connected=False, error=last_error)
         if result.status_code != 0:
             last_error = (result.std_err or b"").decode(errors="replace").strip()[:200]
             # Se entró: el PowerShell falló, que es otra cosa. Probar el
             # siguiente transporte no arreglaría nada.
             return Answer(connected=True, error=last_error)
         return Answer(connected=True, data=_decode(result.std_out))
-    return Answer(connected=False, error=last_error or "no se pudo conectar")
+    return Answer(connected=False, error=last_error or "no se pudo conectar", unreachable=True)
 
 
 def _decode(raw: bytes | str) -> dict[str, Any] | None:

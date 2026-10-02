@@ -45,7 +45,7 @@ import servicemanager
 import win32service
 import win32serviceutil
 
-from agent import status
+from agent import logs, status
 from agent import store as enrollment_store
 from agent.__main__ import main as agent_main
 from agent.__main__ import unexpected_error
@@ -74,7 +74,9 @@ class _EventLogStream:
     """
 
     def __init__(self, log: Callable[[str], None]) -> None:
-        self._log = log
+        # Tapado al salir (`logs.scrub`): el Visor de eventos lo lee cualquier
+        # administrador, y es donde acaba cualquier `print` o traza suelta.
+        self._log = lambda line: log(logs.scrub(line))
         self._pending = ""
 
     def write(self, text: str) -> int:
@@ -282,27 +284,18 @@ def restrict_key_to_administrators(key_name: str) -> None:
 
 
 def lock_status_directory(directory: Path) -> None:
-    """La carpeta del fichero de estado: escribe el servicio, lee cualquiera.
+    """La carpeta del agente (y del fichero de estado), cerrada al instalar.
 
     `%ProgramData%` deja por defecto que cualquier usuario cree carpetas y
     ficheros dentro, y se quede como dueño -- comprobado en esta máquina. Sin
-    cerrarla, un usuario podría dejar ahí un estado falso, con una URL que el
-    icono de bandeja abriría en el navegador de un administrador. Queda:
-    SYSTEM y Administradores con control total, Usuarios solo lectura, y
-    «OWNER RIGHTS» también solo lectura, para que quien la hubiera creado antes
-    de instalar no conserve el permiso implícito de dueño para reabrirla.
+    cerrarla, un usuario podría dejar ahí un estado falso, unos ajustes con su
+    proxy o una cola de envíos inventada. Quién sabe proteger esa carpeta es
+    `agent.store.secure_state_dir`, que el agente llama además en cada
+    arranque; aquí solo se le pide lo mismo al instalar, con derechos de
+    administrador. Si la carpeta no estaba protegida, lo que hubiera dentro se
+    aparta y no se usa.
     """
-    import ntsecuritycon
-    import win32security
-
-    directory.mkdir(parents=True, exist_ok=True)
-    read = ntsecuritycon.FILE_GENERIC_READ | ntsecuritycon.FILE_GENERIC_EXECUTE
-    _set_protected_dacl(
-        str(directory),
-        win32security.SE_FILE_OBJECT,
-        ntsecuritycon.FILE_ALL_ACCESS,
-        {win32security.WinBuiltinUsersSid: read, win32security.WinCreatorOwnerRightsSid: read},
-    )
+    enrollment_store.secure_state_dir(folder=directory)
 
 
 def _after_install(opts: list[tuple[str, str]]) -> None:

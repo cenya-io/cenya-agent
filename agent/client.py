@@ -1,4 +1,9 @@
-"""Talking to the server: two POSTs, nothing more.
+"""Talking to the server: a handful of POSTs, nothing more.
+
+Protocol 1 (the 0.10.x agents) is a heartbeat and a push of findings; protocol
+2 (``docs/agente-v2-nucleo.md``) adds the control channel (``checkin``), one
+result per task, the answers to orders and the goodbye. Both stay here: an
+agent 0.11 talking to a server that only knows protocol 1 falls back to it.
 
 Standard library only. The agent as a whole now needs `pysnmp` for the SNMP
 collector, but this door to the server does not: keeping it on the stdlib is
@@ -18,10 +23,12 @@ import json
 import os
 import ssl
 import urllib.error
+import urllib.parse
 import urllib.request
 from typing import Any
 
 from agent.i18n import _t, accept_language
+from agent.logs import scrub
 
 #: Lo que se enseña de una respuesta de error que no es la del servidor (un
 #: proxy, un portal cautivo): el principio, que suele bastar para reconocerla.
@@ -75,8 +82,33 @@ def _batched(items: list[dict[str, Any]], max_bytes: int = MAX_BATCH_BYTES) -> l
     return batches or [[]]
 
 
+#: El protocolo más alto que habla este agente (docs/agente-v2-nucleo.md).
+PROTOCOL = 2
+
+
+def result_parts(run: dict[str, Any], items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The bodies of `v2/results`: same `run` in all, `part` from 1, `final` on the last."""
+    batches = _batched(items)
+    return [
+        {"run": run, "items": batch, "part": number, "final": number == len(batches)}
+        for number, batch in enumerate(batches, start=1)
+    ]
+
+
 class PushError(Exception):
-    """The server could not be reached or refused the push."""
+    """The server could not be reached or refused the push.
+
+    `status` is the HTTP code when the server did answer (`None` when it could
+    not be reached): the protocol-2 loop needs to tell «this door does not
+    exist» (404, a server that only speaks protocol 1) from «the network is
+    down», and the outbox «this will never be accepted» (400) from «later».
+    """
+
+    def __init__(self, message: str, *, status: int | None = None) -> None:
+        super().__init__(message)
+        self.status = status
+        #: Lo que no llegó a enviarse de un resultado troceado (`push_results`).
+        self.remaining: list[dict[str, Any]] = []
 
 
 class _NoRedirects(urllib.request.HTTPRedirectHandler):
@@ -90,8 +122,56 @@ class _NoRedirects(urllib.request.HTTPRedirectHandler):
 
 _OPENER = urllib.request.build_opener(_NoRedirects)
 
+#: Cómo salir a internet (`settings.json`, `agent/settings.py`). `system` es lo
+#: de siempre: urllib lee el proxy del sistema (variables y, en Windows, el
+#: registro). `none` sale directo aunque el sistema diga otra cosa; `manual`,
+#: por el proxy que se indique.
+PROXY_SYSTEM = "system"
+PROXY_NONE = "none"
+PROXY_MANUAL = "manual"
 
-def _opener_for(ca_bundle: str) -> urllib.request.OpenerDirector:
+
+def proxy_url_is_valid(url: str) -> bool:
+    """Si `url` es algo que `urllib` sabrá usar como proxy.
+
+    ``http://[usuario:clave@]servidor:puerto`` o solo ``servidor:puerto``. Una
+    errata como ``https:/admin:S3cret@proxy:8080`` hacía que `urllib` lanzara
+    un `ValueError` **con la URL dentro**, contraseña incluida, que acababa en
+    el registro, en `status.json` y en el Visor de eventos.
+    """
+    url = (url or "").strip()
+    if not url or any(char.isspace() for char in url):
+        return False
+    if "://" in url:
+        parts = urllib.parse.urlsplit(url)
+        try:
+            parts.port  # noqa: B018 - un puerto que no es un número lanza aquí
+        except ValueError:
+            return False
+        return bool(parts.scheme) and bool(parts.hostname)
+    return "/" not in url
+
+
+def _proxy_problem() -> str:
+    return _t(
+        "La dirección del proxy no es válida: revisa el ajuste «proxy» (settings.json o CENYA_PROXY). "
+        "No se muestra aquí porque puede llevar una contraseña."
+    )
+
+
+def _proxy_handler(proxy: tuple[str, str] | None) -> urllib.request.ProxyHandler | None:
+    """El manejador de proxy para ese modo, o `None` para el del sistema."""
+    if not proxy:
+        return None
+    mode, url = proxy
+    if mode == PROXY_NONE:
+        return urllib.request.ProxyHandler({})
+    if mode == PROXY_MANUAL and url:
+        return urllib.request.ProxyHandler({"http": url, "https": url})
+    return None
+
+
+def _opener_for(ca_bundle: str, proxy: tuple[str, str] | None = None) -> urllib.request.OpenerDirector:
     """El abridor de peticiones: el de siempre, o uno con una CA propia.
 
     Un certificado autofirmado es lo normal en la red de una pyme, y hasta
@@ -104,10 +184,16 @@ def _opener_for(ca_bundle: str) -> urllib.request.OpenerDirector:
     que deja a los tests seguir interceptando `_OPENER.open` sin saber que
     existe esta función.
     """
-    if not ca_bundle:
+    handler = _proxy_handler(proxy)
+    if not ca_bundle and handler is None:
         return _OPENER
-    context = ssl.create_default_context(cafile=ca_bundle)
-    return urllib.request.build_opener(_NoRedirects, urllib.request.HTTPSHandler(context=context))
+    handlers: list = [_NoRedirects]
+    if handler is not None:
+        handlers.append(handler)
+    if ca_bundle:
+        context = ssl.create_default_context(cafile=ca_bundle)
+        handlers.append(urllib.request.HTTPSHandler(context=context))
+    return urllib.request.build_opener(*handlers)
 
 
 def _mozilla_roots() -> str:
@@ -125,12 +211,16 @@ def _mozilla_roots() -> str:
     return path if os.path.exists(path) else ""
 
 
-def _fallback_opener() -> urllib.request.OpenerDirector | None:
-    """An opener that trusts Mozilla's roots instead of the operating system's."""
+def _fallback_opener(proxy: tuple[str, str] | None = None) -> urllib.request.OpenerDirector | None:
+    """An opener that trusts Mozilla's roots instead of the operating system's.
+
+    Through the same proxy as the first try: a second opinion on the
+    certificate, not a second way out of the network.
+    """
     roots = _mozilla_roots()
     if not roots:
         return None
-    return _opener_for(roots)
+    return _opener_for(roots, proxy)
 
 
 def _is_certificate_failure(exc: urllib.error.URLError) -> bool:
@@ -139,10 +229,20 @@ def _is_certificate_failure(exc: urllib.error.URLError) -> bool:
 
 
 class AgentClient:
-    def __init__(self, base_url: str, token: str, *, ca_bundle: str = "") -> None:
+    def __init__(
+        self, base_url: str, token: str, *, ca_bundle: str = "", proxy: tuple[str, str] | None = None
+    ) -> None:
         self.base_url = base_url.rstrip("/")
         self.token = token
-        self._opener = _opener_for(ca_bundle)
+        #: `(modo, url)` de `agent/settings.py`; `None` es el proxy del sistema.
+        #: La URL puede llevar usuario y contraseña: no se escribe en ningún sitio.
+        #: Un proxy manual mal escrito no se usa ni se nombra: cada petición
+        #: falla con una frase que no lo cita (`_proxy_problem`).
+        self._bad_proxy = bool(proxy and proxy[0] == PROXY_MANUAL and not proxy_url_is_valid(proxy[1]))
+        if self._bad_proxy:
+            proxy = (PROXY_NONE, "")
+        self._proxy = proxy
+        self._opener = _opener_for(ca_bundle, proxy) if proxy else _opener_for(ca_bundle)
         # Only without a CA of the company's own. With one, that is the answer
         # the operator chose, and a second opinion would undo it.
         self._may_fall_back = not ca_bundle
@@ -168,7 +268,7 @@ class AgentClient:
         except urllib.error.URLError as exc:
             if not (self._may_fall_back and _is_certificate_failure(exc)):
                 raise
-            fallback = _fallback_opener()
+            fallback = _fallback_opener(self._proxy) if self._proxy else _fallback_opener()
             if fallback is None:
                 raise
             try:
@@ -207,15 +307,70 @@ class AgentClient:
             refreshed += int(answer.get("refreshed") or 0)
         return {**answer, "created": created, "refreshed": refreshed, "batches": len(batches)}
 
-    def enroll(self, *, code: str, hostname: str, version: str) -> dict[str, Any]:
-        """Trade a one-time code for the permanent token. The only call with no token."""
-        return self._post(
-            "/api/agent/enroll/",
-            {"code": code, "hostname": hostname, "version": version},
-            authenticated=False,
-        )
+    def enroll(
+        self,
+        *,
+        code: str,
+        hostname: str,
+        version: str,
+        public_key: str = "",
+        about: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Trade a one-time code for the permanent token. The only call with no token.
+
+        `protocol`, `public_key` and `about` are protocol 2 (spec 1.1); a server
+        that does not know them ignores them, and one that does not answer
+        `protocol` is taken as protocol 1.
+        """
+        payload: dict[str, Any] = {"code": code, "hostname": hostname, "version": version, "protocol": PROTOCOL}
+        if public_key:
+            payload["public_key"] = public_key
+        if about:
+            payload["about"] = about
+        return self._post("/api/agent/enroll/", payload, authenticated=False)
+
+    # --- Protocolo 2 (docs/agente-v2-nucleo.md, sección 1) ----------------------
+
+    def checkin(self, body: dict[str, Any]) -> dict[str, Any]:
+        """The control channel (spec 1.2). A 404 means the server speaks protocol 1."""
+        return self._post("/api/agent/v2/checkin/", body)
+
+    def post_result_part(self, body: dict[str, Any]) -> dict[str, Any]:
+        """One already-built piece of a result (spec 1.6): what the outbox resends."""
+        return self._post("/api/agent/v2/results/", body)
+
+    def push_results(self, *, run: dict[str, Any], items: list[dict[str, Any]]) -> dict[str, Any]:
+        """The result of a task, in as many pieces as the limits require.
+
+        Every piece carries the same `run` (and so the same `run.id`, which is
+        what makes resending one harmless). If a piece fails, the `PushError`
+        carries in `remaining` that piece and the ones after it, ready for the
+        outbox: what went up stays up.
+        """
+        parts = result_parts(run, items)
+        created = refreshed = 0
+        answer: dict[str, Any] = {}
+        for index, body in enumerate(parts):
+            try:
+                answer = self.post_result_part(body)
+            except PushError as exc:
+                exc.remaining = parts[index:]
+                raise
+            created += int(answer.get("created") or 0)
+            refreshed += int(answer.get("refreshed") or 0)
+        return {**answer, "created": created, "refreshed": refreshed, "batches": len(parts)}
+
+    def answer_order(self, order_id: str, body: dict[str, Any]) -> dict[str, Any]:
+        """Answer an order (spec 1.3). The id goes quoted: it comes from the server."""
+        return self._post(f"/api/agent/v2/orders/{urllib.parse.quote(order_id, safe='')}/result/", body)
+
+    def goodbye(self, reason: str = "uninstall") -> dict[str, Any]:
+        """Tell the server this agent is going away; its token stops working (spec 1.7)."""
+        return self._post("/api/agent/v2/goodbye/", {"reason": reason})
 
     def _post(self, path: str, payload: dict[str, Any], *, authenticated: bool = True) -> dict[str, Any]:
+        if self._bad_proxy:
+            raise PushError(_proxy_problem())
         headers = {"Content-Type": "application/json"}
         if authenticated:
             headers["Authorization"] = f"Bearer {self.token}"
@@ -238,10 +393,17 @@ class AgentClient:
             detail = _error_detail(body) or str(exc.reason)
             # `detail` lo escribe el servidor, ya en el idioma que se le pidió.
             raise PushError(
-                _t("El servidor respondió %(code)s: %(detail)s") % {"code": exc.code, "detail": detail}
+                _t("El servidor respondió %(code)s: %(detail)s") % {"code": exc.code, "detail": detail},
+                status=exc.code,
             ) from exc
         except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
-            raise PushError(_t("No se pudo hablar con el servidor: %(error)s") % {"error": exc}) from exc
+            raise PushError(_t("No se pudo hablar con el servidor: %(error)s") % {"error": scrub(str(exc))}) from exc
+        except ValueError as exc:
+            # `urllib` mete en el texto la URL que no entiende, y si es la del
+            # proxy lleva su contraseña: no se repite, ni siquiera tapada.
+            if self._proxy and self._proxy[0] == PROXY_MANUAL:
+                raise PushError(_proxy_problem()) from None
+            raise PushError(_t("No se pudo hablar con el servidor: %(error)s") % {"error": scrub(str(exc))}) from None
         if not isinstance(answer, dict):
             # Un proxy o un portal cautivo puede devolver 200 con cualquier
             # cosa. Sin esto, el `answer.get(...)` de arriba lanza

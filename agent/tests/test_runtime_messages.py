@@ -78,7 +78,7 @@ class LoopOutputTests(unittest.TestCase):
 
         event = threading.Event()
 
-        def fail(client, config):
+        def fail(client, config, **kwargs):
             event.set()
             raise PushError("x")
 

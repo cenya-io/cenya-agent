@@ -1,12 +1,17 @@
 # -*- mode: python ; coding: utf-8 -*-
 #
-# El agente de Cenya congelado con PyInstaller: una carpeta con tres
+# El agente de Cenya congelado con PyInstaller: una carpeta con cuatro
 # ejecutables que comparten Python y las librerías, lista para que Inno Setup
 # (`cenya-agent.iss`) la meta en el instalador.
 #
 #   cenya-agent.exe          la línea de comandos: enroll, selftest, export-netbox, el bucle
 #   cenya-agent-service.exe  el servicio de Windows y su instalación
 #   cenya-agent-tray.exe     el icono de bandeja (sin consola)
+#   cenya-agent-askpass.exe  lo que OpenSSH ejecuta para pedir la contraseña (SSH_ASKPASS);
+#                            con consola a propósito: `ssh` lee su salida estándar
+#
+# El OpenSSH que usa el colector SSH no sale de aquí: build.ps1 lo baja, lo
+# verifica y lo deja en dist\cenya-agent\openssh antes de empaquetar.
 #
 # Construir, desde la raíz del repositorio y con el agente instalado con todos
 # sus extras (`pip install ./agent[completo] pyinstaller`):
@@ -41,11 +46,19 @@ common = dict(
         "agent.winservice",
         "agent.tray",
         "agent.netbox_export",
+        "agent.goodbye",
+        # Los permisos de la carpeta de estado (agent/store.py) los lee y
+        # escribe pywin32 si está, importado dentro de una función.
+        "win32security",
+        "win32api",
         "win32serviceutil",
         "win32service",
         "servicemanager",
         "win32gui",
         "certifi",
+        # La clave del agente (agent/identity.py) la importa dentro de una
+        # función, solo si está: dicho aquí para que no dependa del análisis.
+        "cryptography",
     ],
     # Lo que el agente nunca usa y pesa: una interfaz gráfica de Tk, las
     # pruebas de unittest de terceros...
@@ -56,6 +69,7 @@ common = dict(
 a_cli = Analysis([str(PACKAGING / "entry_agent.py")], **common)
 a_svc = Analysis([str(PACKAGING / "entry_service.py")], **common)
 a_tray = Analysis([str(PACKAGING / "entry_tray.py")], **common)
+a_askpass = Analysis([str(PACKAGING / "entry_askpass.py")], **common)
 
 # Un solo juego de librerías compartido: sin esto, cada ejecutable llevaría su
 # propia copia de Python y de pysnmp (tres veces el mismo peso).
@@ -63,6 +77,7 @@ MERGE(
     (a_cli, "cenya-agent", "cenya-agent"),
     (a_svc, "cenya-agent-service", "cenya-agent-service"),
     (a_tray, "cenya-agent-tray", "cenya-agent-tray"),
+    (a_askpass, "cenya-agent-askpass", "cenya-agent-askpass"),
 )
 
 # El icono de los tres ejecutables: el de la marca (copia del favicon.ico del
@@ -100,6 +115,17 @@ exe_tray = EXE(
     upx=False,
 )
 
+exe_askpass = EXE(
+    PYZ(a_askpass.pure),
+    a_askpass.scripts,
+    [],
+    exclude_binaries=True,
+    name="cenya-agent-askpass",
+    console=True,
+    icon=ICON,
+    upx=False,
+)
+
 coll = COLLECT(
     exe_cli,
     a_cli.binaries,
@@ -110,6 +136,9 @@ coll = COLLECT(
     exe_tray,
     a_tray.binaries,
     a_tray.datas,
+    exe_askpass,
+    a_askpass.binaries,
+    a_askpass.datas,
     strip=False,
     upx=False,
     name="cenya-agent",

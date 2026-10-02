@@ -25,7 +25,7 @@ from typing import Any, Callable
 
 from agent import credentials as creds
 from agent import net, ssh
-from agent.collectors import register
+from agent.collectors import register, tasking
 from agent.collectors.base import Finding
 from agent.notes import collector_note
 
@@ -444,7 +444,7 @@ MAX_CONFIG_BYTES = 256 * 1024
 
 
 def interrogate(
-    host: str, credentials: list[creds.Credential]
+    host: str, credentials: list[creds.Credential], logins: tasking.Logins | None = None
 ) -> tuple[dict[str, Any], creds.Credential | None]:
     """Lo que ese equipo cuenta de sí mismo, y con qué credencial se entró.
 
@@ -456,19 +456,15 @@ def interrogate(
     La credencial vuelve con los datos porque la captura de configuración
     reutiliza **exactamente la que funcionó**: probar otras sería engordar la
     misma cuenta de intentos fallidos que este bucle se cuida de no engordar.
+
+    Cada inicio de sesión pasa por `logins` (el límite global de credenciales,
+    spec 2.3): una credencial suspendida se salta sin intentarlo.
     """
     for credential in credentials:
         connected = False
         for family in FAMILIES:
-            answer = ssh.run(
-                host=host,
-                username=credential.username,
-                secret=credential.secret,
-                port=credential.port,
-                key_file=credential.key_file,
-                command=family.command,
-            )
-            if not answer.connected:
+            answer = _login(logins, host, credential, family.command)
+            if answer is tasking.SKIPPED or not answer.connected:
                 break
             connected = True
             data = family.parse(answer.output)
@@ -482,17 +478,30 @@ def interrogate(
     return {}, None
 
 
-def fetch_config(host: str, credential: creds.Credential, command: str) -> str:
+def _login(logins: tasking.Logins | None, host: str, credential: creds.Credential, command: str) -> Any:
+    """Un `ssh.run`, por el límite de credenciales si lo hay. `tasking.SKIPPED` si no toca."""
+
+    def call() -> ssh.Answer:
+        return ssh.run(
+            host=host,
+            username=credential.username,
+            secret=credential.secret,
+            port=credential.port,
+            key_file=credential.key_file,
+            command=command,
+        )
+
+    if logins is None:
+        return call()
+    return logins.run(credential, call, ssh.outcome)
+
+
+def fetch_config(
+    host: str, credential: creds.Credential, command: str, logins: tasking.Logins | None = None
+) -> str:
     """La configuración del equipo, o "". Nunca truncada en silencio."""
-    answer = ssh.run(
-        host=host,
-        username=credential.username,
-        secret=credential.secret,
-        port=credential.port,
-        key_file=credential.key_file,
-        command=command,
-    )
-    if not answer.connected:
+    answer = _login(logins, host, credential, command)
+    if answer is tasking.SKIPPED or not answer.connected:
         return ""
     output = answer.output or ""
     if len(output.encode()) > MAX_CONFIG_BYTES:
@@ -539,20 +548,37 @@ class SshCollector:
                 collector_note("ssh", "no_credentials", "no hay credenciales SSH configuradas (Ajustes -> Agentes -> Barrido)")
             )
             return []
-        if not ssh.SSHPASS_AVAILABLE and any(credential.secret for credential in credentials):
+        if not ssh.PASSWORD_AUTH_AVAILABLE and any(credential.secret for credential in credentials):
             # No es un error que pare nada: las credenciales con clave siguen
             # funcionando. Se dice porque, si no, el usuario ve «no entró en
-            # ningún Windows... perdón, en ningún Linux» y no sabe por qué.
-            errors.append(
-                collector_note(
-                    "ssh", "sshpass_missing", "hay credenciales con contraseña y falta «sshpass»; solo se usarán las de clave"
+            # ningún equipo» y no sabe por qué. Y se dice lo cierto: con un
+            # OpenSSH anterior a 8.4 lo que arregla esto es actualizarlo.
+            if ssh.VERSION is not None and ssh.VERSION < ssh.MIN_ASKPASS_VERSION:
+                errors.append(
+                    collector_note(
+                        "ssh",
+                        "password_auth_unavailable",
+                        f"hay credenciales con contraseña pero el OpenSSH instalado ({ssh.VERSION[0]}.{ssh.VERSION[1]}) "
+                        "es anterior a 8.4 y no sirve para ellas; actualízalo o instala «sshpass»; solo se usarán las de clave",
+                        version=f"{ssh.VERSION[0]}.{ssh.VERSION[1]}",
+                    )
                 )
-            )
+            else:
+                errors.append(
+                    collector_note(
+                        "ssh", "sshpass_missing", "hay credenciales con contraseña y falta «sshpass»; solo se usarán las de clave"
+                    )
+                )
 
         hosts = ctx["hosts"] or []
         if not hosts:
             return []
-        by_ip = {host["ip"]: host.get("mac", "") for host in hosts if host.get("ip")}
+        task = tasking.task(ctx)
+        if task == "configs":
+            return self._configs(ctx, credentials)
+        by_ip = {
+            host["ip"]: host.get("mac", "") for host in hosts if host.get("ip") and tasking.wanted(ctx, host["ip"])
+        }
 
         # Qué puertos se sondean sale de las credenciales, no de una constante.
         # Con el 22 fijo, un servidor con SSH en el 2222 --que es de lo más
@@ -562,7 +588,7 @@ class SshCollector:
         ports = {credential.port or SSH_PORT for credential in credentials}
         open_ports: dict[str, set[int]] = {}
         for port in sorted(ports):
-            for ip in net.hosts_listening(list(by_ip), port):
+            for ip in net.hosts_listening(list(by_ip), port, **tasking.listen_options(ctx)):
                 open_ports.setdefault(ip, set()).add(port)
         reachable = [ip for ip in by_ip if ip in open_ports]
         if not reachable:
@@ -578,10 +604,32 @@ class SshCollector:
             """
             return [c for c in credentials if (c.port or SSH_PORT) in open_ports[ip]]
 
-        with ThreadPoolExecutor(max_workers=WORKERS) as pool:
-            answers = list(pool.map(lambda ip: interrogate(ip, usable(ip)), reachable))
+        progress = tasking.Progress(ctx, self.name, len(reachable))
 
-        capture = _capture_enabled(ctx)
+        def visit(ip: str) -> tuple[dict[str, Any], creds.Credential | None]:
+            """Un equipo: qué credenciales tocan (alcance y memoria), y entrar."""
+            try:
+                order, full = tasking.plan(ctx, ip, by_ip[ip], "ssh", usable(ip))
+                if not order:
+                    # La memoria dice que hoy no toca: ni un intento, y no es
+                    # un error que anotar.
+                    return {}, None
+                logins = tasking.Logins(ctx, self.name, "ssh", ip, by_ip[ip])
+                data, credential = interrogate(ip, order, logins)
+                # Una credencial saltada por el límite global no es una ronda
+                # entera: no se apunta como fallida.
+                full = full and not logins.skipped
+                tasking.settle(ctx, ip, by_ip[ip], "ssh", credential, attempted=True, full=full)
+                return data, credential
+            finally:
+                progress.tick()
+
+        with ThreadPoolExecutor(max_workers=tasking.workers(ctx, "login", WORKERS)) as pool:
+            answers = list(pool.map(visit, reachable))
+
+        # En la tarea `inventory` se interroga pero no se copia: la copia es
+        # de la tarea `configs`, una vez al día, con la credencial que entró hoy.
+        capture = _capture_enabled(ctx) and task != "inventory"
         findings: list[Finding] = []
         for ip, (data, credential) in zip(reachable, answers):
             if not data:
@@ -593,6 +641,17 @@ class SshCollector:
             # MAC del mismo equipo abriría una segunda fila en la bandeja para
             # algo que ya está ahí. Es el fallo silencioso que este orden evita.
             identity = {"mac": sweep_mac or own_mac} if (sweep_mac or own_mac) else {"ip": ip}
+            if credential is not None:
+                # Para la tarea `configs`: qué familia es (un equipo de red con
+                # comando de copia, o nada) y con qué identidad se presentó.
+                family = data.get("family", "")
+                tasking.flag(
+                    ctx,
+                    ip,
+                    sweep_mac,
+                    config_family=family if family in CAPTURE_COMMANDS else "",
+                    identity_mac=sweep_mac or own_mac,
+                )
             findings.append(
                 Finding(
                     kind="host",
@@ -621,7 +680,7 @@ class SshCollector:
             command = CAPTURE_COMMANDS.get(data.get("family", ""), "")
             if not capture or credential is None or not command:
                 continue
-            content = fetch_config(ip, credential, command)
+            content = fetch_config(ip, credential, command, tasking.Logins(ctx, self.name, "ssh", ip, sweep_mac))
             if not content.strip():
                 continue
             findings.append(
@@ -634,6 +693,71 @@ class SshCollector:
                         "hostname": data.get("hostname", ""),
                         "ip": ip,
                         "mac": sweep_mac or own_mac,
+                    },
+                )
+            )
+        return findings
+
+    def _configs(self, ctx: dict, credentials: list[creds.Credential]) -> list[Finding]:
+        """La tarea `configs`: solo la copia, solo donde ya se entró.
+
+        Sobre los equipos de red que la memoria apuntó en el inventario y que
+        siguen vivos, con **la credencial que entró entonces** y ninguna otra:
+        sin interrogar, sin sondear puertos y sin rondas. Un equipo cuya
+        credencial ya no está en la lista (alguien la borró) se salta: probar
+        otras aquí sería justo el ruido que esta tarea existe para no hacer.
+        """
+        mem = tasking.memory(ctx)
+        if mem is None or not _capture_enabled(ctx):
+            return []
+        jobs: list[tuple[str, str, dict, creds.Credential, str]] = []
+        for ip, mac, entry in tasking.alive_from_memory(ctx, mem.config_hosts()):
+            command = CAPTURE_COMMANDS.get(str(entry.get("family") or ""), "")
+            if not command:
+                continue
+            ident = mem.remembered(tasking.host_key(ctx, ip, mac), "ssh")
+            credential = next(
+                (c for c in credentials if ident and c.ident == ident and c.covers(ip)),
+                None,
+            )
+            if credential is None:
+                continue
+            jobs.append((ip, mac, entry, credential, command))
+        if not jobs:
+            return []
+
+        progress = tasking.Progress(ctx, self.name, len(jobs))
+
+        def fetch(job: tuple[str, str, dict, creds.Credential, str]) -> str:
+            ip, mac, _entry, credential, command = job
+            try:
+                return fetch_config(ip, credential, command, tasking.Logins(ctx, self.name, "ssh", ip, mac))
+            finally:
+                progress.tick()
+
+        with ThreadPoolExecutor(max_workers=tasking.workers(ctx, "login", WORKERS)) as pool:
+            contents = list(pool.map(fetch, jobs))
+
+        findings: list[Finding] = []
+        for (ip, mac, entry, _credential, _command), content in zip(jobs, contents):
+            if not content.strip():
+                continue
+            # La misma identidad con la que el inventario presentó al equipo:
+            # el servidor cuelga la copia de esa fila.
+            identity_mac = str(entry.get("identity_mac") or "") or mac
+            identity = {"mac": identity_mac} if identity_mac else {"ip": ip}
+            findings.append(
+                Finding(
+                    kind="config",
+                    identity=identity,
+                    payload={
+                        "config": content,
+                        "family": str(entry.get("family") or ""),
+                        # Esta tarea no interroga, así que no sabe el nombre;
+                        # el servidor engancha la copia por la identidad.
+                        "hostname": "",
+                        "ip": ip,
+                        "mac": identity_mac,
                     },
                 )
             )

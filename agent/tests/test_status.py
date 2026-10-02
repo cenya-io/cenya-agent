@@ -167,7 +167,7 @@ class LoopReportsTests(StatusFileTestCase):
 
         event = threading.Event()
 
-        def fail(client, config):
+        def fail(client, config, **kwargs):
             event.set()
             raise PushError("El servidor respondió 401: Token de agente no válido.")
 

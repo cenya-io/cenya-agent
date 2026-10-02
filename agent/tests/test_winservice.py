@@ -120,7 +120,7 @@ class MainStopTests(unittest.TestCase):
 
         event = threading.Event()
 
-        def sweep_then_stop(client, config):
+        def sweep_then_stop(client, config, **kwargs):
             event.set()  # alguien pulsa «Detener» mientras barre
             return 900
 
@@ -135,7 +135,7 @@ class MainStopTests(unittest.TestCase):
 
         event = threading.Event()
 
-        def fail_then_stop(client, config):
+        def fail_then_stop(client, config, **kwargs):
             event.set()
             raise PushError("servidor caído")
 
@@ -231,6 +231,21 @@ class ServiceTestCase(unittest.TestCase):
 
     def logged(self, level: str) -> list[str]:
         return [msg for lvl, msg in self.fakes["servicemanager"].logged if lvl == level]
+
+
+class EventLogScrubTests(ServiceTestCase):
+    def test_the_event_log_never_gets_a_proxy_password(self) -> None:
+        """Cualquier `print` o traza acaba aquí, y lo lee cualquier administrador."""
+        lines: list[str] = []
+        stream = self.ws._EventLogStream(lines.append)
+
+        stream.write("Error inesperado: ValueError: proxy URL with no authority: 'https:/admin:S3cret@proxy:8080'\n")
+        stream.write("Authorization: Bearer cya_secreto")
+        stream.flush()
+
+        self.assertEqual(len(lines), 2)
+        self.assertNotIn("S3cret", " ".join(lines))
+        self.assertNotIn("cya_secreto", " ".join(lines))
 
 
 class ServiceRunStopTests(ServiceTestCase):

@@ -27,6 +27,7 @@ import json
 import os
 import sys
 import tempfile
+import threading
 # La función y no el módulo: los tests del bucle sustituyen `time.sleep` para
 # contar sorbos de siesta, y un reintento de escritura aquí (Windows bloquea un
 # instante el fichero recién escrito) se colaba en esa cuenta.
@@ -37,6 +38,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
+from agent import logs, store
 from agent.i18n import _t, _tn
 
 ENV_VAR = "CENYA_STATUS_FILE"
@@ -88,11 +90,34 @@ def read() -> dict[str, Any] | None:
     return data if isinstance(data, dict) else None
 
 
+#: Con el protocolo 2 escriben dos hilos (el de control y el de las tareas):
+#: leer, fundir y reemplazar tiene que ir de una vez o uno pisa al otro.
+_WRITE_LOCK = threading.Lock()
+
+
 def write(**fields: Any) -> None:
-    """Funde `fields` con lo que había y lo guarda de golpe. Nunca lanza."""
+    """Funde `fields` con lo que había y lo guarda de golpe. Nunca lanza.
+
+    Todo texto pasa antes por `logs.scrub`: este fichero lo lee cualquier
+    usuario de la máquina (es el del icono), y un error puede traer dentro un
+    `usuario:clave@` o un `Bearer`.
+    """
     target = path()
     if target is None:
         return
+    with _WRITE_LOCK:
+        _write(target, {key: _scrubbed(value) for key, value in fields.items()})
+
+
+def _scrubbed(value: Any) -> Any:
+    if isinstance(value, str):
+        return logs.scrub(value)
+    if isinstance(value, list):
+        return [_scrubbed(item) for item in value]
+    return value
+
+
+def _write(target: Path, fields: dict[str, Any]) -> None:
     try:
         current = read() or {}
         current.update(fields)
@@ -102,6 +127,10 @@ def write(**fields: Any) -> None:
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
                 json.dump(current, handle, ensure_ascii=False, indent=1)
+            # En la carpeta protegida del agente nada hereda la lectura para
+            # Usuarios: este fichero la lleva explícita, porque el icono de
+            # bandeja lo lee con la cuenta de quien tiene la sesión abierta.
+            store.protect_status_file(Path(temporary))
             # En Windows, reemplazar un fichero que el icono tiene abierto en
             # ese mismo instante falla: se reintenta un momento antes de
             # rendirse, y rendirse solo cuesta una actualización.
@@ -185,6 +214,55 @@ def nap_tick(*, next_in: int, error: str = "") -> None:
         fields.update(last_error=error, last_error_at=now.isoformat())
     else:
         fields["last_contact_ok_at"] = now.isoformat()
+    write(**fields)
+
+
+# --- Protocolo 2: tareas con su propio ritmo ----------------------------------
+#
+# Los mismos campos que lee `describe`, para que el icono de hoy siga
+# funcionando: una tarea en marcha es «barriendo» con su paso, y al terminar
+# cuenta como el último barrido. `task` dice cuál fue.
+
+
+def task_started(task: str) -> None:
+    write(state="barriendo", task=task, step="", last_sweep_started_at=_now().isoformat())
+
+
+def task_step(task: str, step: str) -> None:
+    write(state="barriendo", task=task, step=step)
+
+
+def task_finished(*, task: str, created: int, refreshed: int, errors: list[str], next_in: int | None) -> None:
+    now = _now()
+    fields: dict[str, Any] = {
+        "state": "durmiendo",
+        "task": "",
+        "step": "",
+        "last_task": task,
+        "last_sweep_finished_at": now.isoformat(),
+        "last_sweep_created": created,
+        "last_sweep_refreshed": refreshed,
+        "last_sweep_notes": list(errors),
+    }
+    if next_in is not None:
+        fields["next_sweep_at"] = (now + timedelta(seconds=next_in)).isoformat()
+    write(**fields)
+
+
+def contact(error: str = "") -> None:
+    """Cómo fue el último checkin, sin tocar lo que esté haciendo el agente."""
+    now = _now()
+    if error:
+        write(last_error=error, last_error_at=now.isoformat())
+    else:
+        write(last_contact_ok_at=now.isoformat(), last_error="")
+
+
+def idle(*, next_in: int | None, paused_until: str | None = None) -> None:
+    """Esperando a la siguiente tarea (o en pausa hasta `paused_until`)."""
+    fields: dict[str, Any] = {"state": "durmiendo", "task": "", "step": "", "paused_until": paused_until}
+    if next_in is not None:
+        fields["next_sweep_at"] = (_now() + timedelta(seconds=next_in)).isoformat()
     write(**fields)
 
 

@@ -293,12 +293,32 @@ variable de máquina la puede leer cualquier usuario del equipo. El agente
 reintenta solo si el servidor no está: no hace falta retrasar la tarea al
 arranque.
 
-**Una asimetría que hay que saber en Windows:** el colector SSH usa el binario
-`ssh` del sistema, y las credenciales SSH **con contraseña** necesitan
-`sshpass`, que no existe para Windows. Un agente en Windows solo puede usar
-credenciales SSH **con clave** (`key_file`); las de contraseña se quedan sin
-usar y el barrido lo dice. En Linux, `apt install sshpass` (la imagen Docker
-oficial ya lo trae).
+**SSH con usuario y contraseña, en Windows y en Linux.** El colector SSH usa el
+binario `ssh` de OpenSSH, no una librería (`paramiko` es LGPL y está descartado).
+Para la contraseña usa el mecanismo del propio OpenSSH: con
+`SSH_ASKPASS_REQUIRE=force` (OpenSSH 8.4 o posterior), `ssh` ejecuta el programa
+`cenya-agent-askpass` y lee de su salida la contraseña. La contraseña viaja en
+una variable de entorno del proceso `ssh` y nada más: no va en la línea de
+órdenes (donde la vería un `ps`), ni en un fichero, ni pasa por un intérprete de
+órdenes, así que comillas, `%`, `!`, `^`, `&`, acentos o una barra final llegan
+tal cual. Es la misma confianza que tenía `sshpass -e`. El ayudante contesta
+**solo** a una petición de contraseña: ante «¿seguro que quieres continuar
+conectando?» o la frase de paso de una clave no imprime nada.
+
+- **El instalador de Windows** lleva su propio OpenSSH (Win32-OpenSSH, licencia
+  BSD) en la carpeta `openssh` junto al programa, y lo usa en lugar del que
+  tenga el sistema: Windows Server 2019 y 2022 traen uno antiguo o ninguno. No
+  hay que instalar nada más.
+- **Con `pip install`** hace falta un OpenSSH 8.4 o posterior en el PATH
+  (Windows 10/11 recientes y cualquier Linux actual lo traen; `ssh -V` lo dice) y
+  el comando `cenya-agent-askpass`, que deja `pip` junto a `cenya-agent`.
+- **Con un OpenSSH anterior a 8.4** (un Linux viejo) se usa `sshpass` si está
+  instalado, como antes (`apt install sshpass`; la imagen Docker oficial ya lo
+  trae). Si no, las credenciales con contraseña no se usan y el barrido lo dice
+  con la versión que ha encontrado; las de clave (`key_file`) funcionan siempre.
+
+`cenya-agent selftest` enseña qué `ssh` va a usar, su versión y si la contraseña
+está disponible (sección `ssh`).
 
 Variables:
 

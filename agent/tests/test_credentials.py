@@ -105,6 +105,81 @@ class ParsingTests(unittest.TestCase):
         self.assertNotIn("priv-secreta", repr(credential))
 
 
+class IdentTests(unittest.TestCase):
+    """El `ident` es lo único de una credencial que la memoria guarda en disco."""
+
+    def _ctx(self, *raw: dict) -> dict:
+        return {"config": {"credentials": list(raw)}, "env": None}
+
+    def test_the_servers_id_wins(self) -> None:
+        (credential,) = creds.all_from(self._ctx({"id": "c1f0", "kind": "ssh", "username": "root"}))
+
+        self.assertEqual(credential.ident, "c1f0")
+
+    def test_without_an_id_it_is_derived_and_stable(self) -> None:
+        raw = {"kind": "ssh", "username": "root", "host": "", "port": 2222, "label": "Switches"}
+
+        first = creds.all_from(self._ctx(raw))[0].ident
+        second = creds.all_from(self._ctx(dict(raw)))[0].ident
+
+        self.assertTrue(first)
+        self.assertEqual(first, second)
+
+    def test_the_derived_ident_never_comes_from_the_secret(self) -> None:
+        """Un hash de una contraseña corta se deshace con un diccionario: si el
+        secreto entrara en el `ident`, la memoria en disco lo delataría."""
+        one = creds.all_from(self._ctx({"kind": "ssh", "username": "root", "secret": "uno"}))[0]
+        other = creds.all_from(self._ctx({"kind": "ssh", "username": "root", "secret": "otro-distinto"}))[0]
+
+        self.assertEqual(one.ident, other.ident)
+        self.assertNotIn("uno", one.ident)
+
+    def test_two_identical_entries_in_different_positions_are_two_credentials(self) -> None:
+        found = creds.all_from(self._ctx({"kind": "ssh", "username": "root"}, {"kind": "ssh", "username": "root"}))
+
+        self.assertNotEqual(found[0].ident, found[1].ident)
+
+    def test_a_community_is_remembered_by_its_number_never_its_value(self) -> None:
+        community = creds.community("super-secreta", 3)
+
+        self.assertEqual(community.ident, "community-3")
+        self.assertNotIn("super-secreta", repr(community))
+
+    def test_a_credential_built_by_hand_still_gets_an_ident(self) -> None:
+        self.assertTrue(creds.Credential(kind="ssh", username="root").ident)
+
+
+class ScopeTests(unittest.TestCase):
+    def _one(self, scope: object) -> creds.Credential:
+        return creds.all_from({"config": {"credentials": [{"kind": "ssh", "username": "u", "scope": scope}]}, "env": None})[0]
+
+    def test_no_scope_means_everywhere(self) -> None:
+        for scope in (None, {}, {"subnets": [], "hosts": []}, "rubbish"):
+            with self.subTest(scope=scope):
+                self.assertTrue(self._one(scope).covers("172.16.4.4"))
+
+    def test_subnets_and_hosts(self) -> None:
+        credential = self._one({"subnets": ["10.0.0.0/24"], "hosts": ["192.168.1.7"]})
+
+        self.assertTrue(credential.covers("10.0.0.200"))
+        self.assertTrue(creds.covers(credential, "192.168.1.7"))
+        self.assertFalse(credential.covers("10.0.1.1"))
+        self.assertFalse(credential.covers(""))
+
+    def test_a_mistyped_scope_covers_nothing_rather_than_everything(self) -> None:
+        """Quien acotó una credencial no quería que se probara fuera; una errata
+        no puede convertir eso en probarla contra toda la red."""
+        credential = self._one({"subnets": ["10.0.0.0/33"]})
+
+        self.assertFalse(credential.covers("10.0.0.1"))
+
+    def test_a_host_by_name(self) -> None:
+        credential = self._one({"hosts": ["VC.acme.local"]})
+
+        self.assertTrue(credential.covers("vc.acme.local"))
+        self.assertFalse(credential.covers("10.0.0.1"))
+
+
 class CaFileTests(unittest.TestCase):
     def test_the_credentials_own_ca_wins(self) -> None:
         env = Config(url="http://x", token="t", ca_bundle="/etc/ssl/empresa.pem")

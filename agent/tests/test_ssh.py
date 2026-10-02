@@ -466,6 +466,7 @@ class RunTests(unittest.TestCase):
             return completed
 
         with mock.patch("agent.ssh.SSHPASS_AVAILABLE", sshpass), \
+             mock.patch("agent.ssh.ASKPASS_AVAILABLE", False), \
              mock.patch("agent.ssh.subprocess.run", fake_run):
             answer = ssh.run(host="10.0.0.5", username="root", secret=secret, command="uname -sr")
         return answer, captured
@@ -527,6 +528,77 @@ class RunTests(unittest.TestCase):
         # Solo la primera línea: el resto son avisos que no explican nada.
         self.assertEqual(answer.error, "root@10.0.0.5: Permission denied (publickey).")
 
+    def test_a_password_run_uses_exactly_one_authentication_method(self) -> None:
+        """Con `keyboard-interactive` y `password` ofrecidos, `ssh` probaba los
+        dos: dos inicios fallidos por contraseña equivocada."""
+        argv = ssh.argv_for(host="h", username="u", with_password=True, askpass=True)
+        options = [argv[i + 1] for i, part in enumerate(argv) if part == "-o"]
+
+        self.assertIn("PreferredAuthentications=password", options)
+        for off in (
+            "PubkeyAuthentication=no",
+            "KbdInteractiveAuthentication=no",
+            "GSSAPIAuthentication=no",
+            "HostbasedAuthentication=no",
+        ):
+            self.assertIn(off, options)
+        self.assertIn("PasswordAuthentication=yes", options)
+        self.assertIn("NumberOfPasswordPrompts=1", options)
+
+    def test_the_keyboard_interactive_run_turns_password_off(self) -> None:
+        argv = ssh.argv_for(host="h", username="u", with_password=True, askpass=True, method="keyboard-interactive")
+        options = [argv[i + 1] for i, part in enumerate(argv) if part == "-o"]
+
+        self.assertIn("PreferredAuthentications=keyboard-interactive", options)
+        self.assertIn("KbdInteractiveAuthentication=yes", options)
+        self.assertIn("PasswordAuthentication=no", options)
+
+    def _runs(self, stderrs: list[str]) -> list[list[str]]:
+        calls: list[list[str]] = []
+
+        def fake_run(argv: list[str], **kwargs: Any) -> Any:
+            calls.append(argv)
+            return subprocess.CompletedProcess(args=argv, returncode=255, stdout="", stderr=stderrs[len(calls) - 1])
+
+        with mock.patch("agent.ssh.ASKPASS_AVAILABLE", True), mock.patch("agent.ssh.ASKPASS", "askpass"), \
+             mock.patch("agent.ssh.subprocess.run", fake_run):
+            answer = ssh.run(host="10.0.0.5", username="admin", secret="mala", command="show version")
+        self.assertFalse(answer.connected)
+        return calls
+
+    def test_a_refused_password_is_not_retried(self) -> None:
+        calls = self._runs(["admin@10.0.0.5: Permission denied (publickey,keyboard-interactive,password).\n"])
+
+        self.assertEqual(len(calls), 1)
+
+    def test_without_password_on_offer_it_retries_once_by_keyboard_interactive(self) -> None:
+        calls = self._runs([
+            "** WARNING: connection is not using a post-quantum key exchange algorithm.\n"
+            "admin@10.0.0.5: Permission denied (publickey,keyboard-interactive).\n",
+            "admin@10.0.0.5: Permission denied (publickey,keyboard-interactive).\n",
+        ])
+
+        self.assertEqual(len(calls), 2)
+        self.assertIn("PreferredAuthentications=keyboard-interactive", calls[1])
+
+    def test_a_connection_failure_is_not_retried(self) -> None:
+        calls = self._runs(["ssh: connect to host 10.0.0.5 port 22: Connection refused\n"])
+
+        self.assertEqual(len(calls), 1)
+
+    def test_the_reason_skips_the_post_quantum_warning(self) -> None:
+        completed = subprocess.CompletedProcess(
+            args=[],
+            returncode=ssh.SSH_FAILURE_CODE,
+            stdout="",
+            stderr="** WARNING: connection is not using a post-quantum key exchange algorithm.\n"
+            "root@10.0.0.5: Permission denied (password).\n",
+        )
+
+        answer, _ = self._run(completed)
+
+        self.assertEqual(answer.error, "root@10.0.0.5: Permission denied (password).")
+
     def test_a_remote_command_that_failed_still_counts_as_getting_in(self) -> None:
         """«No me dejó entrar» y «entré y ese comando no existe ahí» son cosas
         distintas: confundirlas hace probar credenciales de más contra un
@@ -567,7 +639,7 @@ class SshCollectorTests(unittest.TestCase):
             return ssh.Answer(connected=bool(output), output=output)
 
         with mock.patch("agent.collectors.ssh.ssh.AVAILABLE", True), \
-             mock.patch("agent.collectors.ssh.ssh.SSHPASS_AVAILABLE", True), \
+             mock.patch("agent.collectors.ssh.ssh.PASSWORD_AUTH_AVAILABLE", True), \
              mock.patch("agent.collectors.ssh.net.hosts_listening", return_value=reachable), \
              mock.patch("agent.collectors.ssh.ssh.run", fake_run):
             return SshCollector().collect(ctx)
@@ -602,7 +674,7 @@ class SshCollectorTests(unittest.TestCase):
         forma de saber que le falta un programa del sistema."""
         ctx = self._ctx(config={"credentials": [{"kind": "ssh", "username": "root", "secret": "x"}]})
         with mock.patch("agent.collectors.ssh.ssh.AVAILABLE", True), \
-             mock.patch("agent.collectors.ssh.ssh.SSHPASS_AVAILABLE", False), \
+             mock.patch("agent.collectors.ssh.ssh.PASSWORD_AUTH_AVAILABLE", False), \
              mock.patch("agent.collectors.ssh.net.hosts_listening", return_value=[]):
             SshCollector().collect(ctx)
 
@@ -611,7 +683,7 @@ class SshCollectorTests(unittest.TestCase):
     def test_the_secret_never_reaches_the_error_lines(self) -> None:
         ctx = self._ctx(config={"credentials": [{"kind": "ssh", "username": "root", "secret": "ultrasecreta"}]})
         with mock.patch("agent.collectors.ssh.ssh.AVAILABLE", True), \
-             mock.patch("agent.collectors.ssh.ssh.SSHPASS_AVAILABLE", False), \
+             mock.patch("agent.collectors.ssh.ssh.PASSWORD_AUTH_AVAILABLE", False), \
              mock.patch("agent.collectors.ssh.net.hosts_listening", return_value=[]):
             SshCollector().collect(ctx)
 
@@ -620,7 +692,7 @@ class SshCollectorTests(unittest.TestCase):
     def test_a_sweep_that_found_nobody_is_not_an_error(self) -> None:
         ctx = self._ctx(hosts=[])
         with mock.patch("agent.collectors.ssh.ssh.AVAILABLE", True), \
-             mock.patch("agent.collectors.ssh.ssh.SSHPASS_AVAILABLE", True):
+             mock.patch("agent.collectors.ssh.ssh.PASSWORD_AUTH_AVAILABLE", True):
             self.assertEqual(SshCollector().collect(ctx), [])
 
         self.assertEqual(ctx.get("errors", []), [])
@@ -751,7 +823,7 @@ class ConfigCaptureTests(unittest.TestCase):
             return ssh.Answer(connected=True, output=IOS_RECHAZA_EL_COMANDO_DE_LINUX)
 
         with mock.patch("agent.collectors.ssh.ssh.AVAILABLE", True), \
-             mock.patch("agent.collectors.ssh.ssh.SSHPASS_AVAILABLE", True), \
+             mock.patch("agent.collectors.ssh.ssh.PASSWORD_AUTH_AVAILABLE", True), \
              mock.patch("agent.collectors.ssh.net.hosts_listening", return_value=["192.168.1.2"]), \
              mock.patch("agent.collectors.ssh.ssh.run", fake_run):
             return SshCollector().collect(ctx)
@@ -802,7 +874,7 @@ class ConfigCaptureTests(unittest.TestCase):
 
         ctx = self._ctx()
         with mock.patch("agent.collectors.ssh.ssh.AVAILABLE", True), \
-             mock.patch("agent.collectors.ssh.ssh.SSHPASS_AVAILABLE", True), \
+             mock.patch("agent.collectors.ssh.ssh.PASSWORD_AUTH_AVAILABLE", True), \
              mock.patch("agent.collectors.ssh.net.hosts_listening", return_value=["192.168.1.2"]), \
              mock.patch("agent.collectors.ssh.ssh.run", fake_run):
             findings = SshCollector().collect(ctx)
