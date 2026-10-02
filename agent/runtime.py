@@ -32,7 +32,7 @@ from agent import __version__, about, logs, notes, outbox, probe, status, store,
 from agent import settings as local_settings
 from agent.client import AgentClient, PushError, result_parts
 from agent.config import Config
-from agent.control import Control, Hooks, Shared
+from agent.control import REFUSED_UNAUTHORIZED, Control, Hooks, Shared
 from agent.i18n import _t, _tn
 from agent.memory import Excluded, Memory
 from agent.notes import collector_note
@@ -145,6 +145,7 @@ class Runtime:
                 config_changed=self._config_changed,
                 probe=self._probe,
                 excluded=self._is_excluded,
+                rejected=self._rejected,
             ),
             clock=clock,
             report=report,
@@ -190,7 +191,14 @@ class Runtime:
     def _is_excluded(self, ip: str) -> bool:
         return self.excluded is not None and ip in self.excluded
 
+    def _rejected(self) -> None:
+        """El servidor ya no quiere a este agente: lo que esperaba en la cola, fuera."""
+        with self._lock:
+            self.scheduler.clear_queue()
+
     def _probe(self, ip: str) -> dict[str, Any]:
+        if self.shared.refused() == REFUSED_UNAUTHORIZED:
+            raise RuntimeError("el servidor ha rechazado a este agente")
         config, _ = self.shared.config_snapshot()
         return probe.report_for(ip, self._base_ctx(config))
 
@@ -254,6 +262,10 @@ class Runtime:
         with self.shared.lock:
             if not self.shared.has_config:
                 return None  # sin configuración no hay qué barrer ni con qué
+            if self.shared.refusal:
+                # 401 o 402: ni lo programado ni los encargos. Con un 402 lo
+                # que espera en la cola se queda para cuando vuelva a aceptar.
+                return None
             server_pause = self.shared.server_paused_until
         now = self._clock()
         paused = is_paused(now, effective_pause(self._local_pause(), server_pause))
@@ -264,7 +276,9 @@ class Runtime:
         """Espera a la siguiente tarea, a sorbos, despertando si llega algo."""
         now = self._clock()
         with self.shared.lock:
-            has_config = self.shared.has_config
+            # Rechazado, nada puede empezar: se espera al próximo checkin bueno
+            # (que despierta este hilo), no a la hora de la siguiente tarea.
+            has_config = self.shared.has_config and not self.shared.refusal
             server_pause = self.shared.server_paused_until
         until = effective_pause(self._local_pause(), server_pause)
         paused = is_paused(now, until)

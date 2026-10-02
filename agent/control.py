@@ -57,6 +57,15 @@ REMEMBERED_ORDERS = 1000
 #: token puede volver a valer y la instalación salir de solo lectura.
 PERMANENT_STATUSES = frozenset({400, 404, 409, 410, 413, 422})
 
+#: Lo que el servidor dice cuando no quiere al agente (spec 1, códigos).
+REFUSED_UNAUTHORIZED = "unauthorized"
+REFUSED_READ_ONLY = "read_only"
+_REFUSALS = {401: REFUSED_UNAUTHORIZED, 402: REFUSED_READ_ONLY}
+
+#: Con el token rechazado se sigue preguntando, pero despacio: si alguien lo
+#: arregla en la web el agente vuelve solo, y mientras tanto no martillea.
+REJECTED_CHECKIN_SECONDS = 300
+
 KIND_RUN_TASK = "run_task"
 KIND_PROBE = "probe"
 
@@ -116,9 +125,17 @@ class Shared:
         self.checkin_seconds = CHECKIN_SECONDS
         self.update: dict[str, Any] | None = None
         self.activity: dict[str, Any] | None = None
+        #: Cómo fue el último checkin que el servidor contestó con un «no»
+        #: rotundo: `REFUSED_UNAUTHORIZED` (401, token revocado o no válido),
+        #: `REFUSED_READ_ONLY` (402, instalación en solo lectura), o "".
+        self.refusal = ""
         #: Despierta al hilo de tareas: llegó un encargo, una configuración o
         #: un cambio de pausa, y no tiene sentido esperar al siguiente minuto.
         self.wake = threading.Event()
+
+    def refused(self) -> str:
+        with self.lock:
+            return self.refusal
 
     def config_snapshot(self) -> tuple[dict[str, Any], str]:
         with self.lock:
@@ -156,6 +173,8 @@ class Hooks:
     probe: Callable[[str], dict[str, Any]]
     #: Si una IP está excluida en los ajustes locales.
     excluded: Callable[[str], bool]
+    #: El servidor ha rechazado al agente (401): vaciar la cola de tareas.
+    rejected: Callable[[], None] = lambda: None
 
 
 class Control:
@@ -234,6 +253,8 @@ class Control:
         except PushError as exc:
             if exc.status == 404 and self.speaks_only_protocol_1():
                 self.gone = True
+            elif exc.status in _REFUSALS:
+                self._refused(_REFUSALS[exc.status], str(exc))
             else:
                 self._say_error(str(exc))
             return False
@@ -261,9 +282,43 @@ class Control:
             return False
         return isinstance(answer, dict)
 
+    def _refused(self, refusal: str, detail: str) -> None:
+        """El servidor dice que no: 401 (token rechazado) o 402 (solo lectura).
+
+        Con un 401 el agente deja de ser de nadie: no se empieza ninguna tarea
+        ni encargo, y la configuración --con las credenciales dentro-- se
+        olvida, para no seguir entrando en los equipos con las de alguien que
+        ya no lo quiere. Se sigue preguntando, despacio, por si se arregla.
+        Con un 402 nada de lo que se descubra podría guardarse: no se empieza
+        ninguna tarea, pero la configuración se queda y se sigue preguntando
+        como siempre. Las dos se levantan solas con el primer checkin bueno.
+        """
+        with self.shared.lock:
+            self.shared.refusal = refusal
+            if refusal == REFUSED_UNAUTHORIZED:
+                self.shared.config, self.shared.config_etag, self.shared.has_config = {}, "", False
+        if refusal == REFUSED_UNAUTHORIZED:
+            self._safely(self.hooks.rejected)
+            text = _t(
+                "El servidor ha rechazado este agente (%(error)s): no barre ni usa ninguna credencial hasta "
+                "que lo acepte de nuevo, y le pregunta cada %(minutes)d minutos. Si se revocó, hay que "
+                "enrolarlo otra vez."
+            ) % {"error": detail, "minutes": REJECTED_CHECKIN_SECONDS // 60}
+        else:
+            text = _t(
+                "La instalación de Cenya está en solo lectura (%(error)s): el agente no empieza ninguna tarea "
+                "hasta que el servidor vuelva a aceptar resultados."
+            ) % {"error": detail}
+        self._say_error(text)
+
     def accept(self, answer: dict[str, Any], body: dict[str, Any], about_hash: str) -> None:
         """Lo que se hace con una respuesta buena: aplicarla y vaciar la cola. Nunca lanza."""
         self._last_error = ""
+        with self.shared.lock:
+            was_refused, self.shared.refusal = bool(self.shared.refusal), ""
+        if was_refused:
+            self._say(_t("[agente] El servidor vuelve a aceptar a este agente."))
+            self.shared.wake.set()
         if "about" in body:
             self._about_sent = about_hash
         try:
@@ -417,6 +472,8 @@ class Control:
                 break
             with self.shared.lock:
                 seconds = self.shared.checkin_seconds
+                if self.shared.refusal == REFUSED_UNAUTHORIZED:
+                    seconds = max(seconds, REJECTED_CHECKIN_SECONDS)
             if stop_event.wait(seconds):
                 break
         # Quien espera en la cola de tareas se entera en el acto.

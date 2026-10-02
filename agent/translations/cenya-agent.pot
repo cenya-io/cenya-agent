@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-02 20:50+0200\n"
+"POT-Creation-Date: 2026-10-02 21:06+0200\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -18,62 +18,62 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=INTEGER; plural=EXPRESSION;\n"
 
-#: agent/__main__.py:40 agent/runtime.py:88 agent/status.py:424
+#: agent/__main__.py:41 agent/runtime.py:88 agent/status.py:424
 #, python-format
 msgid "%(n)d hallazgo nuevo"
 msgid_plural "%(n)d hallazgos nuevos"
 msgstr[0] ""
 msgstr[1] ""
 
-#: agent/__main__.py:41 agent/runtime.py:89 agent/status.py:426
+#: agent/__main__.py:42 agent/runtime.py:89 agent/status.py:426
 #, python-format
 msgid "%(n)d ya conocido."
 msgid_plural "%(n)d ya conocidos."
 msgstr[0] ""
 msgstr[1] ""
 
-#: agent/__main__.py:44
+#: agent/__main__.py:45
 #, python-format
 msgid "%(n)d envío"
 msgid_plural "%(n)d envíos"
 msgstr[0] ""
 msgstr[1] ""
 
-#: agent/__main__.py:45
+#: agent/__main__.py:46
 #, python-format
 msgid "[agente] Barrido enviado en %(batches)s: %(created)s, %(refreshed)s"
 msgstr ""
 
-#: agent/__main__.py:46
+#: agent/__main__.py:47
 #, python-format
 msgid "[agente] Barrido enviado: %(created)s, %(refreshed)s"
 msgstr ""
 
-#: agent/__main__.py:61 agent/control.py:435 agent/runtime.py:440
+#: agent/__main__.py:62 agent/control.py:511 agent/runtime.py:458
 #, python-format
 msgid "Error inesperado: %(error)s"
 msgstr ""
 
-#: agent/__main__.py:228 agent/__main__.py:272 agent/__main__.py:279
-#: agent/control.py:423 agent/runtime.py:242
+#: agent/__main__.py:246 agent/__main__.py:290 agent/__main__.py:297
+#: agent/control.py:499 agent/runtime.py:254
 #, python-format
 msgid "[agente] %(error)s"
 msgstr ""
 
-#: agent/__main__.py:242
+#: agent/__main__.py:260
 #, python-format
 msgid "[agente] Conectado a %(url)s con el protocolo 2."
 msgstr ""
 
-#: agent/__main__.py:246
+#: agent/__main__.py:264
 msgid "[agente] El servidor solo habla el protocolo 1: se sigue con el bucle de siempre."
 msgstr ""
 
-#: agent/__main__.py:248
+#: agent/__main__.py:266
 msgid "[agente] Detenido."
 msgstr ""
 
-#: agent/__main__.py:263
+#: agent/__main__.py:281
 #, python-format
 msgid "[agente] Empujando a %(url)s cada ~%(seconds)d s."
 msgstr ""
@@ -110,16 +110,30 @@ msgstr ""
 msgid "La cadena de conexión no es válida: debe parecerse a cenya://portal.midominio.com/XXXX-XXXX-XXXX. Cópiala entera de Ajustes → Agentes."
 msgstr ""
 
-#: agent/control.py:279
+#: agent/control.py:303
+#, python-format
+msgid "El servidor ha rechazado este agente (%(error)s): no barre ni usa ninguna credencial hasta que lo acepte de nuevo, y le pregunta cada %(minutes)d minutos. Si se revocó, hay que enrolarlo otra vez."
+msgstr ""
+
+#: agent/control.py:309
+#, python-format
+msgid "La instalación de Cenya está en solo lectura (%(error)s): el agente no empieza ninguna tarea hasta que el servidor vuelva a aceptar resultados."
+msgstr ""
+
+#: agent/control.py:320
+msgid "[agente] El servidor vuelve a aceptar a este agente."
+msgstr ""
+
+#: agent/control.py:353
 msgid "[agente] Configuración nueva recibida."
 msgstr ""
 
-#: agent/control.py:285
+#: agent/control.py:359
 #, python-format
 msgid "[agente] Hay una versión nueva del agente: %(version)s."
 msgstr ""
 
-#: agent/control.py:313
+#: agent/control.py:387
 #, python-format
 msgid "[agente] Encargo recibido: %(kind)s."
 msgstr ""
@@ -334,7 +348,7 @@ msgstr ""
 msgid "[agente] Tarea %(task)s enviada: %(created)s, %(refreshed)s"
 msgstr ""
 
-#: agent/runtime.py:428
+#: agent/runtime.py:446
 #, python-format
 msgid "[agente] Tarea %(task)s guardada en la cola local: se enviará cuando el servidor conteste."
 msgstr ""

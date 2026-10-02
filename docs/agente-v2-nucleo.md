@@ -270,6 +270,16 @@ token deja de valer. Respuesta `{"ok": true}`.
   `inventory` solo para ellos (`trigger: "new_host"`).
 - En pausa no arranca ninguna tarea programada; la que está en curso termina.
   Los encargos sí se atienden (los pide una persona).
+- **Checkin con 401** (token revocado o no válido): no se empieza ninguna
+  tarea (programada ni encargada) ni sondeo, la configuración --y con ella las
+  credenciales-- se borra de la memoria del proceso, la cola de tareas se
+  vacía, y se sigue haciendo checkin cada 5 minutos diciendo en el registro y
+  en el estado que el servidor ha rechazado al agente. El primer checkin bueno
+  lo levanta (y trae la configuración de nuevo, porque el etag se olvidó).
+- **Checkin con 402** (instalación en solo lectura): no se empieza ninguna
+  tarea programada ni encargo (nada podría guardarse), pero la configuración y
+  la cola se quedan y el checkin sigue a su ritmo. El primer checkin bueno lo
+  levanta.
 - Cada tarea empuja su resultado al terminar. Si el envío falla va a la cola
   local y la siguiente tarea no espera.
 

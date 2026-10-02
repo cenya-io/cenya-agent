@@ -148,6 +148,10 @@ class Scheduler:
             position += 1
         self._queue.insert(position, job)
 
+    def clear_queue(self) -> None:
+        """Olvida lo que esperaba: encargos y equipos nuevos (un token revocado)."""
+        self._queue.clear()
+
     def add_new_hosts(self, ips: list[str], now: datetime) -> Job | None:
         """Tras una presencia, un inventario solo de los nuevos. Devuelve el que queda en cola.
 

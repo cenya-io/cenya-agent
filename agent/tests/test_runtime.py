@@ -428,6 +428,91 @@ class LoopTests(RuntimeTestCase):
         self.assertEqual(runtime.outbox.count(), 0)
 
 
+class StopAfterOneWait:
+    """Un `stop_event` que apunta cuánto le piden esperar y para en la primera espera."""
+
+    def __init__(self) -> None:
+        self.waits: list[float] = []
+
+    def is_set(self) -> bool:
+        return bool(self.waits)
+
+    def wait(self, timeout: float | None = None) -> bool:
+        self.waits.append(timeout or 0)
+        return True
+
+
+class RefusalTests(RuntimeTestCase):
+    """A revoked token (401) or a read-only installation (402) stops the scanning."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.server = Server()
+        self.serving = serving(self.server)
+        url = self.serving.__enter__()
+        self.addCleanup(self.serving.__exit__, None, None, None)
+        self.rt = self.runtime(url)
+        self.assertEqual(self.rt.negotiate(), rt.V2)
+        self.rt._queue_order(Job("presence", "order", order_id="o-1"))
+        self.said: list[str] = []
+        patcher = mock.patch("agent.control.logs.error", side_effect=self.said.append)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def refuse(self, status: int) -> None:
+        with mock.patch.object(self.rt.client, "checkin", side_effect=PushError(f"{status}", status=status)):
+            self.assertFalse(self.rt.control.checkin_once())
+
+    def checkin_seconds_while_refused(self) -> float:
+        stop = StopAfterOneWait()
+        with mock.patch.object(self.rt.control, "checkin_once", return_value=False):
+            self.rt.control.run(stop)
+        return stop.waits[0]
+
+    def test_a_401_drops_the_credentials_starts_nothing_and_checks_in_slowly(self) -> None:
+        self.server.config = {**self.server.config, "credentials": [{"kind": "ssh", "username": "a", "secret": "s"}]}
+        self.rt.shared.config_etag = "viejo"  # que el siguiente checkin la traiga
+        self.assertTrue(self.rt.control.checkin_once())
+        self.assertTrue(self.rt.shared.config_snapshot()[0]["credentials"])
+
+        self.refuse(401)
+
+        self.assertIsNone(self.rt.next_job())
+        self.assertEqual(self.rt.shared.config_snapshot(), ({}, ""))
+        self.assertFalse(self.rt.shared.has_config)
+        self.assertEqual(self.rt.scheduler.queued, ())  # el encargo pendiente, fuera
+        with self.assertRaises(RuntimeError):
+            self.rt._probe("10.0.0.5")
+        self.assertEqual(self.checkin_seconds_while_refused(), 300)
+        self.assertTrue(any("rechazado" in line for line in self.said), self.said)
+
+    def test_after_a_401_the_agent_comes_back_by_itself(self) -> None:
+        self.refuse(401)
+
+        self.assertTrue(self.rt.control.checkin_once())
+
+        self.assertTrue(self.rt.shared.has_config)
+        self.assertEqual(self.rt.shared.refused(), "")
+        self.assertEqual(self.rt.next_job().task, "presence")  # la programada, de nuevo
+        self.assertEqual(self.checkin_seconds_while_refused(), 10)
+
+    def test_a_402_starts_nothing_but_keeps_the_config_and_the_queue(self) -> None:
+        config = self.rt.shared.config_snapshot()
+
+        self.refuse(402)
+
+        self.assertIsNone(self.rt.next_job())
+        self.assertEqual(self.rt.shared.config_snapshot(), config)
+        self.assertEqual(len(self.rt.scheduler.queued), 1)
+        self.assertEqual(self.checkin_seconds_while_refused(), 10)  # el ritmo de siempre
+        self.assertTrue(any("solo lectura" in line for line in self.said), self.said)
+
+        self.assertTrue(self.rt.control.checkin_once())
+
+        job = self.rt.next_job()
+        self.assertEqual((job.task, job.order_id), ("presence", "o-1"))
+
+
 class MainTests(RuntimeTestCase):
     """`main` elige protocolo, y vuelve al 1 si el servidor no sabe del 2."""
 
