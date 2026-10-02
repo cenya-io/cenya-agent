@@ -100,9 +100,12 @@ Respuesta:
 }
 ```
 
-- `config_etag` es el SHA-256 del JSON canónico de `config` (claves ordenadas,
-  sin espacios, UTF-8). Lo calcula el servidor; el agente solo lo guarda y lo
-  devuelve. Con el mismo etag, `config` no viaja.
+- `config_etag` es una huella **opaca** de `config`: la calcula el servidor y
+  el agente solo la guarda y la devuelve. Cambia cuando cambia cualquier cosa
+  de `config`, incluido un secreto. No es un hash directo del JSON con los
+  secretos dentro (se guardaría en la base y se podría atacar con un
+  diccionario): el servidor la deriva con una clave propia. Con el mismo etag,
+  `config` no viaja.
 - `need_about`: el servidor no tiene el `about` de ese hash; el agente lo manda
   entero en el siguiente checkin.
 - `paused_until`: pausa puesta **desde la web**. El agente está en pausa hasta
