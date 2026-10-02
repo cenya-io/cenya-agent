@@ -20,7 +20,7 @@ import time
 from datetime import datetime, timezone
 from typing import Protocol
 
-from agent import __version__, enroll, logs, notes, probe, status
+from agent import __version__, enroll, logs, notes, probe, status, store
 from agent import settings as local_settings
 from agent.notes import collector_note
 from agent.client import AgentClient, PushError
@@ -190,10 +190,21 @@ def main(argv: list[str] | None = None, stop_event: StopSignal | None = None) ->
         from agent import netbox_export
 
         raise SystemExit(netbox_export.run(args[1:]))
+    # La carpeta de estado, protegida antes de leer nada de ella: lo que un
+    # usuario cualquiera pudo dejar en una sin proteger (unos ajustes con su
+    # proxy, una cola inventada) se aparta, y en una que no se puede proteger
+    # el agente no arranca.
+    try:
+        securing = store.secure_state_dir()
+    except store.StoreError as exc:
+        _say(str(exc), error=True)
+        raise SystemExit(str(exc)) from exc
     # Un contenedor o un script que arranca el agente directamente puede traer
     # la cadena de conexión en el entorno: se canjea aquí, la primera vez.
     enroll.ensure_enrolled()
     logs.setup()
+    if securing.moved:
+        _say(store.moved_line(securing), error=True)
     local = local_settings.load()
     # El idioma de `settings.json`, si nadie lo fijó en el entorno: lo leen
     # `agent.i18n` (lo que se imprime) y `accept_language` (los errores del

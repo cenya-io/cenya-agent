@@ -101,6 +101,16 @@ def run(args: list[str], environ: Mapping[str, str] | None = None) -> int:
         else:
             positional.append(arg)
 
+    # Antes de leer nada de la carpeta: lo que haya en una sin proteger no se
+    # usa, y en una que no se puede proteger no se guarda el token.
+    try:
+        securing = store.secure_state_dir(env)
+    except store.StoreError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    if securing.moved:
+        print(store.moved_line(securing), file=sys.stderr)
+
     existing = store.load(env)
     if existing is not None and not force:
         print(

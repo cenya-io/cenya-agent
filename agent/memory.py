@@ -20,13 +20,12 @@ from __future__ import annotations
 
 import ipaddress
 import json
-import os
-import tempfile
 import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
+from agent import store
 from agent.credentials import Credential
 
 #: Un equipo que no se ve en este tiempo se olvida.
@@ -162,26 +161,14 @@ class Memory:
         """
         if self._path is None:
             return
-        temporary = ""
         try:
             with self._lock:
                 payload = json.dumps(self._snapshot(), ensure_ascii=False, sort_keys=True, indent=1)
-            self._path.parent.mkdir(parents=True, exist_ok=True)
-            handle, temporary = tempfile.mkstemp(dir=str(self._path.parent), prefix=".memory-", suffix=".tmp")
-            with os.fdopen(handle, "w", encoding="utf-8") as stream:
-                stream.write(payload)
-                stream.flush()
-                os.fsync(stream.fileno())
-            os.replace(temporary, self._path)
-            temporary = ""
+            # Con la protección del token (`agent.store`): no guarda secretos,
+            # pero dice qué equipos hay y con qué credencial entra en cada uno.
+            store.write_protected(self._path, payload)
         except Exception:  # noqa: BLE001 - un disco lleno no tumba una tarea
             pass
-        finally:
-            if temporary:
-                try:
-                    os.remove(temporary)
-                except OSError:
-                    pass
 
     def _snapshot(self) -> dict[str, Any]:
         return {

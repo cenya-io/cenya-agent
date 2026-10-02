@@ -381,6 +381,34 @@ El ajuste local `gentleness_cap` puede bajarla, nunca subirla.
 
 Las variables `CENYA_*` mandan sobre `settings.json`.
 
+**La carpeta se protege en cada arranque** (servicio, consola, `enroll`,
+`--once`), antes de leer nada de ella, y solo lo sabe hacer `agent/store.py`
+(`secure_state_dir`):
+
+- Windows: la carpeta con una DACL protegida (nada heredado de
+  `%ProgramData%`): SYSTEM y Administradores control total, la cuenta que corre
+  el agente también cuando no es ninguna de las dos, y Usuarios y OWNER RIGHTS
+  solo lectura **de la carpeta, sin herencia** (el icono de bandeja lee
+  `status.json`, que lleva esa lectura explícita y nada más la lleva).
+  `enrollment.json`, `identity.key`, `settings.json`, `memory.json`, `outbox/` y
+  `logs/`: SYSTEM, Administradores (y la cuenta que corre el agente si no es
+  ninguna de las dos), sin Usuarios y sin herencia. Elevado o como SYSTEM, el
+  dueño pasa a ser Administradores. Todo por SID.
+- POSIX: carpeta `0700`, ficheros `0600`.
+- **Lo que ya había solo se cree si la carpeta ya estaba protegida.** Si no lo
+  estaba (DACL no protegida, o un grupo amplio --Usuarios, Usuarios
+  autentificados, Todos, INTERACTIVE-- podía crear o cambiar algo dentro, o un
+  dueño ajeno sin OWNER RIGHTS; en POSIX, escritura de grupo u otros o dueño
+  ajeno), `settings.json`, `identity.key`, `memory.json`, `enrollment.json`,
+  `outbox/` y `logs/` se renombran con el sufijo `.untrusted-<fecha>` dentro de
+  la carpeta (nunca se borran) y se dice en una línea. El enrolamiento apartado
+  no se usa: el agente dice que hay que repetirlo
+  (`cenya-agent enroll <cadena> --force`) y sale como cuando no está enrolado.
+  La disposición que dejaba el instalador 0.10.x (SYSTEM y Administradores
+  total; Usuarios y OWNER RIGHTS lectura heredada) cuenta como protegida.
+- Si una carpeta sin proteger no se puede proteger (sin derechos), el agente no
+  arranca ni guarda en ella ningún secreto, y dice por qué.
+
 Cola (`outbox/`): tope de 50 MB y de 24 h; lo que no cabe o caduca se tira
 empezando por lo más viejo, y se anota (`outbox_dropped`). Se vacía en orden
 en cada checkin que sale bien. Nunca contiene credenciales: solo resultados.

@@ -5,7 +5,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: cenya-agent 0.9.1\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-02 20:22+0200\n"
+"POT-Creation-Date: 2026-10-02 20:50+0200\n"
 "PO-Revision-Date: 2026-09-14 17:00+0200\n"
 "Last-Translator: NetInventory\n"
 "Language-Team: Brazilian Portuguese\n"
@@ -15,14 +15,14 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
-#: agent/__main__.py:40 agent/runtime.py:89 agent/status.py:419
+#: agent/__main__.py:40 agent/runtime.py:88 agent/status.py:424
 #, python-format
 msgid "%(n)d hallazgo nuevo"
 msgid_plural "%(n)d hallazgos nuevos"
 msgstr[0] "%(n)d nova descoberta"
 msgstr[1] "%(n)d novas descobertas"
 
-#: agent/__main__.py:41 agent/runtime.py:90 agent/status.py:421
+#: agent/__main__.py:41 agent/runtime.py:89 agent/status.py:426
 #, python-format
 msgid "%(n)d ya conocido."
 msgid_plural "%(n)d ya conocidos."
@@ -46,31 +46,31 @@ msgstr "[agente] Varredura enviada em %(batches)s: %(created)s, %(refreshed)s"
 msgid "[agente] Barrido enviado: %(created)s, %(refreshed)s"
 msgstr "[agente] Varredura enviada: %(created)s, %(refreshed)s"
 
-#: agent/__main__.py:61 agent/control.py:435 agent/runtime.py:441
+#: agent/__main__.py:61 agent/control.py:435 agent/runtime.py:440
 #, python-format
 msgid "Error inesperado: %(error)s"
 msgstr "Erro inesperado: %(error)s"
 
-#: agent/__main__.py:217 agent/__main__.py:261 agent/__main__.py:268
-#: agent/control.py:423 agent/runtime.py:243
+#: agent/__main__.py:228 agent/__main__.py:272 agent/__main__.py:279
+#: agent/control.py:423 agent/runtime.py:242
 #, python-format
 msgid "[agente] %(error)s"
 msgstr "[agente] %(error)s"
 
-#: agent/__main__.py:231
+#: agent/__main__.py:242
 #, python-format
 msgid "[agente] Conectado a %(url)s con el protocolo 2."
 msgstr "[agente] Conectado a %(url)s com o protocolo 2."
 
-#: agent/__main__.py:235
+#: agent/__main__.py:246
 msgid "[agente] El servidor solo habla el protocolo 1: se sigue con el bucle de siempre."
 msgstr "[agente] O servidor só fala o protocolo 1: segue-se com o ciclo de sempre."
 
-#: agent/__main__.py:237
+#: agent/__main__.py:248
 msgid "[agente] Detenido."
 msgstr "[agente] Parado."
 
-#: agent/__main__.py:252
+#: agent/__main__.py:263
 #, python-format
 msgid "[agente] Empujando a %(url)s cada ~%(seconds)d s."
 msgstr "[agente] Enviando para %(url)s a cada ~%(seconds)d s."
@@ -94,7 +94,12 @@ msgstr "O servidor respondeu algo que não é um objeto JSON."
 msgid "La dirección del portal es http:// hacia %(host)s: el latido lleva las credenciales de descubrimiento y viajarían en claro. Usa https:// (con CENYA_CA_BUNDLE si el certificado es propio) o, solo para pruebas, CENYA_INSECURE_HTTP=1."
 msgstr "O endereço do portal é http:// para %(host)s: o batimento leva as credenciais de descoberta, que trafegariam sem criptografia. Use https:// (com CENYA_CA_BUNDLE se o certificado for próprio) ou, só para testes, CENYA_INSECURE_HTTP=1."
 
-#: agent/config.py:128
+#: agent/config.py:130
+#, python-format
+msgid "El enrolamiento de este agente estaba en una carpeta sin proteger (%(path)s) y no es de fiar: se ha apartado sin usarlo. Enrola el equipo de nuevo: cenya-agent enroll <cadena> --force"
+msgstr "O registro deste agente estava em uma pasta desprotegida (%(path)s) e não é confiável: foi deixado de lado sem ser usado. Registre esta máquina novamente: cenya-agent enroll <cadeia> --force"
+
+#: agent/config.py:139
 msgid "Este agente no está enrolado. En Ajustes → Agentes genera una cadena de conexión y ejecuta: cenya-agent enroll <cadena>"
 msgstr "Este agente não está registrado. Em Configurações → Agentes, gere uma cadeia de conexão e execute: cenya-agent enroll <cadeia>"
 
@@ -130,34 +135,34 @@ msgstr "%(error)s O código já foi usado: gere outra cadeia em Configurações 
 msgid "[agente] Enrolado como «%(name)s» en %(url)s."
 msgstr "[agente] Registrado como «%(name)s» em %(url)s."
 
-#: agent/enroll.py:107
+#: agent/enroll.py:117
 #, python-format
 msgid "Este equipo ya está enrolado como «%(name)s» en %(url)s. Para enrolarlo de nuevo, añade --force."
 msgstr "Esta máquina já está registrada como «%(name)s» em %(url)s. Para registrá-la de novo, adicione --force."
 
-#: agent/enroll.py:115
+#: agent/enroll.py:125
 msgid "Cadena de conexión (la de Ajustes → Agentes): "
 msgstr "Cadeia de conexão (a de Configurações → Agentes): "
 
-#: agent/enroll.py:118
+#: agent/enroll.py:128
 msgid "Falta la cadena de conexión: cenya-agent enroll cenya://portal.midominio.com/XXXX-XXXX-XXXX"
 msgstr "Falta a cadeia de conexão: cenya-agent enroll cenya://portal.minhaempresa.com.br/XXXX-XXXX-XXXX"
 
-#: agent/enroll.py:126
+#: agent/enroll.py:136
 msgid "El enrolamiento ha fallado."
 msgstr "O registro falhou."
 
-#: agent/enroll.py:128
+#: agent/enroll.py:138
 #, python-format
 msgid "Agente «%(name)s» enrolado en %(url)s."
 msgstr "Agente «%(name)s» registrado em %(url)s."
 
-#: agent/enroll.py:129
+#: agent/enroll.py:139
 #, python-format
 msgid "El token queda guardado de forma protegida en %(path)s; no hace falta copiarlo."
 msgstr "O token fica guardado de forma protegida em %(path)s; não é preciso copiá-lo."
 
-#: agent/enroll.py:130
+#: agent/enroll.py:140
 msgid "Para dejarlo funcionando, ejecuta: cenya-agent"
 msgstr "Para deixá-lo em funcionamento, execute: cenya-agent"
 
@@ -321,133 +326,148 @@ msgstr[1] "%(n)d objetos exportados para %(path)s."
 msgid "Súbelo en Cenya: Ajustes → Importar → «NetBox, desde un fichero»."
 msgstr "Envie-o no Cenya: Configurações → Importar → «NetBox, de um arquivo»."
 
-#: agent/runtime.py:87
+#: agent/runtime.py:86
 #, python-format
 msgid "[agente] Tarea %(task)s enviada: %(created)s, %(refreshed)s"
 msgstr "[agente] Tarefa %(task)s enviada: %(created)s, %(refreshed)s"
 
-#: agent/runtime.py:429
+#: agent/runtime.py:428
 #, python-format
 msgid "[agente] Tarea %(task)s guardada en la cola local: se enviará cuando el servidor conteste."
 msgstr "[agente] Tarefa %(task)s guardada na fila local: será enviada quando o servidor responder."
 
-#: agent/status.py:297
+#: agent/status.py:302
 msgid "hace menos de un minuto"
 msgstr "há menos de um minuto"
 
-#: agent/status.py:300
+#: agent/status.py:305
 #, python-format
 msgid "hace %(n)d minuto"
 msgid_plural "hace %(n)d minutos"
 msgstr[0] "há %(n)d minuto"
 msgstr[1] "há %(n)d minutos"
 
-#: agent/status.py:303
+#: agent/status.py:308
 #, python-format
 msgid "hace %(n)d hora"
 msgid_plural "hace %(n)d horas"
 msgstr[0] "há %(n)d hora"
 msgstr[1] "há %(n)d horas"
 
-#: agent/status.py:305
+#: agent/status.py:310
 #, python-format
 msgid "hace %(n)d día"
 msgid_plural "hace %(n)d días"
 msgstr[0] "há %(n)d dia"
 msgstr[1] "há %(n)d dias"
 
-#: agent/status.py:321 agent/status.py:336
+#: agent/status.py:326 agent/status.py:341
 msgid "Agente detenido"
 msgstr "Agente parado"
 
-#: agent/status.py:321
+#: agent/status.py:326
 msgid "El servicio está detenido y no hay datos de su última ejecución."
 msgstr "O serviço está parado e não há dados da última execução."
 
-#: agent/status.py:323
+#: agent/status.py:328
 msgid "Servicio no instalado"
 msgstr "Serviço não instalado"
 
-#: agent/status.py:323
+#: agent/status.py:328
 msgid "El servicio del agente no está instalado en este equipo."
 msgstr "O serviço do agente não está instalado neste computador."
 
-#: agent/status.py:324
+#: agent/status.py:329
 msgid "Sin datos del agente"
 msgstr "Sem dados do agente"
 
-#: agent/status.py:324
+#: agent/status.py:329
 msgid "No se encuentra el fichero de estado: el agente no ha arrancado nunca aquí, o no se puede leer."
 msgstr "O arquivo de status não foi encontrado: o agente nunca foi iniciado aqui, ou o arquivo não pode ser lido."
 
-#: agent/status.py:335
+#: agent/status.py:340
 msgid "Agente detenido por un error"
 msgstr "Agente parado por um erro"
 
-#: agent/status.py:340
+#: agent/status.py:345
 msgid "hace un tiempo desconocido"
 msgstr "há um tempo desconhecido"
 
-#: agent/status.py:343
+#: agent/status.py:348
 msgid "Sin noticias del agente"
 msgstr "Sem notícias do agente"
 
-#: agent/status.py:345
+#: agent/status.py:350
 #, python-format
 msgid "La última noticia del agente es de %(ago)s: puede haberse detenido, o el fichero de estado ya no se actualiza."
 msgstr "Última notícia do agente: %(ago)s. Ele pode ter parado, ou o arquivo de status não é mais atualizado."
 
-#: agent/status.py:355
+#: agent/status.py:360
 msgid "No puede hablar con el servidor"
 msgstr "Sem conexão com o servidor"
 
-#: agent/status.py:361
+#: agent/status.py:366
 msgid "Barriendo la red"
 msgstr "Varrendo a rede"
 
-#: agent/status.py:362
+#: agent/status.py:367
 #, python-format
 msgid "Paso actual: %(step)s"
 msgstr "Etapa atual: %(step)s"
 
-#: agent/status.py:365
+#: agent/status.py:370
 msgid "Arrancando"
 msgstr "Iniciando"
 
-#: agent/status.py:366
+#: agent/status.py:371
 msgid "En marcha"
 msgstr "Em execução"
 
-#: agent/status.py:374
+#: agent/status.py:379
 #, python-format
 msgid "Cenya Agent: %(headline)s"
 msgstr "Cenya Agent: %(headline)s"
 
-#: agent/status.py:416
+#: agent/status.py:421
 #, python-format
 msgid "Último barrido: %(clock)s (%(ago)s)."
 msgstr "Última varredura: %(clock)s (%(ago)s)."
 
-#: agent/status.py:429
+#: agent/status.py:434
 #, python-format
 msgid "Salió parcial, con %(n)d aviso (detalle en Ajustes → Agentes)."
 msgid_plural "Salió parcial, con %(n)d avisos (detalle en Ajustes → Agentes)."
 msgstr[0] "Saiu parcial, com %(n)d aviso (detalhes em Configurações → Agentes)."
 msgstr[1] "Saiu parcial, com %(n)d avisos (detalhes em Configurações → Agentes)."
 
-#: agent/status.py:436
+#: agent/status.py:441
 msgid "Todavía no ha terminado ningún barrido."
 msgstr "Ainda nenhuma varredura terminou."
 
-#: agent/status.py:439
+#: agent/status.py:444
 #, python-format
 msgid "Próximo barrido hacia las %(clock)s."
 msgstr "Próxima varredura por volta das %(clock)s."
 
-#: agent/store.py:132
+#: agent/store.py:572
 #, python-format
 msgid "No se pudo guardar el enrolamiento de forma segura en %(path)s: %(error)s"
 msgstr "Não foi possível salvar o registro de forma segura em %(path)s: %(error)s"
+
+#: agent/store.py:600
+#, python-format
+msgid "[agente] La carpeta %(path)s no estaba protegida: se ha apartado sin usarlo lo que otro usuario pudo dejar en ella (%(names)s), y ya queda protegida."
+msgstr "[agente] A pasta %(path)s não estava protegida: o que outro usuário pode ter deixado nela foi deixado de lado sem ser usado (%(names)s), e agora ela está protegida."
+
+#: agent/store.py:629
+#, python-format
+msgid "No se pudo apartar %(path)s, que no es de fiar: %(error)s"
+msgstr "Não foi possível deixar de lado %(path)s, que não é confiável: %(error)s"
+
+#: agent/store.py:654
+#, python-format
+msgid "La carpeta %(path)s no está protegida y no se puede proteger (%(error)s): el agente no lee ni guarda en ella su token ni sus credenciales. Ejecútalo como administrador o como servicio."
+msgstr "A pasta %(path)s não está protegida e não pode ser protegida (%(error)s): o agente não lê nem guarda nela seu token nem suas credenciais. Execute-o como administrador ou como serviço."
 
 #: agent/tray.py:175
 #, python-format
@@ -499,24 +519,24 @@ msgstr "%(dll)s não foi encontrado: o Python com que este ambiente foi criado n
 msgid "No se puede reemplazar %(file)s: detén el servicio antes de actualizarlo (%(command)s stop)."
 msgstr "Não é possível substituir %(file)s: pare o serviço antes de atualizá-lo (%(command)s stop)."
 
-#: agent/winservice.py:321
+#: agent/winservice.py:312
 msgid "Este equipo no está enrolado y en esta consola no hay ningún token: el servicio no podría arrancar. Ejecuta antes cenya-agent enroll <cadena> y vuelve a instalar."
 msgstr "Esta máquina não está registrada e não há nenhum token neste console: o serviço não conseguiria iniciar. Execute antes cenya-agent enroll <cadeia> e instale de novo."
 
-#: agent/winservice.py:327
+#: agent/winservice.py:318
 #, python-format
 msgid "Variables guardadas en el servicio: %(names)s"
 msgstr "Variáveis salvas no serviço: %(names)s"
 
-#: agent/winservice.py:329
+#: agent/winservice.py:320
 msgid "Sin variables CENYA_* en esta consola: se dejan las que ya tuviera el servicio."
 msgstr "Sem variáveis CENYA_* neste console: ficam as que o serviço já tinha."
 
-#: agent/winservice.py:331
+#: agent/winservice.py:322
 msgid "La clave del servicio queda legible solo por SYSTEM y Administradores."
 msgstr "A chave de registro do serviço agora só pode ser lida por SYSTEM e Administradores."
 
-#: agent/winservice.py:336
+#: agent/winservice.py:327
 #, python-format
 msgid "Estado del agente en %(path)s (lo escribe el servicio; lo lee el icono de bandeja)."
 msgstr "Status do agente em %(path)s (gravado pelo serviço, lido pelo ícone da bandeja)."

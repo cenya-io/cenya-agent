@@ -122,6 +122,17 @@ def from_env(environ: dict[str, str] | None = None) -> Config:
         if enrolled is not None:
             token = enrolled.token
             url = url or enrolled.url
+    if not token and store.untrusted_enrollment(env):
+        # Lo apartó `store.secure_state_dir`: estaba en una carpeta donde
+        # cualquier usuario podía escribir, así que no se sabe de quién es.
+        raise SystemExit(
+            _t(
+                "El enrolamiento de este agente estaba en una carpeta sin proteger (%(path)s) y no "
+                "es de fiar: se ha apartado sin usarlo. Enrola el equipo de nuevo: "
+                "cenya-agent enroll <cadena> --force"
+            )
+            % {"path": store.state_dir(env)}
+        )
     if not token:
         raise SystemExit(
             _t(

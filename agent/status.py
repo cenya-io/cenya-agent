@@ -38,6 +38,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
+from agent import store
 from agent.i18n import _t, _tn
 
 ENV_VAR = "CENYA_STATUS_FILE"
@@ -113,6 +114,10 @@ def _write(target: Path, fields: dict[str, Any]) -> None:
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
                 json.dump(current, handle, ensure_ascii=False, indent=1)
+            # En la carpeta protegida del agente nada hereda la lectura para
+            # Usuarios: este fichero la lleva explícita, porque el icono de
+            # bandeja lo lee con la cuenta de quien tiene la sesión abierta.
+            store.protect_status_file(Path(temporary))
             # En Windows, reemplazar un fichero que el icono tiene abierto en
             # ese mismo instante falla: se reintenta un momento antes de
             # rendirse, y rendirse solo cuesta una actualización.
