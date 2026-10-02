@@ -444,7 +444,7 @@ MAX_CONFIG_BYTES = 256 * 1024
 
 
 def interrogate(
-    host: str, credentials: list[creds.Credential]
+    host: str, credentials: list[creds.Credential], logins: tasking.Logins | None = None
 ) -> tuple[dict[str, Any], creds.Credential | None]:
     """Lo que ese equipo cuenta de sí mismo, y con qué credencial se entró.
 
@@ -456,19 +456,15 @@ def interrogate(
     La credencial vuelve con los datos porque la captura de configuración
     reutiliza **exactamente la que funcionó**: probar otras sería engordar la
     misma cuenta de intentos fallidos que este bucle se cuida de no engordar.
+
+    Cada inicio de sesión pasa por `logins` (el límite global de credenciales,
+    spec 2.3): una credencial suspendida se salta sin intentarlo.
     """
     for credential in credentials:
         connected = False
         for family in FAMILIES:
-            answer = ssh.run(
-                host=host,
-                username=credential.username,
-                secret=credential.secret,
-                port=credential.port,
-                key_file=credential.key_file,
-                command=family.command,
-            )
-            if not answer.connected:
+            answer = _login(logins, host, credential, family.command)
+            if answer is tasking.SKIPPED or not answer.connected:
                 break
             connected = True
             data = family.parse(answer.output)
@@ -482,17 +478,30 @@ def interrogate(
     return {}, None
 
 
-def fetch_config(host: str, credential: creds.Credential, command: str) -> str:
+def _login(logins: tasking.Logins | None, host: str, credential: creds.Credential, command: str) -> Any:
+    """Un `ssh.run`, por el límite de credenciales si lo hay. `tasking.SKIPPED` si no toca."""
+
+    def call() -> ssh.Answer:
+        return ssh.run(
+            host=host,
+            username=credential.username,
+            secret=credential.secret,
+            port=credential.port,
+            key_file=credential.key_file,
+            command=command,
+        )
+
+    if logins is None:
+        return call()
+    return logins.run(credential, call, ssh.outcome)
+
+
+def fetch_config(
+    host: str, credential: creds.Credential, command: str, logins: tasking.Logins | None = None
+) -> str:
     """La configuración del equipo, o "". Nunca truncada en silencio."""
-    answer = ssh.run(
-        host=host,
-        username=credential.username,
-        secret=credential.secret,
-        port=credential.port,
-        key_file=credential.key_file,
-        command=command,
-    )
-    if not answer.connected:
+    answer = _login(logins, host, credential, command)
+    if answer is tasking.SKIPPED or not answer.connected:
         return ""
     output = answer.output or ""
     if len(output.encode()) > MAX_CONFIG_BYTES:
@@ -605,7 +614,11 @@ class SshCollector:
                     # La memoria dice que hoy no toca: ni un intento, y no es
                     # un error que anotar.
                     return {}, None
-                data, credential = interrogate(ip, order)
+                logins = tasking.Logins(ctx, self.name, "ssh", ip, by_ip[ip])
+                data, credential = interrogate(ip, order, logins)
+                # Una credencial saltada por el límite global no es una ronda
+                # entera: no se apunta como fallida.
+                full = full and not logins.skipped
                 tasking.settle(ctx, ip, by_ip[ip], "ssh", credential, attempted=True, full=full)
                 return data, credential
             finally:
@@ -667,7 +680,7 @@ class SshCollector:
             command = CAPTURE_COMMANDS.get(data.get("family", ""), "")
             if not capture or credential is None or not command:
                 continue
-            content = fetch_config(ip, credential, command)
+            content = fetch_config(ip, credential, command, tasking.Logins(ctx, self.name, "ssh", ip, sweep_mac))
             if not content.strip():
                 continue
             findings.append(
@@ -716,9 +729,9 @@ class SshCollector:
         progress = tasking.Progress(ctx, self.name, len(jobs))
 
         def fetch(job: tuple[str, str, dict, creds.Credential, str]) -> str:
-            ip, _mac, _entry, credential, command = job
+            ip, mac, _entry, credential, command = job
             try:
-                return fetch_config(ip, credential, command)
+                return fetch_config(ip, credential, command, tasking.Logins(ctx, self.name, "ssh", ip, mac))
             finally:
                 progress.tick()
 

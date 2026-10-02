@@ -41,7 +41,29 @@ MAX_HOSTS_CROSSED = 50
 
 
 class HypervisorError(Exception):
-    """No se pudo hablar con el hipervisor, o no dejó entrar."""
+    """No se pudo hablar con el hipervisor, o no dejó entrar.
+
+    Para el límite de credenciales (spec 2.3) dice además cómo fue:
+    `unreachable` si no se llegó a mandar la credencial (nada contestó, TLS no
+    se fió), `logged_in` si entró y lo que falló fue otra cosa, y `status` el
+    código HTTP si lo hubo. Sin ninguna de las dos marcas, cuenta como un
+    inicio de sesión fallido: es lo prudente.
+    """
+
+    def __init__(
+        self, message: str, *, status: int | None = None, unreachable: bool = False, logged_in: bool = False
+    ) -> None:
+        super().__init__(message)
+        self.status = status
+        self.unreachable = unreachable
+        self.logged_in = logged_in
+
+
+def login_outcome(error: "HypervisorError | None") -> str:
+    """El veredicto de un `login()` para el límite de credenciales (`agent.memory`)."""
+    if error is None or error.logged_in:
+        return "ok"
+    return "unreachable" if error.unreachable else "auth_failed"
 
 
 def _context(ca_file: str) -> ssl.SSLContext:
@@ -82,8 +104,13 @@ class RestClient:
             with self._opener.open(request, timeout=TIMEOUT_SECONDS) as response:
                 raw = response.read().decode(errors="replace")
         except urllib.error.HTTPError as exc:
-            raise HypervisorError(f"{exc.code} en {path}") from exc
-        except (urllib.error.URLError, TimeoutError, ssl.SSLError) as exc:
+            raise HypervisorError(f"{exc.code} en {path}", status=exc.code) from exc
+        except urllib.error.URLError as exc:
+            # Al conectar o al mandar (TLS incluido): la credencial no llegó a
+            # evaluarse.
+            raise HypervisorError(str(getattr(exc, "reason", exc)), unreachable=True) from exc
+        except (TimeoutError, ssl.SSLError) as exc:
+            # Esperando la respuesta, con la petición ya enviada: cuenta.
             raise HypervisorError(str(getattr(exc, "reason", exc))) from exc
         if not raw:
             return None
@@ -143,12 +170,20 @@ class VMwareClient:
                 )
             except HypervisorError as exc:
                 last = exc
-                continue
+                if exc.status == 404:
+                    continue  # un vCenter 6.7: la sesión está en la otra ruta
+                # Un 401 (o cualquier otra cosa) no se repite en la otra ruta:
+                # sería un segundo inicio de sesión fallido de la misma cuenta.
+                raise
             token = answer.get("value") if isinstance(answer, dict) else answer
             if isinstance(token, str) and token:
                 self.token = token
                 self.prefix = VMWARE_PREFIXES[path]
                 return
+        if isinstance(last, HypervisorError) and last.status == 404:
+            # Ninguna de las dos rutas existe: no es un vCenter, y nadie
+            # evaluó la credencial.
+            raise HypervisorError(str(last), status=404, unreachable=True)
         raise HypervisorError(str(last) if last else "el vCenter no devolvió sesión")
 
     def _get(self, path: str) -> Any:

@@ -71,19 +71,27 @@ def interrogate(host: str, port: int, credentials: list[creds.Credential], ctx: 
 
 
 def interrogate_with(
-    host: str, port: int, credentials: list[creds.Credential], ctx: dict
+    host: str, port: int, credentials: list[creds.Credential], ctx: dict, logins: tasking.Logins | None = None
 ) -> tuple[dict[str, Any], creds.Credential | None]:
     """``interrogate``, y además con qué credencial se entró: la memoria la
-    recuerda para empezar por ella la próxima vez."""
+    recuerda para empezar por ella la próxima vez.
+
+    Cada intento pasa por `logins` (el límite global de credenciales, spec
+    2.3): es aquí donde una clave de dominio equivocada bloquearía la cuenta.
+    """
     for credential in credentials:
-        answer = winrm.query(
-            host=host,
-            username=credential.username,
-            secret=credential.secret,
-            port=credential.port or port,
-            ca_file=creds.ca_file_for(ctx, credential),
-        )
-        if answer.connected:
+
+        def call(credential: creds.Credential = credential) -> winrm.Answer:
+            return winrm.query(
+                host=host,
+                username=credential.username,
+                secret=credential.secret,
+                port=credential.port or port,
+                ca_file=creds.ca_file_for(ctx, credential),
+            )
+
+        answer = call() if logins is None else logins.run(credential, call, winrm.outcome)
+        if answer is not tasking.SKIPPED and answer.connected:
             return answer.data or {}, credential
     return {}, None
 
@@ -167,7 +175,9 @@ class WinrmCollector:
                     # La memoria dice que hoy no toca: ni un intento contra un
                     # dominio que cuenta los fallos.
                     return {}
-                data, credential = interrogate_with(ip, port, order, ctx)
+                logins = tasking.Logins(ctx, self.name, "winrm", ip, by_ip[ip])
+                data, credential = interrogate_with(ip, port, order, ctx, logins)
+                full = full and not logins.skipped
                 tasking.settle(ctx, ip, by_ip[ip], "winrm", credential, attempted=True, full=full)
                 return data
             finally:

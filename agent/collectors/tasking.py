@@ -23,6 +23,7 @@ from typing import Any
 
 from agent import credentials as creds
 from agent import net
+from agent.notes import collector_note
 
 
 def task(ctx: dict) -> str | None:
@@ -184,6 +185,91 @@ def settle(
         _guarded(mem.record_success, key, protocol, credential, now())
     elif attempted and full:
         _guarded(mem.record_round_failed, key, protocol, now())
+
+
+#: Lo que devuelve `Logins.run` cuando el cortacircuitos dice que no se pruebe.
+SKIPPED = object()
+
+#: Los veredictos de un intento (los mismos que `agent.memory`).
+OK = "ok"
+AUTH_FAILED = "auth_failed"
+UNREACHABLE = "unreachable"
+
+
+class Logins:
+    """The logins of one collector against one host, through the credential breaker.
+
+    Cada intento se reserva antes (`Memory.reserve`) y se cierra después con
+    su veredicto (`outcome(resultado)`: `OK`, `AUTH_FAILED` o `UNREACHABLE`).
+    Sin memoria en el contexto (o una que no sabe de esto), se intenta sin
+    más, como siempre. Una credencial suspendida no se prueba y se anota una
+    vez por ejecución (`credential_suspended`); `skipped` dice si eso pasó, y
+    entonces la ronda contra ese equipo no fue entera.
+    """
+
+    def __init__(self, ctx: dict, collector: str, protocol: str, ip: str, mac: str = "", *, explicit: bool = False) -> None:
+        self.ctx = ctx
+        self.collector = collector
+        self.protocol = protocol
+        self.explicit = explicit
+        self.skipped = False
+        mem = memory(ctx)
+        self._memory = mem if mem is not None and hasattr(mem, "reserve") else None
+        self._key = host_key(ctx, ip, mac) if self._memory is not None and (ip or mac) else ""
+
+    def run(self, credential: creds.Credential, call: Any, outcome: Any) -> Any:
+        mem = self._memory
+        if mem is None:
+            return call()
+        remembered = bool(self._key) and _guarded(mem.remembered, self._key, self.protocol, default="") == credential.ident
+        attempt = _guarded(
+            mem.reserve,
+            credential.ident,
+            now(),
+            host_key=self._key,
+            remembered=remembered,
+            explicit=self.explicit,
+            default=False,
+        )
+        if attempt is False:
+            return call()  # la memoria falló: es prescindible, se intenta como siempre
+        if attempt is None:
+            self.skipped = True
+            note_suspended(self.ctx, self.collector, credential)
+            return SKIPPED
+        verdict = AUTH_FAILED  # ante la duda, un fallo de autenticación: es lo prudente
+        try:
+            result = call()
+            verdict = outcome(result)
+            return result
+        finally:
+            if _guarded(mem.finish, attempt, verdict, now(), default=False):
+                note_suspended(self.ctx, self.collector, credential)
+
+
+_NOTED_LOCK = threading.Lock()
+
+
+def note_suspended(ctx: dict, collector: str, credential: creds.Credential) -> None:
+    """La nota `credential_suspended`, una sola vez por credencial y ejecución."""
+    with _NOTED_LOCK:
+        noted = ctx.setdefault("_suspended_noted", set())
+        if credential.ident in noted:
+            return
+        noted.add(credential.ident)
+    mem = memory(ctx)
+    failures = _guarded(mem.failures, credential.ident, default=0) if mem is not None else 0
+    name = credential.label or credential.username
+    ctx.setdefault("errors", []).append(
+        collector_note(
+            collector,
+            "credential_suspended",
+            f"la credencial «{name}» ha fallado {failures} veces y no se volverá a probar hasta que "
+            "se cambie en Ajustes -> Agentes o pasen 24 horas",
+            name=name,
+            failures=failures,
+        )
+    )
 
 
 def flag(ctx: dict, ip: str, mac: str, **flags: Any) -> None:

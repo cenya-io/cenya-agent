@@ -21,6 +21,8 @@ from __future__ import annotations
 import ipaddress
 import json
 import threading
+import time
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable
@@ -35,6 +37,36 @@ FORGET_AFTER = timedelta(days=30)
 #: para no sumar intentos fallidos cada pocos minutos, lo bastante corto para
 #: que un equipo nuevo con credencial nueva no espere una semana.
 ROUND_COOLDOWN = timedelta(hours=24)
+
+# --- El cortacircuitos de credenciales (spec 2.3) --------------------------------
+#
+# La memoria por equipo no basta contra un dominio: UNA credencial equivocada
+# probada contra cincuenta Windows son cincuenta inicios de sesión fallidos de
+# la misma cuenta en un solo inventario, y el Directorio Activo la bloquea. Este
+# límite es global, por credencial (`ident`, nunca el secreto).
+
+#: Intentos fallidos en total, entre todos los equipos, que se le consienten a
+#: una credencial que nunca ha entrado («sin probar») antes de suspenderla.
+UNPROVEN_FAILURES = 3
+#: Equipos distintos donde una credencial que ya entró (y era la recordada)
+#: falla antes de suspenderla: lo probable es que le hayan cambiado la clave.
+CHANGED_PASSWORD_HOSTS = 3
+#: Cuánto dura una suspensión si nadie toca las credenciales.
+SUSPENSION = timedelta(hours=24)
+#: Una credencial que entró hace menos de esto no se frena en los equipos donde
+#: es la recordada. Pasado este tiempo, mientras no vuelva a entrar, solo
+#: `CHANGED_PASSWORD_HOSTS` intentos a la vez en esos equipos: si le cambiaron
+#: la clave, no hay diez fallos en vuelo cuando llega el tercero.
+PROVEN_TRUST = timedelta(hours=1)
+#: Lo más que un hilo espera su turno antes de dejarlo (y saltarse esa
+#: credencial en ese equipo). Cada intento tiene su propio tope de tiempo, así
+#: que esperar más de esto es que algo va muy mal.
+MAX_WAIT_SECONDS = 300.0
+
+#: Cómo acabó un intento de entrar (`Memory.finish`).
+OK = "ok"
+AUTH_FAILED = "auth_failed"
+UNREACHABLE = "unreachable"
 
 VERSION = 1
 
@@ -113,6 +145,39 @@ def _clean_entry(raw: Any) -> dict[str, Any] | None:
     return entry
 
 
+def _blank_credential() -> dict[str, Any]:
+    return {"proven": False, "failures": 0, "hosts": [], "suspended_at": "", "ok_at": "", "seen_at": ""}
+
+
+def _clean_credential(raw: Any) -> dict[str, Any] | None:
+    """Un registro del cortacircuitos leído del disco; lo raro, fuera."""
+    if not isinstance(raw, dict):
+        return None
+    record = _blank_credential()
+    record["proven"] = raw.get("proven") is True
+    failures = raw.get("failures")
+    record["failures"] = failures if isinstance(failures, int) and not isinstance(failures, bool) and failures > 0 else 0
+    hosts = raw.get("hosts")
+    record["hosts"] = sorted({h for h in hosts if isinstance(h, str) and h}) if isinstance(hosts, list) else []
+    for name in ("suspended_at", "ok_at", "seen_at"):
+        record[name] = _text(raw.get(name)) if _parse(raw.get(name)) else ""
+    return record
+
+
+@dataclass
+class Attempt:
+    """Un intento de entrar reservado con `Memory.reserve`: se cierra con `finish`."""
+
+    ident: str
+    host_key: str
+    remembered: bool
+    explicit: bool
+    #: Ocupa uno de los intentos de una credencial sin probar.
+    budget: bool = False
+    #: Ocupa uno de los intentos a la vez en equipos donde es la recordada.
+    throttled: bool = False
+
+
 class Memory:
     """Hosts seen, their flags, and the credential that worked on each.
 
@@ -123,8 +188,14 @@ class Memory:
     def __init__(self, path: Path | None = None) -> None:
         self._path = Path(path) if path is not None else None
         self._lock = threading.RLock()
+        #: Para que quien espera turno en `reserve` se entere de cada `finish`.
+        self._turns = threading.Condition(self._lock)
         self._etag = ""
         self._hosts: dict[str, dict[str, Any]] = {}
+        #: El cortacircuitos, por `ident` (sin secretos). Se guarda en disco.
+        self._credentials: dict[str, dict[str, Any]] = {}
+        #: Los intentos en vuelo, por `ident`: solo en memoria, nunca en disco.
+        self._pending: dict[str, list[int]] = {}
         #: El último «ahora» que nos han dicho. Sirve para fechar lo que se
         #: crea sin fecha (`flag`) con el mismo reloj que el resto.
         self._clock: datetime | None = None
@@ -150,6 +221,12 @@ class Memory:
                 entry = _clean_entry(value)
                 if isinstance(key, str) and key and entry is not None:
                     memory._hosts[key] = entry
+        credentials = raw.get("credentials")
+        if isinstance(credentials, dict):
+            for ident, value in credentials.items():
+                record = _clean_credential(value)
+                if isinstance(ident, str) and ident and record is not None:
+                    memory._credentials[ident] = record
         return memory
 
     def detach(self) -> "Memory":
@@ -184,6 +261,7 @@ class Memory:
             "version": VERSION,
             "etag": self._etag,
             "hosts": {key: json.loads(json.dumps(entry)) for key, entry in self._hosts.items()},
+            "credentials": {ident: json.loads(json.dumps(record)) for ident, record in self._credentials.items()},
         }
 
     # --- reloj y claves -----------------------------------------------------------
@@ -206,6 +284,13 @@ class Memory:
         limit = now - FORGET_AFTER
         for key in [k for k, entry in self._hosts.items() if (_parse(entry["last_seen"]) or limit) <= limit]:
             del self._hosts[key]
+        # Las credenciales que nadie ha usado en ese tiempo, igual (ya no
+        # están en la configuración); nunca una con intentos en vuelo.
+        for ident in [
+            i for i, record in self._credentials.items()
+            if (_parse(record["seen_at"]) or limit) <= limit and not any(self._pending.get(i, (0, 0)))
+        ]:
+            del self._credentials[ident]
 
     def _find(self, ip: str, mac: str) -> str | None:
         """La clave con la que ya se conoce ese equipo, si se conoce."""
@@ -398,7 +483,128 @@ class Memory:
             for entry in self._hosts.values():
                 for record in entry["creds"].values():
                     record["failed_at"] = ""
+            # Y el cortacircuitos: las suspensiones y las cuentas de fallos se
+            # levantan. Lo que entró sigue «probado»: el `id` del servidor
+            # cambia cuando cambia la credencial, y una que nunca entró sigue
+            # sin probar; un cambio de etag por otra cosa (la agenda) no puede
+            # dejar una credencial de dominio buena con el límite de tres.
+            for record in self._credentials.values():
+                record.update(failures=0, hosts=[], suspended_at="")
             self._etag = etag
+            self._turns.notify_all()
+
+    # --- el cortacircuitos (spec 2.3) ----------------------------------------------
+
+    def _credential(self, ident: str, now: datetime) -> dict[str, Any]:
+        record = self._credentials.get(ident)
+        if record is None:
+            record = self._credentials[ident] = _blank_credential()
+        record["seen_at"] = _iso(now)
+        suspended = _parse(record["suspended_at"])
+        if suspended is not None and now - suspended >= SUSPENSION:
+            # Pasado el día, otra oportunidad entera.
+            record.update(failures=0, hosts=[], suspended_at="")
+        return record
+
+    def _in_flight(self, ident: str) -> list[int]:
+        """[intentos sin probar en vuelo, intentos frenados en vuelo]."""
+        return self._pending.setdefault(ident, [0, 0])
+
+    def suspended(self, ident: str, now: datetime) -> bool:
+        """Whether that credential is suspended right now."""
+        with self._lock:
+            return bool(self._credential(ident, _utc(now))["suspended_at"])
+
+    def failures(self, ident: str) -> int:
+        """The failures that count for that credential's suspension (for its note)."""
+        with self._lock:
+            record = self._credentials.get(ident) or _blank_credential()
+            return len(record["hosts"]) if record["proven"] else record["failures"]
+
+    def reserve(
+        self,
+        ident: str,
+        now: datetime,
+        *,
+        host_key: str = "",
+        remembered: bool = False,
+        explicit: bool = False,
+        wait: float = MAX_WAIT_SECONDS,
+    ) -> Attempt | None:
+        """Ask before trying a credential. `None`: do not try it now.
+
+        Hay que pedirlo **antes** de cada intento y cerrarlo con `finish`
+        después: así el límite se cumple con diez hilos a la vez. Mientras los
+        intentos que ocupan el cupo están en vuelo, los demás **esperan** su
+        resultado en vez de saltarse el equipo: si uno entra, la credencial
+        queda probada y todos siguen; si fallan, queda suspendida y los que
+        esperaban reciben `None`.
+
+        `explicit` es una persona que lo pide (`probe`, `test_credential`):
+        puede probar una suspendida, una vez, y si entra la levanta.
+        """
+        now = _utc(now)
+        deadline = time.monotonic() + max(0.0, wait)
+        with self._turns:
+            while True:
+                record = self._credential(ident, now)
+                pending = self._in_flight(ident)
+                attempt = Attempt(ident, host_key, remembered, explicit)
+                if explicit:
+                    return attempt
+                if record["suspended_at"]:
+                    return None
+                if not record["proven"]:
+                    if record["failures"] + pending[0] < UNPROVEN_FAILURES:
+                        pending[0] += 1
+                        attempt.budget = True
+                        return attempt
+                else:
+                    ok_at = _parse(record["ok_at"])
+                    trusted = ok_at is not None and now - ok_at < PROVEN_TRUST
+                    if not remembered or trusted:
+                        return attempt
+                    if len(record["hosts"]) + pending[1] < CHANGED_PASSWORD_HOSTS:
+                        pending[1] += 1
+                        attempt.throttled = True
+                        return attempt
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return None
+                self._turns.wait(min(remaining, 1.0))
+
+    def finish(self, attempt: Attempt, outcome: str, now: datetime) -> bool:
+        """Close a reserved attempt. Returns whether this suspended the credential.
+
+        `outcome`: `OK`, `AUTH_FAILED` (el equipo contestó y no la aceptó), o
+        `UNREACHABLE` (no se llegó a autenticar: equipo apagado, puerto
+        cerrado, tiempo agotado antes de pedir la clave). Lo último no gasta
+        nada: se devuelve el cupo.
+        """
+        now = _utc(now)
+        with self._turns:
+            record = self._credential(attempt.ident, now)
+            pending = self._in_flight(attempt.ident)
+            if attempt.budget:
+                pending[0] = max(0, pending[0] - 1)
+            if attempt.throttled:
+                pending[1] = max(0, pending[1] - 1)
+            suspended_now = False
+            if outcome == OK:
+                record.update(proven=True, failures=0, hosts=[], suspended_at="", ok_at=_iso(now))
+            elif outcome == AUTH_FAILED:
+                if not record["proven"]:
+                    record["failures"] += 1
+                    limit_reached = record["failures"] >= UNPROVEN_FAILURES
+                else:
+                    if attempt.remembered and attempt.host_key and attempt.host_key not in record["hosts"]:
+                        record["hosts"] = sorted([*record["hosts"], attempt.host_key])
+                    limit_reached = len(record["hosts"]) >= CHANGED_PASSWORD_HOSTS
+                if limit_reached and not record["suspended_at"]:
+                    record["suspended_at"] = _iso(now)
+                    suspended_now = True
+            self._turns.notify_all()
+            return suspended_now
 
 
 class Excluded:

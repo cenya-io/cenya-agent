@@ -360,6 +360,50 @@ class Memory:
   ronda), no los aciertos.
 - Un equipo que no se ve en 30 días se olvida.
 
+**Límite global por credencial (cortacircuitos).** La regla por equipo no
+basta contra un dominio: una credencial equivocada probada contra M Windows
+son M inicios de sesión fallidos de la misma cuenta en un solo inventario. La
+memoria lleva además, por `ident` (sin secretos, en `memory.json`; un registro
+roto es «sin registro»), la salud de cada credencial, y la usan SSH, WinRM y
+los hipervisores (no SNMP):
+
+```python
+    def reserve(self, ident, now, *, host_key="", remembered=False,
+                explicit=False) -> Attempt | None: ...   # None: no probarla
+    def finish(self, attempt, outcome, now) -> bool: ...  # True: la ha suspendido
+    def suspended(self, ident, now) -> bool: ...
+```
+
+- **Sin probar** (nunca ha entrado): como mucho **3 fallos de autenticación
+  en total**, entre todos los equipos y protocolos; al tercero queda
+  **suspendida**. El límite vale con hilos en paralelo: cada intento se
+  reserva antes y se cierra después (`OK`, `AUTH_FAILED`, `UNREACHABLE`), y
+  mientras los que ocupan el cupo están en vuelo los demás esperan su
+  resultado (si uno entra, siguen todos; si fallan, se la saltan).
+- «No se pudo conectar» (equipo apagado, puerto cerrado, nombre que no
+  resuelve, TLS que no se fía, tiempo agotado *antes* de autenticar) devuelve
+  el cupo. Ante la duda, cuenta como fallo: es lo prudente.
+- **Probada** (ya entró alguna vez): no la limita en los equipos donde nunca
+  entró (una de dominio contra un Linux suelto no bloquea nada). Pero si falla
+  en **3 equipos distintos donde era la recordada**, lo probable es que le
+  hayan cambiado la clave: se suspende igual. Mientras no haya entrado en la
+  última hora, en esos equipos solo van 3 intentos a la vez.
+- Una suspensión dura hasta que cambia el etag de la configuración (alguien
+  tocó las credenciales) o pasan 24 h. Lo que entró sigue «probado» al cambiar
+  el etag.
+- Se avisa **una vez por ejecución** con la nota `credential_suspended`
+  (`name`: la etiqueta o el usuario, nunca el secreto; `failures`).
+- Un `probe` (o el futuro `test_credential`) lo pide una persona: puede probar
+  una credencial suspendida, una vez, y si entra la levanta. Sus fallos
+  cuentan igual.
+- La regla por equipo (la recordada primero, una ronda entera cada 24 h) sigue
+  igual; esto es un límite más, global. Una credencial saltada por el límite no
+  hace «entera» la ronda de ese equipo.
+- Para que «fallo» sea fiable: SSH usa un solo método por intento (1 fallo por
+  contraseña equivocada); WinRM no repite por `basic` una clave que NTLM ya
+  rechazó; vCenter no repite en `/rest` lo que `/api/session` rechazó (solo
+  si esa ruta no existe).
+
 `Credential` gana `ident` (el `id` del servidor; si no viene, un derivado
 estable de tipo, usuario, servidor, puerto, etiqueta y posición — nunca del
 secreto) y `scope`.

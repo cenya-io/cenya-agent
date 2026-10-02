@@ -94,7 +94,7 @@ class HyperVClient:
         de bloqueo del dominio, y no arreglaría nada.
         """
         if not winrm.AVAILABLE:
-            raise HypervisorError("falta pywinrm")
+            raise HypervisorError("falta pywinrm", unreachable=True)
         last_error = ""
         for transport in winrm.TRANSPORTS:
             try:
@@ -110,13 +110,21 @@ class HyperVClient:
                 result = session.run_ps(SCRIPT)
             except Exception as exc:  # noqa: BLE001 - pywinrm lanza de todo: HTTP, TLS, WSMan
                 last_error = f"{type(exc).__name__}: {exc}"
-                continue
+                if winrm.before_auth(exc):
+                    continue
+                # Como en `winrm.query`: una clave rechazada no se repite por
+                # otro transporte (sería otro fallo de la misma cuenta).
+                raise HypervisorError(last_error) from None
             if result.status_code != 0:
                 stderr = (result.std_err or b"").decode(errors="replace").strip()[:200]
-                raise HypervisorError(stderr or "el PowerShell falló sin decir por qué")
-            self._data = self._parse(result.std_out)
+                raise HypervisorError(stderr or "el PowerShell falló sin decir por qué", logged_in=True)
+            try:
+                self._data = self._parse(result.std_out)
+            except HypervisorError as exc:
+                # Entró: lo que falla es lo que contestó, no la credencial.
+                raise HypervisorError(str(exc), logged_in=True) from None
             return
-        raise HypervisorError(last_error or "no se pudo conectar")
+        raise HypervisorError(last_error or "no se pudo conectar", unreachable=True)
 
     def _parse(self, raw: bytes | str) -> dict[str, Any]:
         """El JSON del guion, ya comprobado.

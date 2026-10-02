@@ -98,8 +98,11 @@ class XcpNgClient:
             with self._opener.open(request, timeout=TIMEOUT_SECONDS) as response:
                 raw = response.read().decode(errors="replace")
         except urllib.error.HTTPError as exc:
-            raise HypervisorError(f"{exc.code} en {method}") from exc
-        except (urllib.error.URLError, TimeoutError, ssl.SSLError) as exc:
+            raise HypervisorError(f"{exc.code} en {method}", status=exc.code) from exc
+        except urllib.error.URLError as exc:
+            # Al conectar o al mandar: la credencial no llegó a evaluarse.
+            raise HypervisorError(str(getattr(exc, "reason", exc)), unreachable=True) from exc
+        except (TimeoutError, ssl.SSLError) as exc:
             raise HypervisorError(str(getattr(exc, "reason", exc))) from exc
         try:
             answer = json.loads(raw)

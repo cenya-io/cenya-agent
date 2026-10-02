@@ -113,7 +113,9 @@ class HypervisorCollector:
             if not self._allowed(ctx, credential, key, address):
                 return []
         try:
-            found = self._from(credential, ctx)
+            found = self._from(credential, ctx, key or address or credential.host)
+            if found is tasking.SKIPPED:
+                return []  # suspendida: lo dice su nota (`credential_suspended`)
         except hypervisor.HypervisorError as exc:
             # Un hipervisor caído o una contraseña cambiada no pueden tumbar
             # el barrido: se anota y se sigue con el siguiente. El detalle va
@@ -160,7 +162,13 @@ class HypervisorCollector:
         except Exception:  # noqa: BLE001
             pass
 
-    def _from(self, credential: creds.Credential, ctx: dict) -> list[Finding]:
+    def _from(self, credential: creds.Credential, ctx: dict, server: str) -> Any:
+        """Lo que da ese hipervisor, o `tasking.SKIPPED` si su credencial está suspendida.
+
+        El inicio de sesión pasa por el límite de credenciales (spec 2.3): una
+        cuenta de dominio en un Hyper-V o un vCenter con su SSO se bloquea igual
+        que contra un Windows suelto.
+        """
         client = CLIENTS[credential.kind](
             credential.host,
             credential.username,
@@ -168,13 +176,27 @@ class HypervisorCollector:
             port=credential.port,
             ca_file=creds.ca_file_for(ctx, credential),
         )
-        client.login()
+        logins = tasking.Logins(ctx, "hypervisors", credential.kind, server)
+        error = logins.run(credential, lambda: _login(client), hypervisor.login_outcome)
+        if error is tasking.SKIPPED:
+            return tasking.SKIPPED
+        if error is not None:
+            raise error
         platform = KIND_LABELS[credential.kind]
         findings = [_host_finding(host, platform, credential) for host in client.hosts()]
         findings.extend(
             _vm_finding(vm, platform, credential) for vm in client.virtual_machines()
         )
         return findings
+
+
+def _login(client: Any) -> hypervisor.HypervisorError | None:
+    """`client.login()`, con el error devuelto en vez de lanzado (para su veredicto)."""
+    try:
+        client.login()
+    except hypervisor.HypervisorError as exc:
+        return exc
+    return None
 
 
 def _host_finding(host: dict[str, Any], platform: str, credential: creds.Credential) -> Finding:

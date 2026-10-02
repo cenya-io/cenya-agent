@@ -161,6 +161,43 @@ class Answer:
     connected: bool
     output: str = ""
     error: str = ""
+    #: No se llegó a autenticar: equipo que no contesta, puerto cerrado, nombre
+    #: que no resuelve, clave de host cambiada, ningún método que use el
+    #: secreto. Solo cuando es **seguro**: ante la duda, `False`, y el intento
+    #: cuenta como fallido para el límite de credenciales (spec 2.3).
+    unreachable: bool = False
+
+
+#: Lo que `ssh` escribe cuando falla antes de pedir ninguna credencial.
+_BEFORE_AUTH = (
+    "connection refused",
+    "connection timed out",
+    "operation timed out",
+    "no route to host",
+    "network is unreachable",
+    "could not resolve hostname",
+    "name or service not known",
+    "no such host is known",
+    "host key verification failed",
+    "unable to negotiate",
+    "kex_exchange_identification",
+    "banner exchange",
+)
+
+
+def before_auth(stderr: str) -> bool:
+    """Whether `ssh` gave up before offering any credential (so nothing was spent)."""
+    text = (stderr or "").lower()
+    if "permission denied" in text or "authentication" in text or "too many" in text:
+        return False
+    return any(phrase in text for phrase in _BEFORE_AUTH)
+
+
+def outcome(answer: Answer) -> str:
+    """El veredicto de un intento para el límite de credenciales (`agent.memory`)."""
+    if answer.connected:
+        return "ok"
+    return "unreachable" if answer.unreachable else "auth_failed"
 
 
 #: Los dos métodos con los que se entrega una contraseña. Uno por intento.
@@ -289,15 +326,21 @@ def run(
     if mode == "askpass" and ("\n" in secret or "\r" in secret):
         # `ssh` lee la respuesta del askpass hasta el fin de línea: una
         # contraseña con uno llegaría cortada y fallaría sin explicación.
-        return Answer(connected=False, error="la contraseña contiene un salto de línea y no se puede entregar")
+        return Answer(
+            connected=False, error="la contraseña contiene un salto de línea y no se puede entregar", unreachable=True
+        )
     answer, stderr = _attempt(host, username, port, key_file, command, secret, mode, PASSWORD)
     if mode and not answer.connected:
         # Un solo reintento, y solo si el servidor ha dicho que `password` no
         # lo ofrece: entonces el primer intento no llegó a gastar nada, y el
         # mismo secreto va por `keyboard-interactive`, solo.
         offered = offered_methods(stderr)
-        if offered is not None and PASSWORD not in offered and KEYBOARD_INTERACTIVE in offered:
-            answer, _ = _attempt(host, username, port, key_file, command, secret, mode, KEYBOARD_INTERACTIVE)
+        if offered is not None and PASSWORD not in offered:
+            if KEYBOARD_INTERACTIVE in offered:
+                answer, _ = _attempt(host, username, port, key_file, command, secret, mode, KEYBOARD_INTERACTIVE)
+            else:
+                # Ni contraseña ni teclado: el secreto no llegó a ofrecerse.
+                answer = Answer(connected=False, error=answer.error, unreachable=True)
     return answer
 
 
@@ -333,12 +376,14 @@ def _attempt(
             env=environment_for(secret, mode),
         )
     except subprocess.TimeoutExpired:
+        # El tope duro llega después de conectar (el de conexión es menor): no
+        # se sabe si la clave llegó a pedirse, así que cuenta como intento.
         return Answer(connected=False, error="tiempo de espera agotado"), ""
     except OSError as exc:
-        return Answer(connected=False, error=str(exc)), ""
+        return Answer(connected=False, error=str(exc), unreachable=True), ""
     stderr = result.stderr or ""
     if result.returncode == SSH_FAILURE_CODE:
-        return Answer(connected=False, error=_reason(stderr)), stderr
+        return Answer(connected=False, error=_reason(stderr), unreachable=before_auth(stderr)), stderr
     return Answer(connected=True, output=result.stdout or "", error=stderr.strip()), stderr
 
 

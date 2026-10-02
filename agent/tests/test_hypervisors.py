@@ -182,7 +182,7 @@ class _Rest:
     ) -> Any:
         self.calls.append((method, path, dict(headers or {}), body))
         if path not in self.routes:
-            raise HypervisorError(f"404 en {path}")
+            raise HypervisorError(f"404 en {path}", status=404)
         answer = self.routes[path]
         if isinstance(answer, Exception):
             raise answer
@@ -332,7 +332,7 @@ class VMwareTests(unittest.TestCase):
 
     def test_wrong_credentials_raise_and_never_echo_the_password(self) -> None:
         """El error acaba en el informe de la ejecución, que se guarda."""
-        unauthorized = HypervisorError("401 en /api/session")
+        unauthorized = HypervisorError("401 en /api/session", status=401)
         client, _ = self._client(
             {"/api/session": unauthorized, "/rest/com/vmware/cis/session": unauthorized}
         )

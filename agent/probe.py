@@ -150,18 +150,25 @@ def _ssh_line(ip: str, ctx: dict) -> Note:
     credentials = creds.for_kind(ctx, creds.SSH)
     if not credentials:
         return probe_note("ssh", "open_no_credentials", "puerto 22 abierto; sin credenciales SSH configuradas", port=SSH_PORT)
+    # Lo pide una persona: puede probar una credencial suspendida (una vez),
+    # y si entra la levanta; los fallos cuentan igual (spec 2.3).
+    logins = tasking.Logins(ctx, "probe", "ssh", ip, explicit=True)
     for credential in credentials:
         if not credential.covers(ip):
             continue
-        answer = ssh.run(
-            host=ip,
-            username=credential.username,
-            secret=credential.secret,
-            port=credential.port,
-            key_file=credential.key_file,
-            command="true",
-        )
-        if answer.connected:
+
+        def call(credential: creds.Credential = credential) -> ssh.Answer:
+            return ssh.run(
+                host=ip,
+                username=credential.username,
+                secret=credential.secret,
+                port=credential.port,
+                key_file=credential.key_file,
+                command="true",
+            )
+
+        answer = logins.run(credential, call, ssh.outcome)
+        if answer is not tasking.SKIPPED and answer.connected:
             _remember(ctx, ip, "ssh", credential)
             return probe_note(
                 "ssh", "logged_in", f"puerto abierto; entró con «{credential.username}»", username=credential.username
@@ -187,16 +194,23 @@ def _winrm_line(ip: str, ctx: dict) -> Note:
             "winrm", "open_no_credentials", f"puerto {open_port} abierto; sin credenciales WinRM configuradas", port=open_port
         )
     last_error = ""
+    logins = tasking.Logins(ctx, "probe", "winrm", ip, explicit=True)
     for credential in credentials:
         if not credential.covers(ip):
             continue
-        answer = winrm.query(
-            host=ip,
-            username=credential.username,
-            secret=credential.secret,
-            port=credential.port or open_port,
-            ca_file=creds.ca_file_for(ctx, credential),
-        )
+
+        def call(credential: creds.Credential = credential) -> winrm.Answer:
+            return winrm.query(
+                host=ip,
+                username=credential.username,
+                secret=credential.secret,
+                port=credential.port or open_port,
+                ca_file=creds.ca_file_for(ctx, credential),
+            )
+
+        answer = logins.run(credential, call, winrm.outcome)
+        if answer is tasking.SKIPPED:
+            continue
         if answer.connected:
             _remember(ctx, ip, "winrm", credential)
             return probe_note(
