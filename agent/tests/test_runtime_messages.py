@@ -156,8 +156,10 @@ class ClientAndConfigTests(unittest.TestCase):
     def test_a_missing_token_is_said_in_the_session_language(self) -> None:
         from agent import config
 
-        with InLanguage("fr"), self.assertRaises(SystemExit) as caught:
-            config.from_env({})
+        # Con una carpeta de estado vacía: en una máquina ya enrolada, el
+        # almacén de verdad haría que no faltara ningún token.
+        with tempfile.TemporaryDirectory() as empty, InLanguage("fr"), self.assertRaises(SystemExit) as caught:
+            config.from_env({"CENYA_STATE_DIR": empty})
 
         self.assertEqual(
             caught.exception.code,
