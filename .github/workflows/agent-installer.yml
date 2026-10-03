@@ -1,6 +1,8 @@
-# Tests en Linux, instalador de Windows construido y probado de verdad, y, al
-# empujar una etiqueta `agent-vX.Y.Z`, Release con el .exe y un `latest.json`
-# que lee la web (versión, URL, SHA-256, fecha). Repo público: minutos gratis.
+# Tests en Linux; instalador de Windows construido y probado de verdad (instalar,
+# actualizarse solo, volver atrás, desinstalar); y, al empujar una etiqueta
+# `agent-vX.Y.Z`, la Release (docs/agente-v2-instalacion.md, sección 1): el
+# instalador, el archivo de Linux, install.sh, latest.json y su firma.
+# Repo público: minutos gratis.
 name: Agente
 
 on:
@@ -23,20 +25,29 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: agent/pyproject.toml
       - run: python -m pip install "./agent[completo]"
       - run: python -m unittest discover -s agent/tests -t .
+      - name: install.sh es sh de verdad
+        run: |
+          sh -n agent/deploy/install.sh
+          shellcheck --shell=sh agent/deploy/install.sh
 
+  # A la vez que `tests`, no detrás: un fallo del instalador se ve sin esperar a
+  # la batería. Lo que no se publica sin las dos es la Release.
   windows:
-    needs: tests
     runs-on: windows-2022
-    timeout-minutes: 30
-    permissions:
-      contents: write   # solo para adjuntar la Release; GITHUB_TOKEN => autor "github-actions[bot]"
+    # Cuatro compilaciones (la que se publica y N, N+1, N+2 de prueba) y una
+    # prueba que espera de verdad a un vigilante.
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: agent/pyproject.toml
 
       - name: La etiqueta coincide con la versión del código
         if: startsWith(github.ref, 'refs/tags/agent-v')
@@ -50,21 +61,51 @@ jobs:
         shell: pwsh
         run: |
           python -m pip install --upgrade pip
-          python -m pip install "./agent[completo]" pyinstaller
+          # `gui`: pywebview y lo suyo, para congelar la ventana (cenya-agent-app.exe).
+          python -m pip install "./agent[completo,gui]" pyinstaller
           if (-not (Get-Command iscc -ErrorAction SilentlyContinue) -and -not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
             choco install innosetup --no-progress -y
           }
 
-      - name: Construir el instalador
+      - name: Construir el instalador que se publica
         shell: pwsh
         run: ./agent/packaging/build.ps1
 
-      - name: Instalar, comprobar y desinstalar de verdad
+      - name: El que se publica lleva exactamente las claves de agent/release_keys.py
+        shell: pwsh
+        run: |
+          $built = (& agent/dist/cenya-agent/cenya-agent.exe selftest | Out-String | ConvertFrom-Json).release_keys
+          $repo = (python -c "from agent import release as r, release_keys as k; print(len(r.load_public_keys(k.PUBLIC_KEYS)) if k.PUBLIC_KEYS else 0)").Trim()
+          if ([int]$built.count -ne [int]$repo) { throw "La compilación acepta $($built.count) claves y el repositorio declara $repo." }
+          if ([int]$repo -eq 0) { Write-Host "::warning title=Sin claves de publicación::agent/release_keys.py está vacío: los agentes de esta versión no se actualizarán solos." }
+
+      - name: Clave de PRUEBA e instaladores N, N+1 y N+2 para la actualización
+        shell: pwsh
+        run: |
+          # Una clave que nace y muere en esta ejecución: firma los manifiestos
+          # de la prueba y solo la aceptan estas tres compilaciones de prueba.
+          $keys = Join-Path $env:RUNNER_TEMP "test-release-key"
+          New-Item -ItemType Directory -Force $keys | Out-Null
+          python agent/packaging/release_key.py generate --private-out "$keys/private.pem" --public-out "$keys/public.txt"
+          $public = (Get-Content "$keys/public.txt").Trim()
+          $version = (Select-String -Path agent/__init__.py -Pattern '__version__ = "(.+)"').Matches[0].Groups[1].Value
+          $out = Join-Path $env:RUNNER_TEMP "installer-test"
+          ./agent/packaging/build.ps1 -ExtraReleaseKey $public -OutputDir $out -Version $version
+          ./agent/packaging/build.ps1 -ExtraReleaseKey $public -OutputDir $out -Version "$version.1"
+          ./agent/packaging/build.ps1 -ExtraReleaseKey $public -OutputDir $out -Version "$version.2"
+          "UPDATE_BASE=$out\Cenya-Agent-Setup-$version.exe" >> $env:GITHUB_ENV
+          "UPDATE_NEXT=$out\Cenya-Agent-Setup-$version.1.exe" >> $env:GITHUB_ENV
+          "UPDATE_BROKEN=$out\Cenya-Agent-Setup-$version.2.exe" >> $env:GITHUB_ENV
+          "TEST_KEY=$keys\private.pem" >> $env:GITHUB_ENV
+
+      - name: Instalar, actualizar, volver atrás y desinstalar de verdad
         shell: pwsh
         run: |
           $installer = (Get-ChildItem agent/installer -Filter "Cenya-Agent-Setup-*.exe" | Select-Object -First 1).FullName
-          ./agent/packaging/smoke-test.ps1 -Installer $installer
+          ./agent/packaging/smoke-test.ps1 -Installer $installer `
+            -UpdateBase $env:UPDATE_BASE -UpdateNext $env:UPDATE_NEXT -UpdateBroken $env:UPDATE_BROKEN -TestKey $env:TEST_KEY
 
+      # Solo el que se publica: los de prueba aceptan una clave que ya no existe.
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -72,16 +113,58 @@ jobs:
           path: agent/installer/*.exe
           if-no-files-found: warn
 
-      - name: Release con latest.json
-        if: startsWith(github.ref, 'refs/tags/agent-v')
-        shell: pwsh
+  release:
+    needs: [tests, windows]
+    if: startsWith(github.ref, 'refs/tags/agent-v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write   # solo para crear la Release; GITHUB_TOKEN => autor "github-actions[bot]"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: python -m pip install "cryptography>=42"
+      - uses: actions/download-artifact@v7
+        with:
+          name: cenya-agent-installer
+          path: dist
+
+      - name: Los ficheros de la versión, el manifiesto y su firma
+        env:
+          CENYA_RELEASE_SIGNING_KEY: ${{ secrets.CENYA_RELEASE_SIGNING_KEY }}
+        run: |
+          set -eu
+          version="${GITHUB_REF_NAME#agent-v}"
+          base="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}"
+          mkdir -p release
+          cp "dist/Cenya-Agent-Setup-${version}.exe" release/
+          # El archivo de Linux es nuestro, no el que genera GitHub para la
+          # etiqueta: ese se genera al vuelo y GitHub no garantiza que sus bytes
+          # (y su SHA-256) sean siempre los mismos. Este se hace una vez, se
+          # firma su huella y se adjunta. Su raíz es agent/ (pip lo instala tal cual).
+          git archive --format=tar.gz --prefix="cenya-agent-${version}/" HEAD:agent > "release/cenya-agent-${version}.tar.gz"
+          # install.sh con las claves públicas dentro: la primera instalación verifica.
+          python agent/packaging/release_key.py embed-keys agent/deploy/install.sh release/install.sh
+          python agent/packaging/release_key.py manifest --version "$version" --base-url "$base" \
+            --windows "release/Cenya-Agent-Setup-${version}.exe" \
+            --linux "release/cenya-agent-${version}.tar.gz" \
+            --install-sh release/install.sh \
+            --out release/latest.json
+          if [ -n "${CENYA_RELEASE_SIGNING_KEY:-}" ]; then
+            python agent/packaging/release_key.py sign release/latest.json
+            # Lo mismo que hará el agente: si la clave del secreto no es una de
+            # agent/release_keys.py, ningún agente la aceptaría. Mejor no publicar.
+            python agent/packaging/release_key.py verify release/latest.json release/latest.json.sig
+          else
+            echo "::warning title=Release sin firmar::Falta el secreto CENYA_RELEASE_SIGNING_KEY: latest.json se publica sin firma y ningún agente se actualizará a esta versión."
+          fi
+          ls -l release
+
+      - name: Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $exe = Get-ChildItem agent/installer -Filter "Cenya-Agent-Setup-*.exe" | Select-Object -First 1
-          $version = "${{ github.ref_name }}".Substring("agent-v".Length)
-          $sha = (Get-FileHash $exe.FullName -Algorithm SHA256).Hash.ToLower()
-          $url = "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/$($exe.Name)"
-          @{ version = $version; url = $url; sha256 = $sha; released = (Get-Date).ToUniversalTime().ToString("s") + "Z" } |
-            ConvertTo-Json | Set-Content latest.json -Encoding utf8
-          gh release create "${{ github.ref_name }}" $exe.FullName latest.json --title "Cenya Agent $version" --generate-notes
+          version="${GITHUB_REF_NAME#agent-v}"
+          gh release create "$GITHUB_REF_NAME" release/* --title "Cenya Agent $version" --generate-notes

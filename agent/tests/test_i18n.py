@@ -35,7 +35,8 @@ PLACEHOLDER = re.compile(r"%\((\w+)\)[sdif]")
 def marked_in_code() -> set[str | tuple[str, str]]:
     """Todo lo que el código pasa a `_t`/`_tn`, leído del código mismo."""
     found: set[str | tuple[str, str]] = set()
-    for path in AGENT_DIR.glob("*.py"):
+    # También la aplicación de escritorio (agent/app): sus textos son del mismo dominio.
+    for path in [*AGENT_DIR.glob("*.py"), *(AGENT_DIR / "app").glob("*.py")]:
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
@@ -207,26 +208,26 @@ class CompilerTests(unittest.TestCase):
 class LanguageChoiceTests(unittest.TestCase):
     def test_each_language_gets_its_own_words(self) -> None:
         expected = {
-            "en": "View status",
-            "de": "Status anzeigen",
-            "fr": "Voir l'état",
-            "pt_BR": "Ver status",
-            "es": "Ver estado",
+            "en": "Local pause lifted.",
+            "de": "Lokale Pause aufgehoben.",
+            "fr": "Pause locale levée.",
+            "pt_BR": "Pausa local retirada.",
+            "es": "Pausa local levantada.",
         }
         for language, text in expected.items():
             with self.subTest(language=language), InLanguage(language):
-                self.assertEqual(i18n._t("Ver estado"), text)
+                self.assertEqual(i18n._t("Pausa local levantada."), text)
 
     def test_regional_variants_find_their_language(self) -> None:
         cases = {
-            "de_AT": "Status anzeigen",  # la lengua sin la región
-            "en_GB": "View status",
-            "pt_PT": "Ver status",  # Portugal lee el catálogo de Brasil antes que el castellano
-            "ja_JP": "Ver estado",  # sin catálogo: castellano, nunca un fallo
+            "de_AT": "Lokale Pause aufgehoben.",  # la lengua sin la región
+            "en_GB": "Local pause lifted.",
+            "pt_PT": "Pausa local retirada.",  # Portugal lee el catálogo de Brasil antes que el castellano
+            "ja_JP": "Pausa local levantada.",  # sin catálogo: castellano, nunca un fallo
         }
         for language, text in cases.items():
             with self.subTest(language=language), InLanguage(language):
-                self.assertEqual(i18n._t("Ver estado"), text)
+                self.assertEqual(i18n._t("Pausa local levantada."), text)
 
     def test_plurals_follow_each_language_rule(self) -> None:
         with InLanguage("fr"):

@@ -53,6 +53,16 @@ def _error_detail(body: str) -> str:
 
 TIMEOUT_SECONDS = 15
 
+#: Lo más que acepta `v2/netbox-bundle/` (spec 3.4). Se comprueba antes de
+#: abrir la conexión: subir 60 MB para oír un 413 es una hora de una línea lenta.
+MAX_BUNDLE_BYTES = 50 * 1024 * 1024
+#: Cada operación de la subida (conectar, cada escritura, la respuesta) puede
+#: esperar esto. Generoso --el servidor valida el paquete entero antes de
+#: contestar-- pero con fin: una subida colgada no puede retener el encargo.
+UPLOAD_TIMEOUT_SECONDS = 300
+#: De cuánto en cuánto se escribe el JSON en la conexión.
+_UPLOAD_CHUNK = 64 * 1024
+
 #: Lo que el servidor acepta de una vez (`core.discovery.MAX_BATCH_ITEMS`). El
 #: agente no puede importarlo --no tiene Django-- así que se repite aquí, y el
 #: troceo de `push_findings` se apoya en este número.
@@ -247,7 +257,17 @@ class AgentClient:
         # the operator chose, and a second opinion would undo it.
         self._may_fall_back = not ca_bundle
 
-    def _open(self, request: urllib.request.Request) -> Any:
+    def reconfigure(self, *, ca_bundle: str = "", proxy: tuple[str, str] | None = None) -> None:
+        """A new CA bundle or proxy without a new client: whoever holds this one sees it at once.
+
+        Lo usa el canal local (`settings.set`) para aplicar el cambio sin
+        reiniciar. Lanza si la CA no se puede cargar, antes de tocar nada.
+        """
+        fresh = AgentClient(self.base_url, self.token, ca_bundle=ca_bundle, proxy=proxy)
+        self._bad_proxy, self._proxy = fresh._bad_proxy, fresh._proxy
+        self._opener, self._may_fall_back = fresh._opener, fresh._may_fall_back
+
+    def _open(self, request: urllib.request.Request, timeout: float = TIMEOUT_SECONDS) -> Any:
         """Open the request, trusting what the operating system trusts.
 
         On Windows, Python reads the system certificate store, which keeps old
@@ -264,7 +284,7 @@ class AgentClient:
         the first error is the one reported: it names the real problem.
         """
         try:
-            return self._opener.open(request, timeout=TIMEOUT_SECONDS)
+            return self._opener.open(request, timeout=timeout)
         except urllib.error.URLError as exc:
             if not (self._may_fall_back and _is_certificate_failure(exc)):
                 raise
@@ -272,7 +292,7 @@ class AgentClient:
             if fallback is None:
                 raise
             try:
-                response = fallback.open(request, timeout=TIMEOUT_SECONDS)
+                response = fallback.open(request, timeout=timeout)
             except urllib.error.HTTPError:
                 # The handshake worked: the server's own answer is the answer.
                 self._opener, self._may_fall_back = fallback, False
@@ -368,7 +388,40 @@ class AgentClient:
         """Tell the server this agent is going away; its token stops working (spec 1.7)."""
         return self._post("/api/agent/v2/goodbye/", {"reason": reason})
 
+    def upload_netbox_bundle(self, bundle: dict, order_id: str | None = None) -> dict[str, Any]:
+        """Upload what was read from a NetBox (spec 3.4). Returns ``{"ok": true, "import": "<uuid>"}``.
+
+        El paquete puede rondar los 50 MB: no se construye dos veces en
+        memoria. El JSON se escribe a trozos directamente en la conexión, y
+        para saber su tamaño (el `Content-Length`, y el tope antes de enviar
+        nada) se recorre una vez sin guardarlo. Dos pasadas de CPU a cambio de
+        no tener a la vez el diccionario, el texto y los bytes.
+        """
+        body = _JsonBody(bundle)
+        size = body.size()
+        if size > MAX_BUNDLE_BYTES:
+            raise PushError(
+                _t("Lo leído de NetBox ocupa %(mb)s MB y el servidor admite %(max)s MB como mucho.")
+                % {"mb": size // (1024 * 1024), "max": MAX_BUNDLE_BYTES // (1024 * 1024)},
+                status=413,
+            )
+        extra = {"Content-Length": str(size)}
+        if order_id:
+            extra["X-Cenya-Order"] = str(order_id)
+        return self._send("/api/agent/v2/netbox-bundle/", body, extra=extra, timeout=UPLOAD_TIMEOUT_SECONDS)
+
     def _post(self, path: str, payload: dict[str, Any], *, authenticated: bool = True) -> dict[str, Any]:
+        return self._send(path, json.dumps(payload).encode(), authenticated=authenticated)
+
+    def _send(
+        self,
+        path: str,
+        data: Any,
+        *,
+        authenticated: bool = True,
+        extra: dict[str, str] | None = None,
+        timeout: float = TIMEOUT_SECONDS,
+    ) -> dict[str, Any]:
         if self._bad_proxy:
             raise PushError(_proxy_problem())
         headers = {"Content-Type": "application/json"}
@@ -379,14 +432,15 @@ class AgentClient:
         language = accept_language()
         if language:
             headers["Accept-Language"] = language
+        headers.update(extra or {})
         request = urllib.request.Request(
             f"{self.base_url}{path}",
-            data=json.dumps(payload).encode(),
+            data=data,
             headers=headers,
             method="POST",
         )
         try:
-            with self._open(request) as response:
+            with self._open(request, timeout) as response:
                 answer = json.loads(response.read().decode())
         except urllib.error.HTTPError as exc:
             body = exc.read().decode(errors="replace") if exc.fp else ""
@@ -396,7 +450,7 @@ class AgentClient:
                 _t("El servidor respondió %(code)s: %(detail)s") % {"code": exc.code, "detail": detail},
                 status=exc.code,
             ) from exc
-        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+        except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
             raise PushError(_t("No se pudo hablar con el servidor: %(error)s") % {"error": scrub(str(exc))}) from exc
         except ValueError as exc:
             # `urllib` mete en el texto la URL que no entiende, y si es la del
@@ -410,3 +464,33 @@ class AgentClient:
             # `AttributeError` y mata el proceso del agente.
             raise PushError(_t("El servidor respondió algo que no es un objeto JSON."))
         return answer
+
+
+class _JsonBody:
+    """A JSON document written to the connection in pieces, as many times as asked.
+
+    `http.client` acepta como cuerpo cualquier iterable de bytes. Cada
+    `__iter__` vuelve a codificar desde el principio: si la primera conexión
+    falla al validar el certificado y `_open` reintenta con las raíces de
+    Mozilla, el cuerpo vuelve a estar entero.
+    """
+
+    def __init__(self, document: Any) -> None:
+        self._document = document
+
+    def __iter__(self):  # noqa: ANN204
+        encoder = json.JSONEncoder(ensure_ascii=False, separators=(",", ":"))
+        pending: list[bytes] = []
+        size = 0
+        for piece in encoder.iterencode(self._document):
+            data = piece.encode("utf-8")
+            pending.append(data)
+            size += len(data)
+            if size >= _UPLOAD_CHUNK:
+                yield b"".join(pending)
+                pending, size = [], 0
+        if pending:
+            yield b"".join(pending)
+
+    def size(self) -> int:
+        return sum(len(chunk) for chunk in self)

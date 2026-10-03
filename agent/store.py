@@ -57,8 +57,15 @@ IDENTITY_FILE = "identity.key"
 SETTINGS_FILE = "settings.json"
 MEMORY_FILE = "memory.json"
 STATUS_FILE = "status.json"
-PRIVATE_FILES = (FILE_NAME, IDENTITY_FILE, SETTINGS_FILE, MEMORY_FILE)
-PRIVATE_FOLDERS = ("outbox", "logs")
+#: La CA propia del portal, copiada aquí por `cenya-agent settings set ca_bundle`
+#: (o el instalador con /CA=). No es un secreto, pero sí de confianza: una CA
+#: puesta por otro usuario dejaría a cualquiera hacerse pasar por el portal.
+CA_FILE = "ca.pem"
+#: Las descargas del actualizador (`agent/update.py`): lo que se va a ejecutar
+#: como administrador no puede haberlo dejado otro usuario.
+UPDATES_FOLDER = "updates"
+PRIVATE_FILES = (FILE_NAME, IDENTITY_FILE, SETTINGS_FILE, MEMORY_FILE, CA_FILE)
+PRIVATE_FOLDERS = ("outbox", "logs", UPDATES_FOLDER)
 
 #: Cómo se renombra lo que se aparta cuando la carpeta no estaba protegida:
 #: todo lo que alguien pudo dejar para que el agente lo creyera suyo. El
@@ -83,6 +90,10 @@ class Enrollment:
     url: str
     token: str
     name: str = ""
+    #: El `uuid` que el servidor dio al enrolar. Es la mitad de la AAD de cada
+    #: credencial sellada (spec 3.1): sin él no abre ninguna. Un enrolamiento
+    #: 0.10.x no lo tiene, y lo trae el checkin (`agent` en la respuesta).
+    uuid: str = ""
 
 
 def state_dir(environ: Mapping[str, str] | None = None) -> Path:
@@ -112,7 +123,10 @@ def load(environ: Mapping[str, str] | None = None) -> Enrollment | None:
     url, token = data.get("url"), data.get("token")
     if not isinstance(url, str) or not isinstance(token, str) or not url or not token:
         return None
-    return Enrollment(url=url, token=token, name=str(data.get("name") or ""))
+    agent_uuid = data.get("uuid")
+    return Enrollment(
+        url=url, token=token, name=str(data.get("name") or ""), uuid=agent_uuid if isinstance(agent_uuid, str) else ""
+    )
 
 
 def untrusted_enrollment(environ: Mapping[str, str] | None = None) -> bool:
@@ -560,12 +574,50 @@ def write_protected(target: Path, content: str | bytes) -> None:
         raise
 
 
+def private_folder(target: Path) -> Path:
+    """Create `target` (if needed) closed like the rest: only SYSTEM, the Administrators
+    and the account running the agent on Windows; ``0700`` on POSIX. Raises `OSError`.
+
+    Lo que el actualizador descarga se guarda aquí y se ejecuta después: no
+    basta con heredar de la carpeta de estado, se cierra explícitamente.
+    """
+    target.mkdir(parents=True, exist_ok=True)
+    if sys.platform == "win32":
+        _apply(target, folder_sddl(_acl_runner(), owner=_is_admin()))
+    else:
+        os.chmod(target, 0o700)
+    return target
+
+
+def private_temp(folder: Path, *, prefix: str, suffix: str) -> tuple[int, Path]:
+    """A new empty file in `folder`, already closed to others, open for writing.
+
+    Como en `write_protected`: el temporal nace cerrado (``0600`` con
+    `mkstemp`, y en Windows con la DACL protegida antes de escribir nada).
+    Devuelve el descriptor y la ruta; quien llama lo cierra y lo borra si falla.
+    """
+    fd, name = tempfile.mkstemp(dir=folder, prefix=prefix, suffix=suffix)
+    tmp = Path(name)
+    if sys.platform == "win32":
+        try:
+            _restrict_windows(tmp)
+        except BaseException:
+            os.close(fd)
+            tmp.unlink(missing_ok=True)
+            raise
+    return fd, tmp
+
+
 def save(enrollment: Enrollment, environ: Mapping[str, str] | None = None) -> Path:
     """Write the enrolment, protected, replacing any previous one."""
     target = path(environ)
     try:
         write_protected(
-            target, json.dumps({"url": enrollment.url, "token": enrollment.token, "name": enrollment.name})
+            target,
+            json.dumps(
+                {"url": enrollment.url, "token": enrollment.token, "name": enrollment.name}
+                | ({"uuid": enrollment.uuid} if enrollment.uuid else {})
+            ),
         )
     except OSError as exc:
         raise StoreError(

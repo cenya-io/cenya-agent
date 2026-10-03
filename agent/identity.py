@@ -68,6 +68,22 @@ def _public_pem(key) -> str:  # noqa: ANN001
     )
 
 
+def public_pem(key) -> str:  # noqa: ANN001
+    """The PEM (SubjectPublicKeyInfo) of a private key's public half."""
+    return _public_pem(key)
+
+
+def private_key(environ: Mapping[str, str] | None = None):  # noqa: ANN201 - tipo de una librería opcional
+    """The private key on disk, or `None` -- never creates one.
+
+    Solo para abrir sobres (`agent/sealing.py`). Quien la pide la usa y la
+    suelta: no se guarda en ningún objeto que viva más que la operación.
+    """
+    if not available():
+        return None
+    return _load_private(path(environ))
+
+
 def public_key(environ: Mapping[str, str] | None = None) -> str:
     """The public key already on disk (PEM), or "" -- never creates one.
 
@@ -78,6 +94,24 @@ def public_key(environ: Mapping[str, str] | None = None) -> str:
         return ""
     key = _load_private(path(environ))
     return _public_pem(key) if key is not None else ""
+
+
+def fingerprint(pem: str) -> str:
+    """SHA-256 (hex) of a public key's DER (SubjectPublicKeyInfo), from its PEM. "" if it is not one. Pure.
+
+    Lo que el servidor puede devolver (`public_key_sha256`, spec 1.2) para que
+    el agente sepa si la clave que guarda allí es la suya.
+    """
+    import base64
+    import binascii
+    import hashlib
+
+    body = "".join(line.strip() for line in (pem or "").splitlines() if line.strip() and "-----" not in line)
+    try:
+        der = base64.b64decode(body, validate=True)
+    except (binascii.Error, ValueError):
+        return ""
+    return hashlib.sha256(der).hexdigest() if der else ""
 
 
 def ensure(environ: Mapping[str, str] | None = None) -> str:

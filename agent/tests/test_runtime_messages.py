@@ -185,25 +185,42 @@ class EventViewerTests(unittest.TestCase):
     def logged(self, level: str) -> list[str]:
         return [msg for lvl, msg in self.fakes["servicemanager"].logged if lvl == level]
 
-    def test_a_service_without_token_says_why_it_stopped_in_german(self) -> None:
-        """Sin tocar el bucle: el `from_env` real, sin token, y el mensaje que
-        llega al Visor de eventos."""
+    def test_a_service_without_token_stays_up_and_says_why_in_german(self) -> None:
+        """Sin tocar el bucle: el `from_env` real, sin token. El servicio no
+        sale con error (Windows lo reiniciaría en bucle): dice en el Visor de
+        eventos por qué espera, sirve el canal y para limpio cuando lo paran."""
+        import threading
+
         service = self.ws.CenyaAgentService(["CenyaAgent"])
-        environ = {k: v for k, v in os.environ.items() if k != "NETINVENTORY_AGENT_TOKEN"}
+        environ = {k: v for k, v in os.environ.items() if k not in ("NETINVENTORY_AGENT_TOKEN", "CENYA_AGENT_TOKEN")}
+        environ["CENYA_STATE_DIR"] = tempfile.mkdtemp(prefix="cenya-sin-token-")
+        failure: list[BaseException] = []
+
+        def run() -> None:
+            try:
+                service.SvcDoRun()
+            except BaseException as exc:  # noqa: BLE001
+                failure.append(exc)
+
+        # El canal de verdad no: aquí pywin32 es de mentira.
         with InLanguage("de"), mock.patch.dict(os.environ, environ, clear=True), mock.patch.dict(
             os.environ, {"CENYA_LANGUAGE": "de"}
-        ):
-            with self.assertRaises(RuntimeError):
-                service.SvcDoRun()
+        ), mock.patch("agent.localpipe.serve", return_value=None):
+            thread = threading.Thread(target=run, daemon=True)
+            thread.start()
+            waiting = "Dieser Agent ist nicht registriert. Unter Einstellungen → Agenten eine Verbindungszeichenfolge erzeugen und ausführen: cenya-agent enroll <Zeichenfolge>"
+            for _ in range(200):
+                if waiting in self.logged("Warning"):
+                    break
+                thread.join(0.05)
+            self.assertTrue(thread.is_alive(), "el servicio sin enrolar no puede salir")
+            service.SvcStop()
+            thread.join(10)
 
-        self.assertEqual(
-            self.logged("Error"),
-            [
-                "Cenya Agent wurde angehalten: Dieser Agent ist nicht registriert. Unter "
-                "Einstellungen → Agenten eine Verbindungszeichenfolge erzeugen und ausführen: "
-                "cenya-agent enroll <Zeichenfolge>"
-            ],
-        )
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(failure, [])
+        self.assertIn(waiting, self.logged("Warning"))
+        self.assertEqual(self.logged("Error"), [])
 
     def test_what_the_loop_prints_reaches_the_event_viewer_translated(self) -> None:
         from agent.__main__ import _sweep_line

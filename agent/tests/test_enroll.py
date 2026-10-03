@@ -479,4 +479,4 @@ class RenamedNamesTests(unittest.TestCase):
         self.assertEqual(
             set(pyproject["project"]["scripts"]), {"cenya-agent", "cenya-agent-service", "cenya-agent-askpass"}
         )
-        self.assertEqual(set(pyproject["project"]["gui-scripts"]), {"cenya-agent-tray"})
+        self.assertEqual(set(pyproject["project"]["gui-scripts"]), {"cenya-agent-tray", "cenya-agent-app"})

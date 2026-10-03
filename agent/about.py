@@ -243,9 +243,11 @@ def capabilities() -> dict[str, bool]:
         return any(collector.name == "hypervisors" for collector in all_collectors())
 
     def _sealed() -> bool:
-        from agent import identity
+        # La clave en disco, la librería, y una ida y vuelta que funciona: decir
+        # «sí» con una clave que no abre haría que la web sellara para nada.
+        from agent import sealing
 
-        return bool(identity.public_key())
+        return sealing.self_test()
 
     return {
         "snmp": check(_snmp),

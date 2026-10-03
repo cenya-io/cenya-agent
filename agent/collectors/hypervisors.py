@@ -120,14 +120,16 @@ class HypervisorCollector:
             # Un hipervisor caído o una contraseña cambiada no pueden tumbar
             # el barrido: se anota y se sigue con el siguiente. El detalle va
             # tal cual: lo escribe el hipervisor, o es un error de red.
+            detail = creds.scrub(str(exc), credential)
             errors.append(
                 collector_note(
-                    "hypervisors", "failed", f"{credential.host}: {exc}", host=credential.host, detail=str(exc)
+                    "hypervisors", "failed", f"{credential.host}: {detail}", host=credential.host, detail=detail
                 )
             )
             self._remember(ctx, key, credential, ok=False)
             return []
         self._remember(ctx, key, credential, ok=True)
+        tasking.note_ok(ctx, credential, credential.host)
         return found
 
     @staticmethod

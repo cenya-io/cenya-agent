@@ -5,7 +5,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: cenya-agent 0.9.1\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-02 21:17+0200\n"
+"POT-Creation-Date: 2026-10-02 23:52+0200\n"
 "PO-Revision-Date: 2026-09-14 17:00+0200\n"
 "Last-Translator: NetInventory\n"
 "Language-Team: English\n"
@@ -15,14 +15,14 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
-#: agent/__main__.py:41 agent/runtime.py:88 agent/status.py:437
+#: agent/__main__.py:41 agent/runtime.py:90 agent/status.py:437
 #, python-format
 msgid "%(n)d hallazgo nuevo"
 msgid_plural "%(n)d hallazgos nuevos"
 msgstr[0] "%(n)d new finding"
 msgstr[1] "%(n)d new findings"
 
-#: agent/__main__.py:42 agent/runtime.py:89 agent/status.py:439
+#: agent/__main__.py:42 agent/runtime.py:91 agent/status.py:439
 #, python-format
 msgid "%(n)d ya conocido."
 msgid_plural "%(n)d ya conocidos."
@@ -46,50 +46,63 @@ msgstr "[agent] Sweep sent in %(batches)s: %(created)s, %(refreshed)s"
 msgid "[agente] Barrido enviado: %(created)s, %(refreshed)s"
 msgstr "[agent] Sweep sent: %(created)s, %(refreshed)s"
 
-#: agent/__main__.py:68 agent/control.py:594 agent/runtime.py:468
+#: agent/__main__.py:68 agent/control.py:736 agent/runtime.py:724
 #, python-format
 msgid "Error inesperado: %(error)s"
 msgstr "Unexpected error: %(error)s"
 
-#: agent/__main__.py:266 agent/__main__.py:310 agent/__main__.py:317
-#: agent/control.py:582 agent/runtime.py:264
+#: agent/__main__.py:286 agent/__main__.py:411 agent/__main__.py:418
+#: agent/control.py:712 agent/runtime.py:485
 #, python-format
 msgid "[agente] %(error)s"
 msgstr "[agent] %(error)s"
 
-#: agent/__main__.py:280
+#: agent/__main__.py:324
+msgid "[agente] Detenido."
+msgstr "[agent] Stopped."
+
+#: agent/__main__.py:349
+msgid "[agente] Sin enrolar: esperando una conexión."
+msgstr "[agent] Not enrolled: waiting for a connection."
+
+#: agent/__main__.py:350
+msgid "[agente] Esperando a que se conecte este equipo (cenya-agent connect <cadena>, o la aplicación Cenya Agent)."
+msgstr "[agent] Waiting for this machine to be connected (cenya-agent connect <string>, or the Cenya Agent application)."
+
+#: agent/__main__.py:383
 #, python-format
 msgid "[agente] Conectado a %(url)s con el protocolo 2."
 msgstr "[agent] Connected to %(url)s using protocol 2."
 
-#: agent/__main__.py:284
+#: agent/__main__.py:387
 msgid "[agente] El servidor solo habla el protocolo 1: se sigue con el bucle de siempre."
 msgstr "[agent] The server only speaks protocol 1: carrying on with the usual loop."
 
-#: agent/__main__.py:286
-msgid "[agente] Detenido."
-msgstr "[agent] Stopped."
-
-#: agent/__main__.py:301
+#: agent/__main__.py:402
 #, python-format
 msgid "[agente] Empujando a %(url)s cada ~%(seconds)d s."
 msgstr "[agent] Pushing to %(url)s every ~%(seconds)d s."
 
-#: agent/client.py:157
+#: agent/client.py:167
 msgid "La dirección del proxy no es válida: revisa el ajuste «proxy» (settings.json o CENYA_PROXY). No se muestra aquí porque puede llevar una contraseña."
 msgstr "The proxy address is not valid: check the «proxy» setting (settings.json or CENYA_PROXY). It is not shown here because it may contain a password."
 
-#: agent/client.py:396
+#: agent/client.py:404
+#, python-format
+msgid "Lo leído de NetBox ocupa %(mb)s MB y el servidor admite %(max)s MB como mucho."
+msgstr "What was read from NetBox takes %(mb)s MB and the server accepts %(max)s MB at most."
+
+#: agent/client.py:450
 #, python-format
 msgid "El servidor respondió %(code)s: %(detail)s"
 msgstr "The server answered %(code)s: %(detail)s"
 
-#: agent/client.py:400 agent/client.py:406
+#: agent/client.py:454 agent/client.py:460
 #, python-format
 msgid "No se pudo hablar con el servidor: %(error)s"
 msgstr "Couldn't reach the server: %(error)s"
 
-#: agent/client.py:411
+#: agent/client.py:465
 msgid "El servidor respondió algo que no es un objeto JSON."
 msgstr "The server answered with something that isn't a JSON object."
 
@@ -111,80 +124,84 @@ msgstr "This agent is not enrolled. In Settings → Agents, generate a connectio
 msgid "La cadena de conexión no es válida: debe parecerse a cenya://portal.midominio.com/XXXX-XXXX-XXXX. Cópiala entera de Ajustes → Agentes."
 msgstr "The connection string is not valid: it should look like cenya://portal.mycompany.com/XXXX-XXXX-XXXX. Copy it whole from Settings → Agents."
 
-#: agent/control.py:355
+#: agent/control.py:401
 #, python-format
 msgid "El servidor ha rechazado este agente (%(error)s): no barre ni usa ninguna credencial hasta que lo acepte de nuevo, y le pregunta cada %(minutes)d minutos. Si se revocó, hay que enrolarlo otra vez."
 msgstr "The server has rejected this agent (%(error)s): it will not scan or use any credential until the server accepts it again, and it asks every %(minutes)d minutes. If it was revoked, it has to be enrolled again."
 
-#: agent/control.py:361
+#: agent/control.py:407
 #, python-format
 msgid "La instalación de Cenya está en solo lectura (%(error)s): el agente no empieza ninguna tarea hasta que el servidor vuelva a aceptar resultados."
 msgstr "The Cenya installation is read-only (%(error)s): the agent will not start any task until the server accepts results again."
 
-#: agent/control.py:372
+#: agent/control.py:418
 msgid "[agente] El servidor vuelve a aceptar a este agente."
 msgstr "[agent] The server accepts this agent again."
 
-#: agent/control.py:409
+#: agent/control.py:446
+msgid "[agente] El portal guarda otra clave para este agente: no podrá abrir las credenciales selladas. Enrólalo de nuevo (cenya-agent enroll <cadena> --force)."
+msgstr "[agent] The portal holds a different key for this agent: it will not be able to open sealed credentials. Enrol it again (cenya-agent enroll <string> --force)."
+
+#: agent/control.py:481
 msgid "[agente] Configuración nueva recibida."
 msgstr "[agent] New configuration received."
 
-#: agent/control.py:415
+#: agent/control.py:487
 #, python-format
 msgid "[agente] Hay una versión nueva del agente: %(version)s."
 msgstr "[agent] A new version of the agent is available: %(version)s."
 
-#: agent/control.py:443
+#: agent/control.py:516
 #, python-format
 msgid "[agente] Encargo recibido: %(kind)s."
 msgstr "[agent] Order received: %(kind)s."
 
-#: agent/enroll.py:66
+#: agent/enroll.py:71
 msgid "El servidor no devolvió ningún token. ¿Es la dirección de un portal de Cenya?"
 msgstr "The server returned no token. Is that the address of a Cenya portal?"
 
-#: agent/enroll.py:74
+#: agent/enroll.py:87
 #, python-format
 msgid "%(error)s El código ya se ha usado: genera otra cadena en Ajustes → Agentes."
 msgstr "%(error)s The code has already been used: generate another string in Settings → Agents."
 
-#: agent/enroll.py:88
+#: agent/enroll.py:101
 #, python-format
 msgid "[agente] Enrolado como «%(name)s» en %(url)s."
 msgstr "[agent] Enrolled as «%(name)s» at %(url)s."
 
-#: agent/enroll.py:117
+#: agent/enroll.py:130
 #, python-format
 msgid "Este equipo ya está enrolado como «%(name)s» en %(url)s. Para enrolarlo de nuevo, añade --force."
 msgstr "This machine is already enrolled as «%(name)s» at %(url)s. To enrol it again, add --force."
 
-#: agent/enroll.py:125
+#: agent/enroll.py:138
 msgid "Cadena de conexión (la de Ajustes → Agentes): "
 msgstr "Connection string (the one in Settings → Agents): "
 
-#: agent/enroll.py:128
+#: agent/enroll.py:141
 msgid "Falta la cadena de conexión: cenya-agent enroll cenya://portal.midominio.com/XXXX-XXXX-XXXX"
 msgstr "The connection string is missing: cenya-agent enroll cenya://portal.mycompany.com/XXXX-XXXX-XXXX"
 
-#: agent/enroll.py:136
+#: agent/enroll.py:149 agent/localops.py:917
 msgid "El enrolamiento ha fallado."
 msgstr "Enrolment failed."
 
-#: agent/enroll.py:138
+#: agent/enroll.py:151
 #, python-format
 msgid "Agente «%(name)s» enrolado en %(url)s."
 msgstr "Agent «%(name)s» enrolled at %(url)s."
 
-#: agent/enroll.py:139
+#: agent/enroll.py:152
 #, python-format
 msgid "El token queda guardado de forma protegida en %(path)s; no hace falta copiarlo."
 msgstr "The token is saved in protected form at %(path)s; there is nothing to copy."
 
-#: agent/enroll.py:140
+#: agent/enroll.py:153
 msgid "Para dejarlo funcionando, ejecuta: cenya-agent"
 msgstr "To leave it running, run: cenya-agent"
 
-#: agent/goodbye.py:51
+#: agent/goodbye.py:51 agent/localops.py:951
 #, python-format
 msgid "No se pudo avisar al servidor (%(error)s). El enrolamiento de este equipo se borra igualmente; el agente seguirá apareciendo en Ajustes → Agentes hasta que se borre allí."
 msgstr "Could not tell the server (%(error)s). This machine's enrolment is removed anyway; the agent will still appear in Settings → Agents until it is deleted there."
@@ -275,6 +292,613 @@ msgstr "The tray icon will appear at sign-in. To see it now: %(tray)s"
 msgid "Windows lo guarda al principio en el desplegable ^ de la barra de tareas: arrástralo fuera para tenerlo siempre a la vista."
 msgstr "Windows first keeps it in the ^ overflow on the taskbar: drag it out to keep it always in view."
 
+#: agent/localapi.py:153
+msgid "La respuesta es demasiado grande para el canal local."
+msgstr "The answer is too large for the local channel."
+
+#: agent/localapi.py:173
+msgid "La petición no es JSON válido."
+msgstr "The request is not valid JSON."
+
+#: agent/localapi.py:175
+msgid "La petición tiene que ser un objeto JSON."
+msgstr "The request must be a JSON object."
+
+#: agent/localapi.py:178
+msgid "El campo «id» tiene que ser un número o un texto."
+msgstr "The “id” field must be a number or a string."
+
+#: agent/localapi.py:181
+msgid "Falta el campo «op»."
+msgstr "The “op” field is missing."
+
+#: agent/localapi.py:186
+msgid "El campo «args» tiene que ser un objeto."
+msgstr "The “args” field must be an object."
+
+#: agent/localapi.py:212
+#, python-format
+msgid "Operación desconocida: %(op)s"
+msgstr "Unknown operation: %(op)s"
+
+#: agent/localapi.py:214
+msgid "Esta operación solo la puede hacer un administrador."
+msgstr "Only an administrator can do this operation."
+
+#: agent/localapi.py:217
+msgid "Este agente no sabe hacer todavía esa operación."
+msgstr "This agent cannot do that operation yet."
+
+#: agent/localapi.py:225
+#, python-format
+msgid "[canal local] Fallo inesperado en %(op)s: %(type)s"
+msgstr "[local channel] Unexpected failure in %(op)s: %(type)s"
+
+#: agent/localapi.py:226
+#, python-format
+msgid "Error inesperado en el agente (%(type)s)."
+msgstr "Unexpected error in the agent (%(type)s)."
+
+#: agent/localapi.py:371 agent/localpipe.py:401 agent/localpipe.py:602
+msgid "Hay demasiadas conexiones abiertas con el agente."
+msgstr "Too many connections are open to the agent."
+
+#: agent/localapi.py:376
+msgid "La petición es demasiado grande."
+msgstr "The request is too large."
+
+#: agent/localclient.py:392
+msgid "Esta instalación no puede hablar con el servicio: falta pywin32."
+msgstr "This installation cannot talk to the service: pywin32 is missing."
+
+#: agent/localclient.py:395
+msgid "El canal del agente lo ha abierto otro programa, no el servicio de Cenya: no se le envía nada. Reinicia el servicio y avisa a quien administre este equipo."
+msgstr "The agent's channel was opened by another program, not the Cenya service: nothing is sent to it. Restart the service and tell whoever administers this computer."
+
+#: agent/localclient.py:399
+msgid "Esta cuenta no tiene permiso para hablar con el servicio del agente."
+msgstr "This account is not allowed to talk to the agent service."
+
+#: agent/localclient.py:400
+msgid "El servicio del agente no está en marcha en este equipo."
+msgstr "The agent service is not running on this computer."
+
+#: agent/localclient.py:405
+msgid "Esto solo lo puede hacer un administrador: abre la consola con «Ejecutar como administrador»."
+msgstr "Only an administrator can do this: open the console with “Run as administrator”."
+
+#: agent/localclient.py:406
+msgid "Esto solo lo puede hacer root o la cuenta con la que corre el agente."
+msgstr "Only root or the account the agent runs as can do this."
+
+#: agent/localclient.py:411
+#, python-format
+msgid "Cenya Agent %(version)s"
+msgstr "Cenya Agent %(version)s"
+
+#: agent/localclient.py:416
+msgid "No está conectado a ningún portal: cenya-agent connect <cadena>"
+msgstr "Not connected to any portal: cenya-agent connect <string>"
+
+#: agent/localclient.py:420
+#, python-format
+msgid "Conectado como «%(name)s» a %(portal)s (protocolo %(protocol)s)."
+msgstr "Connected as “%(name)s” to %(portal)s (protocol %(protocol)s)."
+
+#: agent/localclient.py:426
+#, python-format
+msgid "Conexión: correcta (último contacto a las %(clock)s)."
+msgstr "Connection: working (last contact at %(clock)s)."
+
+#: agent/localclient.py:428
+#, python-format
+msgid "Conexión: falla (%(error)s)."
+msgstr "Connection: failing (%(error)s)."
+
+#: agent/localclient.py:430
+msgid "Conexión: el servidor ha rechazado a este agente; hay que conectarlo de nuevo."
+msgstr "Connection: the server has rejected this agent; it must be connected again."
+
+#: agent/localclient.py:432
+msgid "Conexión: la instalación de Cenya está en solo lectura."
+msgstr "Connection: the Cenya installation is read-only."
+
+#: agent/localclient.py:434
+msgid "Conexión: todavía sin noticias del servidor."
+msgstr "Connection: no word from the server yet."
+
+#: agent/localclient.py:443
+#, python-format
+msgid "Ahora: trabajando en %(task)s%(progress)s."
+msgstr "Now: working on %(task)s%(progress)s."
+
+#: agent/localclient.py:445
+msgid "Ahora: en pausa hasta que se reanude (cenya-agent resume)."
+msgstr "Now: paused until resumed (cenya-agent resume)."
+
+#: agent/localclient.py:447
+#, python-format
+msgid "Ahora: en pausa hasta las %(clock)s."
+msgstr "Now: paused until %(clock)s."
+
+#: agent/localclient.py:449
+msgid "Ahora: esperando a la siguiente tarea."
+msgstr "Now: waiting for the next task."
+
+#: agent/localclient.py:452
+msgid "Tareas:"
+msgstr "Tasks:"
+
+#: agent/localclient.py:456
+#, python-format
+msgid "%(task)s: cada %(every)s, última %(last)s (%(status)s), próxima %(next)s"
+msgstr "%(task)s: every %(every)s, last %(last)s (%(status)s), next %(next)s"
+
+#: agent/localclient.py:467
+#, python-format
+msgid "%(n)d envío pendiente en la cola local."
+msgid_plural "%(n)d envíos pendientes en la cola local."
+msgstr[0] "%(n)d upload pending in the local queue."
+msgstr[1] "%(n)d uploads pending in the local queue."
+
+#: agent/localclient.py:470
+#, python-format
+msgid "Hay una versión nueva del agente: %(version)s."
+msgstr "A new version of the agent is available: %(version)s."
+
+#: agent/localclient.py:474
+#, python-format
+msgid "Exportando NetBox: %(step)s (%(done)s de %(total)s)."
+msgstr "Exporting NetBox: %(step)s (%(done)s of %(total)s)."
+
+#: agent/localclient.py:483
+#, python-format
+msgid "%(n)d hora"
+msgid_plural "%(n)d horas"
+msgstr[0] "%(n)d hour"
+msgstr[1] "%(n)d hours"
+
+#: agent/localclient.py:486
+#, python-format
+msgid "%(n)d minuto"
+msgid_plural "%(n)d minutos"
+msgstr[0] "%(n)d minute"
+msgstr[1] "%(n)d minutes"
+
+#: agent/localclient.py:487
+#, python-format
+msgid "%(n)d segundo"
+msgid_plural "%(n)d segundos"
+msgstr[0] "%(n)d second"
+msgstr[1] "%(n)d seconds"
+
+#: agent/localclient.py:491 agent/localclient.py:711
+msgid "[bien]"
+msgstr "[ok]"
+
+#: agent/localclient.py:491 agent/localclient.py:711
+msgid "[falla]"
+msgstr "[fail]"
+
+#: agent/localclient.py:509
+msgid "Uso: cenya-agent status | run <tarea> | pause [--hours N] | resume | logs [-n N] [-f] | doctor | connect <cadena> | disconnect"
+msgstr "Usage: cenya-agent status | run <task> | pause [--hours N] | resume | logs [-n N] [-f] | doctor | connect <string> | disconnect"
+
+#: agent/localclient.py:562 agent/app/view.py:133
+msgid "El servicio no ha contestado a tiempo."
+msgstr "The service did not answer in time."
+
+#: agent/localclient.py:565
+msgid "Se ha perdido la conexión con el servicio."
+msgstr "The connection to the service was lost."
+
+#: agent/localclient.py:592
+#, python-format
+msgid "Tarea %(task)s en cola: empieza en cuanto termine la que está en curso."
+msgstr "Task %(task)s queued: it starts as soon as the one in progress finishes."
+
+#: agent/localclient.py:594
+msgid "Antes tiene que llegar la configuración del servidor."
+msgstr "The server's configuration has to arrive first."
+
+#: agent/localclient.py:596
+msgid "La instalación de Cenya está en solo lectura: la tarea espera a que vuelva a aceptar resultados."
+msgstr "The Cenya installation is read-only: the task waits until results are accepted again."
+
+#: agent/localclient.py:615
+#, python-format
+msgid "Agente en pausa hasta las %(clock)s. La tarea en curso, si hay una, termina."
+msgstr "Agent paused until %(clock)s. The task in progress, if any, will finish."
+
+#: agent/localclient.py:624
+msgid "Pausa local levantada."
+msgstr "Local pause lifted."
+
+#: agent/localclient.py:627
+#, python-format
+msgid "Sigue en pausa hasta las %(clock)s: esa pausa se puso desde la web y se quita allí."
+msgstr "Still paused until %(clock)s: that pause was set from the web and is lifted there."
+
+#: agent/localclient.py:681
+#, python-format
+msgid "Tampoco se puede leer el registro (%(path)s) desde esta cuenta."
+msgstr "The log (%(path)s) cannot be read from this account either."
+
+#: agent/localclient.py:683
+#, python-format
+msgid "Registro leído directamente de %(path)s:"
+msgstr "Log read directly from %(path)s:"
+
+#: agent/localclient.py:703
+msgid "Se prueba la conexión desde esta consola, sin el servicio."
+msgstr "Testing the connection from this console, without the service."
+
+#: agent/localclient.py:705
+msgid "Conexión con el portal:"
+msgstr "Connection to the portal:"
+
+#: agent/localclient.py:710
+msgid "Esta instalación:"
+msgstr "This installation:"
+
+#: agent/localclient.py:712
+msgid "completa (colectores, librerías y traducciones)."
+msgstr "complete (collectors, libraries and translations)."
+
+#: agent/localclient.py:712
+msgid "incompleta: detalle con cenya-agent selftest."
+msgstr "incomplete: details with cenya-agent selftest."
+
+#: agent/localclient.py:749
+msgid "Falta la cadena de conexión: cenya-agent connect cenya://portal.midominio.com/XXXX-XXXX-XXXX"
+msgstr "The connection string is missing: cenya-agent connect cenya://portal.mydomain.com/XXXX-XXXX-XXXX"
+
+#: agent/localclient.py:759
+msgid "Se enrola desde esta consola; después arranca el servicio."
+msgstr "Enrolling from this console; start the service afterwards."
+
+#: agent/localclient.py:763
+#, python-format
+msgid "Conectado como «%(name)s» a %(portal)s. El agente se reinicia con la conexión nueva."
+msgstr "Connected as “%(name)s” to %(portal)s. The agent restarts with the new connection."
+
+#: agent/localclient.py:777
+msgid "Para borrar el enrolamiento sin el servicio: cenya-agent goodbye"
+msgstr "To remove the enrolment without the service: cenya-agent goodbye"
+
+#: agent/localops.py:183
+msgid "No existe ese fichero."
+msgstr "That file does not exist."
+
+#: agent/localops.py:187
+msgid "No es un fichero de certificados que se pueda leer (PEM)."
+msgstr "It is not a readable certificate file (PEM)."
+
+#: agent/localops.py:197
+msgid "Ajuste desconocido."
+msgstr "Unknown setting."
+
+#: agent/localops.py:201
+msgid "Idioma no disponible: es, en, de, fr, pt_BR o vacío."
+msgstr "Language not available: es, en, de, fr, pt_BR or empty."
+
+#: agent/localops.py:206
+msgid "Tiene que ser una ruta."
+msgstr "It must be a path."
+
+#: agent/localops.py:213
+msgid "Tiene que ser un objeto con «mode» y «url»."
+msgstr "It must be an object with “mode” and “url”."
+
+#: agent/localops.py:218
+msgid "Modo de proxy no válido: system, manual o none."
+msgstr "Invalid proxy mode: system, manual or none."
+
+#: agent/localops.py:227 agent/localops.py:438
+msgid "La dirección del proxy no es válida."
+msgstr "The proxy address is not valid."
+
+#: agent/localops.py:234 agent/localops.py:238
+msgid "Tiene que ser un objeto con «subnets» y «addresses»."
+msgstr "It must be an object with “subnets” and “addresses”."
+
+#: agent/localops.py:254
+#, python-format
+msgid "No son redes ni direcciones válidas: %(values)s"
+msgstr "These are not valid networks or addresses: %(values)s"
+
+#: agent/localops.py:260
+msgid "Valor no válido: gentle, normal, fast o vacío."
+msgstr "Invalid value: gentle, normal, fast or empty."
+
+#: agent/localops.py:265
+msgid "Tiene que ser verdadero o falso."
+msgstr "It must be true or false."
+
+#: agent/localops.py:280
+msgid "«indefinite» tiene que ser verdadero o falso."
+msgstr "“indefinite” must be true or false."
+
+#: agent/localops.py:283
+msgid "Una pausa sin plazo no lleva «until» ni «seconds»."
+msgstr "A pause with no end takes neither “until” nor “seconds”."
+
+#: agent/localops.py:287 agent/localops.py:291
+msgid "«until» tiene que ser una fecha ISO 8601."
+msgstr "“until” must be an ISO 8601 date."
+
+#: agent/localops.py:296
+msgid "«seconds» tiene que ser un número de segundos mayor que cero."
+msgstr "“seconds” must be a number of seconds greater than zero."
+
+#: agent/localops.py:299
+msgid "Falta «until» o «seconds»."
+msgstr "“until” or “seconds” is missing."
+
+#: agent/localops.py:301
+msgid "Esa hora ya ha pasado."
+msgstr "That time has already passed."
+
+#: agent/localops.py:305
+#, python-format
+msgid "Una pausa con hora no puede durar más de %(days)d días; para pararlo sin plazo, pausa hasta que lo reanudes."
+msgstr "A pause with an end time cannot last more than %(days)d days; to stop it with no end, pause until you resume it."
+
+#: agent/localops.py:427
+msgid "La dirección del portal no es válida."
+msgstr "The portal address is not valid."
+
+#: agent/localops.py:444
+#, python-format
+msgid "No se encuentra el nombre %(host)s."
+msgstr "The name %(host)s cannot be found."
+
+#: agent/localops.py:446
+#, python-format
+msgid "El nombre %(host)s se resuelve."
+msgstr "The name %(host)s resolves."
+
+#: agent/localops.py:451
+#, python-format
+msgid "El puerto %(port)s de %(host)s no contesta."
+msgstr "Port %(port)s on %(host)s does not answer."
+
+#: agent/localops.py:454
+#, python-format
+msgid "%(host)s rechaza la conexión al puerto %(port)s."
+msgstr "%(host)s refuses the connection to port %(port)s."
+
+#: agent/localops.py:457
+#, python-format
+msgid "No se puede abrir una conexión con %(host)s:%(port)s."
+msgstr "A connection to %(host)s:%(port)s cannot be opened."
+
+#: agent/localops.py:459
+#, python-format
+msgid "El puerto %(port)s de %(host)s acepta conexiones."
+msgstr "Port %(port)s on %(host)s accepts connections."
+
+#: agent/localops.py:461
+msgid "Sin TLS: la dirección es http://."
+msgstr "No TLS: the address is http://."
+
+#: agent/localops.py:463
+msgid "El certificado se comprueba a través del proxy, en el paso siguiente."
+msgstr "The certificate is checked through the proxy, in the next step."
+
+#: agent/localops.py:467
+msgid "El certificado del portal es válido."
+msgstr "The portal's certificate is valid."
+
+#: agent/localops.py:468
+msgid "El certificado es válido con la lista de CA de Mozilla (no con la del sistema)."
+msgstr "The certificate is valid with Mozilla's CA list (not the system's)."
+
+#: agent/localops.py:469
+#, python-format
+msgid "El certificado del portal no es válido: %(reason)s"
+msgstr "The portal's certificate is not valid: %(reason)s"
+
+#: agent/localops.py:470
+#, python-format
+msgid "No se puede leer el fichero de CA configurado (%(path)s)."
+msgstr "The configured CA file cannot be read (%(path)s)."
+
+#: agent/localops.py:471
+#, python-format
+msgid "Falló la negociación TLS (%(reason)s)."
+msgstr "The TLS handshake failed (%(reason)s)."
+
+#: agent/localops.py:477
+msgid "Este agente no está enrolado."
+msgstr "This agent is not enrolled."
+
+#: agent/localops.py:481
+msgid "El servidor acepta a este agente."
+msgstr "The server accepts this agent."
+
+#: agent/localops.py:483
+msgid "El servidor rechaza el token de este agente: hay que enrolarlo de nuevo."
+msgstr "The server rejects this agent's token: it must be enrolled again."
+
+#: agent/localops.py:485
+msgid "La instalación de Cenya está en solo lectura."
+msgstr "The Cenya installation is read-only."
+
+#: agent/localops.py:488
+#, python-format
+msgid "El servidor respondió %(status)s: %(detail)s"
+msgstr "The server answered %(status)s: %(detail)s"
+
+#: agent/localops.py:491
+#, python-format
+msgid "No se pudo hablar con el servidor: %(detail)s"
+msgstr "Could not talk to the server: %(detail)s"
+
+#: agent/localops.py:638 agent/localops.py:890
+msgid "Este agente no está enrolado: conéctalo con una cadena de Ajustes → Agentes."
+msgstr "This agent is not enrolled: connect it with a string from Settings → Agents."
+
+#: agent/localops.py:713
+msgid "«lines» tiene que ser un número entero positivo."
+msgstr "“lines” must be a positive whole number."
+
+#: agent/localops.py:716
+msgid "«after» tiene que ser el cursor de una respuesta anterior."
+msgstr "“after” must be the cursor from an earlier answer."
+
+#: agent/localops.py:745
+#, python-format
+msgid "Tarea desconocida. Las tareas son: %(tasks)s."
+msgstr "Unknown task. The tasks are: %(tasks)s."
+
+#: agent/localops.py:749
+msgid "El servidor solo habla el protocolo 1: ahí no hay tareas sueltas, solo el barrido completo."
+msgstr "The server only speaks protocol 1: there are no separate tasks there, only the full sweep."
+
+#: agent/localops.py:752
+msgid "El servidor ha rechazado a este agente: no se empieza ninguna tarea."
+msgstr "The server has rejected this agent: no task is started."
+
+#: agent/localops.py:767 agent/settings_command.py:96
+#, python-format
+msgid "No se pudieron guardar los ajustes en %(path)s."
+msgstr "The settings could not be saved in %(path)s."
+
+#: agent/localops.py:787
+msgid "[agente] En pausa desde esta máquina hasta que se reanude."
+msgstr "[agent] Paused from this machine until resumed."
+
+#: agent/localops.py:789
+#, python-format
+msgid "[agente] En pausa desde esta máquina hasta %(until)s."
+msgstr "[agent] Paused from this machine until %(until)s."
+
+#: agent/localops.py:799
+msgid "[agente] Pausa local levantada desde esta máquina."
+msgstr "[agent] Local pause lifted from this machine."
+
+#: agent/localops.py:808
+msgid "Hay ajustes que no son válidos; no se ha cambiado nada."
+msgstr "Some settings are not valid; nothing has been changed."
+
+#: agent/localops.py:810
+msgid "No hay nada que cambiar."
+msgstr "There is nothing to change."
+
+#: agent/localops.py:825
+msgid "Los ajustes se guardaron, pero la conexión no se pudo rehacer con ellos."
+msgstr "The settings were saved, but the connection could not be rebuilt with them."
+
+#: agent/localops.py:838
+#, python-format
+msgid "[agente] Ajustes locales cambiados desde esta máquina: %(fields)s."
+msgstr "[agent] Local settings changed from this machine: %(fields)s."
+
+#: agent/localops.py:851
+msgid "La dirección no es válida."
+msgstr "The address is not valid."
+
+#: agent/localops.py:854
+msgid "Esa dirección está excluida en este agente: no se sondea."
+msgstr "That address is excluded on this agent: it is not probed."
+
+#: agent/localops.py:860
+msgid "El servidor ha rechazado a este agente: no se usa ninguna credencial."
+msgstr "The server has rejected this agent: no credential is used."
+
+#: agent/localops.py:904
+msgid "Falta la cadena de conexión (la de Ajustes → Agentes)."
+msgstr "The connection string is missing (the one from Settings → Agents)."
+
+#: agent/localops.py:907
+msgid "El token de este agente lo fija la variable CENYA_AGENT_TOKEN: cámbiala allí."
+msgstr "This agent's token is set by the CENYA_AGENT_TOKEN variable: change it there."
+
+#: agent/localops.py:909 agent/localops.py:931
+msgid "Ya se está cambiando la conexión de este agente."
+msgstr "This agent's connection is already being changed."
+
+#: agent/localops.py:925
+#, python-format
+msgid "[agente] Conectado desde esta máquina como «%(name)s» en %(url)s."
+msgstr "[agent] Connected from this machine as “%(name)s” at %(url)s."
+
+#: agent/localops.py:947
+msgid "[agente] Desconectado desde esta máquina."
+msgstr "[agent] Disconnected from this machine."
+
+#: agent/localops.py:955
+msgid "Se ha avisado al servidor: este agente queda dado de baja."
+msgstr "The server has been told: this agent is now deregistered."
+
+#: agent/localops.py:957
+msgid "Este agente no estaba conectado a ningún servidor."
+msgstr "This agent was not connected to any server."
+
+#: agent/localops.py:981
+msgid "Falta la URL de NetBox."
+msgstr "The NetBox URL is missing."
+
+#: agent/localops.py:983
+msgid "Falta el token de NetBox."
+msgstr "The NetBox token is missing."
+
+#: agent/localops.py:985
+msgid "«verify_tls» y «send» tienen que ser verdadero o falso."
+msgstr "“verify_tls” and “send” must be true or false."
+
+#: agent/localops.py:994
+msgid "Ya hay una exportación de NetBox en marcha."
+msgstr "A NetBox export is already running."
+
+#: agent/localops.py:1011
+#, python-format
+msgid "La exportación falló (%(type)s)."
+msgstr "The export failed (%(type)s)."
+
+#: agent/localops.py:1034 agent/localops.py:1100 agent/netbox_export.py:299
+#, python-format
+msgid "No se pudo escribir %(path)s: %(error)s"
+msgstr "Couldn't write %(path)s: %(error)s"
+
+#: agent/localops.py:1180
+msgid "Falta «path»: la ruta completa donde dejar el fichero."
+msgstr "“path” is missing: the full path where the file should go."
+
+#: agent/localops.py:1183
+msgid "«path» tiene que ser una ruta completa (absoluta)."
+msgstr "“path” must be a full (absolute) path."
+
+#: agent/localops.py:1187
+#, python-format
+msgid "No existe la carpeta %(path)s."
+msgstr "The folder %(path)s does not exist."
+
+#: agent/localpipe.py:342 agent/localpipe.py:572
+#, python-format
+msgid "[canal local] No se puede abrir %(name)s (%(error)s): la aplicación y los comandos locales no podrán hablar con el servicio."
+msgstr "[local channel] Cannot open %(name)s (%(error)s): the application and the local commands will not be able to talk to the service."
+
+#: agent/localpipe.py:383
+#, python-format
+msgid "[canal local] El canal local se ha cerrado por un error: %(error)s"
+msgstr "[local channel] The local channel closed because of an error: %(error)s"
+
+#: agent/localpipe.py:549
+#, python-format
+msgid "[canal local] %(path)s existe y no es un socket: no se toca."
+msgstr "[local channel] %(path)s exists and is not a socket: it is left alone."
+
+#: agent/localpipe.py:559
+#, python-format
+msgid "[canal local] Ya hay otro agente escuchando en %(path)s."
+msgstr "[local channel] Another agent is already listening on %(path)s."
+
+#: agent/localpipe.py:664
+msgid "[canal local] Sin pywin32 no hay canal local: la aplicación y los comandos locales no podrán hablar con el servicio."
+msgstr "[local channel] Without pywin32 there is no local channel: the application and the local commands will not be able to talk to the service."
+
 #: agent/netbox_export.py:124
 #, python-format
 msgid "NetBox no respondió en %(seconds)s segundos. ¿Es esa la URL y llega la red hasta allí?"
@@ -317,7 +941,7 @@ msgstr "The response from %(path)s doesn't have the expected shape."
 msgid "%(path)s tiene más de %(max)s objetos. Esta importación está pensada para inventarios de pyme; hablemos antes de traer eso."
 msgstr "%(path)s has more than %(max)s objects. This import is meant for small-business inventories; let's talk before bringing that in."
 
-#: agent/netbox_export.py:227
+#: agent/netbox_export.py:227 agent/app/view.py:630
 msgid "La URL tiene que empezar por http:// o https://."
 msgstr "The URL must start with http:// or https://."
 
@@ -348,11 +972,6 @@ msgstr "Without a token NetBox can't be read."
 msgid "Leyendo %(path)s…"
 msgstr "Reading %(path)s…"
 
-#: agent/netbox_export.py:299
-#, python-format
-msgid "No se pudo escribir %(path)s: %(error)s"
-msgstr "Couldn't write %(path)s: %(error)s"
-
 #: agent/netbox_export.py:306
 #, python-format
 msgid "Exportado %(n)d objeto a %(path)s."
@@ -364,15 +983,55 @@ msgstr[1] "Exported %(n)d objects to %(path)s."
 msgid "Súbelo en Cenya: Ajustes → Importar → «NetBox, desde un fichero»."
 msgstr "Upload it in Cenya: Settings → Import → «NetBox, from a file»."
 
-#: agent/runtime.py:86
+#: agent/runtime.py:88
 #, python-format
 msgid "[agente] Tarea %(task)s enviada: %(created)s, %(refreshed)s"
 msgstr "[agent] Task %(task)s sent: %(created)s, %(refreshed)s"
 
-#: agent/runtime.py:456
+#: agent/runtime.py:169
+msgid "[agente] Creada la clave de este agente: se presenta al portal en el próximo checkin."
+msgstr "[agent] This agent's key has been created: it is presented to the portal at the next check-in."
+
+#: agent/runtime.py:712
 #, python-format
 msgid "[agente] Tarea %(task)s guardada en la cola local: se enviará cuando el servidor conteste."
 msgstr "[agent] Task %(task)s saved in the local queue: it will be sent when the server answers."
+
+#: agent/settings_command.py:42
+msgid "Uso: cenya-agent settings set ca_bundle <fichero> | set auto_update on|off | unset ca_bundle"
+msgstr "Usage: cenya-agent settings set ca_bundle <file> | set auto_update on|off | unset ca_bundle"
+
+#: agent/settings_command.py:72
+#, python-format
+msgid "No se pudo leer el certificado %(path)s: %(error)s"
+msgstr "The certificate %(path)s could not be read: %(error)s"
+
+#: agent/settings_command.py:80
+#, python-format
+msgid "%(path)s no contiene ningún certificado de CA válido (PEM o DER)."
+msgstr "%(path)s contains no valid CA certificate (PEM or DER)."
+
+#: agent/settings_command.py:87
+#, python-format
+msgid "No se pudo guardar el certificado en %(path)s: %(error)s"
+msgstr "The certificate could not be saved in %(path)s: %(error)s"
+
+#: agent/settings_command.py:90
+#, python-format
+msgid "Certificado de CA guardado en %(path)s: el agente lo usará para verificar el portal."
+msgstr "CA certificate saved in %(path)s: the agent will use it to verify the portal."
+
+#: agent/settings_command.py:118
+msgid "Certificado de CA olvidado."
+msgstr "CA certificate forgotten."
+
+#: agent/settings_command.py:126
+msgid "La actualización automática queda encendida."
+msgstr "Automatic updates are now on."
+
+#: agent/settings_command.py:126
+msgid "La actualización automática queda apagada."
+msgstr "Automatic updates are now off."
 
 #: agent/status.py:315
 msgid "hace menos de un minuto"
@@ -411,7 +1070,7 @@ msgstr "The service is stopped and there is no data from its last run."
 msgid "Servicio no instalado"
 msgstr "Service not installed"
 
-#: agent/status.py:341
+#: agent/status.py:341 agent/app/bridge.py:703
 msgid "El servicio del agente no está instalado en este equipo."
 msgstr "The agent service is not installed on this computer."
 
@@ -448,7 +1107,7 @@ msgstr "Can't reach the server"
 msgid "Barriendo la red"
 msgstr "Sweeping the network"
 
-#: agent/status.py:380
+#: agent/status.py:380 agent/app/view.py:337
 #, python-format
 msgid "Paso actual: %(step)s"
 msgstr "Current step: %(step)s"
@@ -457,7 +1116,7 @@ msgstr "Current step: %(step)s"
 msgid "Arrancando"
 msgstr "Starting"
 
-#: agent/status.py:384
+#: agent/status.py:384 agent/app/view.py:910
 msgid "En marcha"
 msgstr "Running"
 
@@ -487,49 +1146,56 @@ msgstr "No sweep has finished yet."
 msgid "Próximo barrido hacia las %(clock)s."
 msgstr "Next sweep around %(clock)s."
 
-#: agent/store.py:572
+#: agent/store.py:624
 #, python-format
 msgid "No se pudo guardar el enrolamiento de forma segura en %(path)s: %(error)s"
 msgstr "The enrolment could not be saved securely at %(path)s: %(error)s"
 
-#: agent/store.py:615
+#: agent/store.py:667
 #, python-format
 msgid "[agente] La carpeta %(path)s no estaba protegida: se ha apartado sin usarlo lo que otro usuario pudo dejar en ella (%(names)s), y ya queda protegida."
 msgstr "[agent] The folder %(path)s was not protected: what another user could have left in it has been set aside unused (%(names)s), and it is now protected."
 
-#: agent/store.py:644
+#: agent/store.py:696
 #, python-format
 msgid "No se pudo apartar %(path)s, que no es de fiar: %(error)s"
 msgstr "Could not set aside %(path)s, which cannot be trusted: %(error)s"
 
-#: agent/store.py:669
+#: agent/store.py:721
 #, python-format
 msgid "La carpeta %(path)s no está protegida y no se puede proteger (%(error)s): el agente no lee ni guarda en ella su token ni sus credenciales. Ejecútalo como administrador o como servicio."
 msgstr "The folder %(path)s is not protected and cannot be protected (%(error)s): the agent will not read or keep its token or credentials there. Run it as an administrator or as a service."
 
-#: agent/tray.py:175
+#: agent/tray.py:211
+msgid "No se encuentra la aplicación de Cenya Agent junto a este icono."
+msgstr "The Cenya Agent application cannot be found next to this icon."
+
+#: agent/tray.py:240
+msgid "Esto necesita permisos de administrador. ¿Abrir Cenya Agent como administrador?"
+msgstr "This needs administrator rights. Open Cenya Agent as administrator?"
+
+#: agent/tray.py:247
+msgid "No se ha podido"
+msgstr "It could not be done"
+
+#: agent/tray.py:265
+msgid "Presencia en marcha"
+msgstr "Presence running"
+
+#: agent/tray.py:265
+msgid "El agente está mirando quién responde en la red."
+msgstr "The agent is checking who answers on the network."
+
+#: agent/tray.py:277 agent/app/view.py:513
 #, python-format
-msgid "Versión del agente: %(version)s"
-msgstr "Agent version: %(version)s"
+msgid "Hay una versión nueva del agente: %(version)s"
+msgstr "A new version of the agent is available: %(version)s"
 
-#: agent/tray.py:178
-#, python-format
-msgid "Servidor: %(url)s"
-msgstr "Server: %(url)s"
+#: agent/tray.py:279 agent/app/view.py:889
+msgid "Está al día."
+msgstr "It is up to date."
 
-#: agent/tray.py:192
-msgid "Ver estado"
-msgstr "View status"
-
-#: agent/tray.py:195
-msgid "Abrir Ajustes → Agentes"
-msgstr "Open Settings → Agents"
-
-#: agent/tray.py:199
-msgid "Cerrar este icono"
-msgstr "Close this icon"
-
-#: agent/tray.py:272
+#: agent/tray.py:360
 #, python-format
 msgid ""
 "El icono de Cenya Agent no ha podido arrancar:\n"
@@ -538,43 +1204,1258 @@ msgstr ""
 "The Cenya Agent icon could not start:\n"
 "%(error)s"
 
-#: agent/winservice.py:163
+#: agent/update.py:489
+msgid "la firma del manifiesto no es de ninguna clave conocida"
+msgstr "the manifest signature is not from any known key"
+
+#: agent/update.py:490
+msgid "el fichero descargado no coincide con el manifiesto firmado; se ha borrado"
+msgstr "the downloaded file does not match the signed manifest; it has been deleted"
+
+#: agent/update.py:491
+msgid "el manifiesto no es válido"
+msgstr "the manifest is not valid"
+
+#: agent/update.py:492
+msgid "este agente no tiene ninguna clave de publicación configurada"
+msgstr "this agent has no release key configured"
+
+#: agent/update.py:493
+msgid "falta la librería cryptography para verificar la firma"
+msgstr "the cryptography library is missing to verify the signature"
+
+#: agent/update.py:494
+msgid "no es más nueva que la instalada"
+msgstr "it is not newer than the installed one"
+
+#: agent/update.py:495
+msgid "el manifiesto es de otra versión"
+msgstr "the manifest is for another version"
+
+#: agent/update.py:496
+msgid "no se pudo descargar"
+msgstr "it could not be downloaded"
+
+#: agent/update.py:497
+msgid "el instalador no llegó a sustituir el agente"
+msgstr "the installer never replaced the agent"
+
+#: agent/update.py:498
+msgid "no consiguió conectar y se volvió a la versión anterior"
+msgstr "it could not connect and the previous version was restored"
+
+#: agent/update.py:499
+msgid "este sistema no se actualiza solo"
+msgstr "this system does not update itself"
+
+#: agent/update.py:609
+#, python-format
+msgid "[agente] Error inesperado al actualizar: %(error)s"
+msgstr "[agent] Unexpected error while updating: %(error)s"
+
+#: agent/update.py:645
+#, python-format
+msgid "[agente] La versión %(version)s no arrancó bien y se volvió a la anterior: no se intentará de nuevo."
+msgstr "[agent] Version %(version)s did not start properly and the previous one was restored: it will not be tried again."
+
+#: agent/update.py:699
+#, python-format
+msgid "[agente] Hay una versión nueva del agente (%(version)s), pero la actualización automática está apagada en esta máquina."
+msgstr "[agent] A new agent version is available (%(version)s), but automatic updates are off on this machine."
+
+#: agent/update.py:731
+#, python-format
+msgid "[agente] Descargando la versión %(version)s del agente."
+msgstr "[agent] Downloading agent version %(version)s."
+
+#: agent/update.py:741
+#, python-format
+msgid "[agente] Versión %(version)s verificada: se instalará en cuanto no haya ninguna tarea en curso."
+msgstr "[agent] Version %(version)s verified: it will be installed as soon as no task is running."
+
+#: agent/update.py:759
+#, python-format
+msgid "[agente] Instalando la versión %(version)s; el servicio se reiniciará."
+msgstr "[agent] Installing version %(version)s; the service will restart."
+
+#: agent/update.py:870
+#, python-format
+msgid "[agente] No se actualiza a la versión %(version)s: %(reason)s."
+msgstr "[agent] Not updating to version %(version)s: %(reason)s."
+
+#: agent/update.py:1024
+msgid "Uso: cenya-agent update apply-request <carpeta de estado>"
+msgstr "Usage: cenya-agent update apply-request <state folder>"
+
+#: agent/winservice.py:165
 msgid "El bucle del agente terminó sin que nadie lo parara."
 msgstr "The agent loop ended without anyone stopping it."
 
-#: agent/winservice.py:172
+#: agent/winservice.py:174
 #, python-format
 msgid "Cenya Agent se ha detenido: %(reason)s"
 msgstr "Cenya Agent has stopped: %(reason)s"
 
-#: agent/winservice.py:213
+#: agent/winservice.py:215
 #, python-format
 msgid "No se encuentra %(dll)s: la Python con la que se creó este entorno ya no está donde estaba. Vuelve a crear el entorno virtual."
 msgstr "%(dll)s can't be found: the Python this environment was created with is no longer where it was. Create the virtual environment again."
 
-#: agent/winservice.py:226
+#: agent/winservice.py:228
 #, python-format
 msgid "No se puede reemplazar %(file)s: detén el servicio antes de actualizarlo (%(command)s stop)."
 msgstr "%(file)s can't be replaced: stop the service before updating it (%(command)s stop)."
 
-#: agent/winservice.py:314
-msgid "Este equipo no está enrolado y en esta consola no hay ningún token: el servicio no podría arrancar. Ejecuta antes cenya-agent enroll <cadena> y vuelve a instalar."
-msgstr "This machine is not enrolled and there is no token in this console: the service could not start. Run cenya-agent enroll <string> first and install again."
+#: agent/winservice.py:316
+msgid "Este equipo aún no está enrolado: el servicio arrancará y esperará a que lo conectes."
+msgstr "This machine is not enrolled yet: the service will start and wait for you to connect it."
 
-#: agent/winservice.py:320
+#: agent/winservice.py:319
 #, python-format
 msgid "Variables guardadas en el servicio: %(names)s"
 msgstr "Variables stored in the service: %(names)s"
 
-#: agent/winservice.py:322
+#: agent/winservice.py:321
 msgid "Sin variables CENYA_* en esta consola: se dejan las que ya tuviera el servicio."
 msgstr "No CENYA_* variables in this console: the ones the service already had are kept."
 
-#: agent/winservice.py:324
+#: agent/winservice.py:323
 msgid "La clave del servicio queda legible solo por SYSTEM y Administradores."
 msgstr "The service's registry key is now readable only by SYSTEM and Administrators."
 
-#: agent/winservice.py:329
+#: agent/winservice.py:328
 #, python-format
 msgid "Estado del agente en %(path)s (lo escribe el servicio; lo lee el icono de bandeja)."
 msgstr "Agent status in %(path)s (written by the service, read by the tray icon)."
+
+#: agent/app/bridge.py:682
+msgid "Eso no es una dirección IP."
+msgstr "That is not an IP address."
+
+#: agent/app/bridge.py:688
+msgid "La dirección del proxy tiene que empezar por http:// o https://."
+msgstr "The proxy address must start with http:// or https://."
+
+#: agent/app/bridge.py:694 agent/app/view.py:675
+#, python-format
+msgid "Guardado en %(path)s"
+msgstr "Saved to %(path)s"
+
+#: agent/app/bridge.py:701
+msgid "Windows no ha dejado hacerlo: hace falta un administrador."
+msgstr "Windows did not allow it: an administrator is needed."
+
+#: agent/app/bridge.py:705
+msgid "El servicio no se ha detenido a tiempo. Vuelve a intentarlo en un momento."
+msgstr "The service did not stop in time. Try again in a moment."
+
+#: agent/app/bridge.py:707 agent/app/view.py:258 agent/app/view.py:919
+msgid "Con el canal de desarrollo, el servicio de Windows no se toca desde aquí."
+msgstr "With the development channel, the Windows service is not touched from here."
+
+#: agent/app/bridge.py:708
+#, python-format
+msgid "Windows no ha podido hacerlo: %(detail)s"
+msgstr "Windows could not do it: %(detail)s"
+
+#: agent/app/main.py:105
+msgid ""
+"Cenya Agent necesita el componente WebView2 de Microsoft para enseñar su ventana, y no está instalado en este equipo.\n"
+"\n"
+"Se descarga gratis en https://developer.microsoft.com/microsoft-edge/webview2/ (el «Evergreen Bootstrapper»).\n"
+"\n"
+"El agente sigue funcionando: esto solo afecta a la ventana."
+msgstr ""
+"Cenya Agent needs Microsoft's WebView2 component to show its window, and it is not installed on this computer.\n"
+"\n"
+"It is a free download at https://developer.microsoft.com/microsoft-edge/webview2/ (the “Evergreen Bootstrapper”).\n"
+"\n"
+"The agent keeps working: this only affects the window."
+
+#: agent/app/main.py:134
+msgid "Falta pywebview: instala el agente con el extra [gui]."
+msgstr "pywebview is missing: install the agent with the [gui] extra."
+
+#: agent/app/strings.py:21
+msgid "Estado"
+msgstr "Status"
+
+#: agent/app/strings.py:22
+msgid "Actividad"
+msgstr "Activity"
+
+#: agent/app/strings.py:23
+msgid "Importar de NetBox"
+msgstr "Import from NetBox"
+
+#: agent/app/strings.py:24
+msgid "Herramientas"
+msgstr "Tools"
+
+#: agent/app/strings.py:25 agent/app/strings.py:64
+msgid "Conexión"
+msgstr "Connection"
+
+#: agent/app/strings.py:26
+msgid "Ajustes"
+msgstr "Settings"
+
+#: agent/app/strings.py:27
+msgid "Acerca de"
+msgstr "About"
+
+#: agent/app/strings.py:28
+msgid "Qué está haciendo el agente en este equipo."
+msgstr "What the agent is doing on this computer."
+
+#: agent/app/strings.py:29
+msgid "El registro del agente, en directo."
+msgstr "The agent's log, live."
+
+#: agent/app/strings.py:30
+msgid "Trae a Cenya lo que ya tienes en NetBox, leído desde dentro de tu red."
+msgstr "Bring into Cenya what you already have in NetBox, read from inside your network."
+
+#: agent/app/strings.py:31
+msgid "Comprobaciones para cuando algo no va como debería."
+msgstr "Checks for when something is not working as it should."
+
+#: agent/app/strings.py:32
+msgid "El portal de Cenya al que informa este equipo."
+msgstr "The Cenya portal this computer reports to."
+
+#: agent/app/strings.py:33
+msgid "Lo que decide quien está en esta máquina."
+msgstr "What the person at this machine decides."
+
+#: agent/app/strings.py:34
+msgid "El agente de descubrimiento de Cenya."
+msgstr "Cenya's discovery agent."
+
+#: agent/app/strings.py:36
+msgid "Cargando…"
+msgstr "Loading…"
+
+#: agent/app/strings.py:37
+msgid "Reintentar"
+msgstr "Retry"
+
+#: agent/app/strings.py:38
+msgid "No se pudo cargar"
+msgstr "Could not load"
+
+#: agent/app/strings.py:39
+msgid "Cancelar"
+msgstr "Cancel"
+
+#: agent/app/strings.py:40
+msgid "Cerrar"
+msgstr "Close"
+
+#: agent/app/strings.py:41
+msgid "Guardado"
+msgstr "Saved"
+
+#: agent/app/strings.py:42
+msgid "Guardar"
+msgstr "Save"
+
+#: agent/app/strings.py:43
+msgid "Canal de desarrollo"
+msgstr "Development channel"
+
+#: agent/app/strings.py:45
+msgid "Solo lectura — reiniciar como administrador para hacer cambios"
+msgstr "Read-only — restart as administrator to make changes"
+
+#: agent/app/strings.py:46
+msgid "Reiniciar como administrador"
+msgstr "Restart as administrator"
+
+#: agent/app/strings.py:47 agent/app/view.py:141 agent/app/view.py:209
+#: agent/app/view.py:260
+msgid "Hace falta abrir Cenya Agent como administrador para hacer cambios."
+msgstr "Cenya Agent must be opened as administrator to make changes."
+
+#: agent/app/strings.py:49
+msgid "El servicio del agente no está en marcha"
+msgstr "The agent's service is not running"
+
+#: agent/app/strings.py:51
+msgid "Sin el servicio, este equipo no barre la red ni informa al portal. Esta ventana se pondrá al día sola en cuanto arranque."
+msgstr "Without the service, this computer neither sweeps the network nor reports to the portal. This window will update on its own as soon as it starts."
+
+#: agent/app/strings.py:54
+msgid "Iniciar el servicio"
+msgstr "Start the service"
+
+#: agent/app/strings.py:55
+msgid "El servicio del agente no está instalado"
+msgstr "The agent's service is not installed"
+
+#: agent/app/strings.py:56
+msgid "Vuelve a ejecutar el instalador de Cenya Agent para recuperarlo."
+msgstr "Run the Cenya Agent installer again to get it back."
+
+#: agent/app/strings.py:58
+msgid "Conecta este equipo a Cenya"
+msgstr "Connect this computer to Cenya"
+
+#: agent/app/strings.py:59
+msgid "Pega la cadena de conexión que da el portal en Ajustes → Agentes → Añadir un agente."
+msgstr "Paste the connection string the portal gives in Settings → Agents → Add an agent."
+
+#: agent/app/strings.py:60
+msgid "cenya://portal.midominio.com/XXXX-XXXX-XXXX"
+msgstr "cenya://portal.mydomain.com/XXXX-XXXX-XXXX"
+
+#: agent/app/strings.py:61
+msgid "Conectar"
+msgstr "Connect"
+
+#: agent/app/strings.py:62
+msgid "Pega antes la cadena de conexión."
+msgstr "Paste the connection string first."
+
+#: agent/app/strings.py:65
+msgid "Tarea en curso"
+msgstr "Current task"
+
+#: agent/app/strings.py:66
+msgid "Tareas"
+msgstr "Tasks"
+
+#: agent/app/strings.py:67
+msgid "Último resultado"
+msgstr "Last result"
+
+#: agent/app/strings.py:68 agent/app/strings.py:80
+msgid "Tarea"
+msgstr "Task"
+
+#: agent/app/strings.py:69
+msgid "Última ejecución"
+msgstr "Last run"
+
+#: agent/app/strings.py:70
+msgid "Resultado"
+msgstr "Result"
+
+#: agent/app/strings.py:71
+msgid "Próxima"
+msgstr "Next"
+
+#: agent/app/strings.py:72
+msgid "Ejecutar ahora"
+msgstr "Run now"
+
+#: agent/app/strings.py:73
+msgid "En cola: empezará en cuanto termine la tarea en curso."
+msgstr "Queued: it will start as soon as the current task ends."
+
+#: agent/app/strings.py:74
+msgid "Pausar"
+msgstr "Pause"
+
+#: agent/app/strings.py:75 agent/app/view.py:958
+msgid "Reanudar"
+msgstr "Resume"
+
+#: agent/app/strings.py:76
+msgid "Sin tareas en marcha"
+msgstr "No task running"
+
+#: agent/app/strings.py:77
+msgid "Todavía no ha terminado ninguna tarea."
+msgstr "No task has finished yet."
+
+#: agent/app/strings.py:78
+msgid "El portal todavía no ha mandado la agenda de tareas."
+msgstr "The portal has not sent the task schedule yet."
+
+#: agent/app/strings.py:81
+msgid "Nivel"
+msgstr "Level"
+
+#: agent/app/strings.py:82 agent/app/view.py:609
+msgid "Todas las tareas"
+msgstr "All tasks"
+
+#: agent/app/strings.py:83 agent/app/view.py:613
+msgid "Todos los niveles"
+msgstr "All levels"
+
+#: agent/app/strings.py:84 agent/app/view.py:614
+msgid "Información"
+msgstr "Information"
+
+#: agent/app/strings.py:85 agent/app/view.py:615
+msgid "Avisos"
+msgstr "Warnings"
+
+#: agent/app/strings.py:86 agent/app/view.py:616
+msgid "Errores"
+msgstr "Errors"
+
+#: agent/app/strings.py:87 agent/app/view.py:110
+msgid "General"
+msgstr "General"
+
+#: agent/app/strings.py:88
+msgid "Copiar"
+msgstr "Copy"
+
+#: agent/app/strings.py:89
+msgid "Copiado"
+msgstr "Copied"
+
+#: agent/app/strings.py:90
+msgid "Abrir la carpeta"
+msgstr "Open the folder"
+
+#: agent/app/strings.py:91
+msgid "Todavía no hay nada en el registro."
+msgstr "There is nothing in the log yet."
+
+#: agent/app/strings.py:92
+msgid "Nada coincide con el filtro."
+msgstr "Nothing matches the filter."
+
+#: agent/app/strings.py:93
+msgid "En directo"
+msgstr "Live"
+
+#: agent/app/strings.py:95
+msgid "NetBox"
+msgstr "NetBox"
+
+#: agent/app/strings.py:96
+msgid "Dirección de NetBox"
+msgstr "NetBox address"
+
+#: agent/app/strings.py:97
+msgid "https://netbox.midominio.local"
+msgstr "https://netbox.mydomain.local"
+
+#: agent/app/strings.py:98
+msgid "Token de solo lectura"
+msgstr "Read-only token"
+
+#: agent/app/strings.py:100
+msgid "¿Cómo se crea? En NetBox, tu usuario → API Tokens → Añadir, sin marcar «Write enabled». Se usa una vez y no se guarda."
+msgstr "How to create one? In NetBox, your user → API Tokens → Add, without ticking “Write enabled”. It is used once and not stored."
+
+#: agent/app/strings.py:103
+msgid "Aceptar un certificado no válido (NetBox con certificado propio o caducado)"
+msgstr "Accept an invalid certificate (NetBox with a self-signed or expired certificate)"
+
+#: agent/app/strings.py:104 agent/app/strings.py:128
+msgid "Probar"
+msgstr "Test"
+
+#: agent/app/strings.py:105
+msgid "NetBox contesta y acepta el token."
+msgstr "NetBox answers and accepts the token."
+
+#: agent/app/strings.py:106
+msgid "Al terminar"
+msgstr "When it finishes"
+
+#: agent/app/strings.py:107
+msgid "Enviar a Cenya y revisar"
+msgstr "Send to Cenya and review"
+
+#: agent/app/strings.py:108
+msgid "Se sube al portal y se abre la revisión en el navegador. Nada se importa hasta que lo confirmes allí."
+msgstr "It is uploaded to the portal and the review opens in the browser. Nothing is imported until you confirm it there."
+
+#: agent/app/strings.py:109
+msgid "Guardar como fichero"
+msgstr "Save as a file"
+
+#: agent/app/strings.py:110
+msgid "Para subirlo después en Ajustes → Importar → «NetBox, desde un fichero»."
+msgstr "To upload it later in Settings → Import → “NetBox, from a file”."
+
+#: agent/app/strings.py:111
+msgid "Leer NetBox"
+msgstr "Read NetBox"
+
+#: agent/app/strings.py:112
+msgid "Leyendo NetBox…"
+msgstr "Reading NetBox…"
+
+#: agent/app/strings.py:113
+msgid "Avance"
+msgstr "Progress"
+
+#: agent/app/strings.py:114
+msgid "Lectura terminada"
+msgstr "Read finished"
+
+#: agent/app/strings.py:115
+msgid "Abrir la revisión"
+msgstr "Open the review"
+
+#: agent/app/strings.py:116
+msgid "Mostrar en la carpeta"
+msgstr "Show in folder"
+
+#: agent/app/strings.py:117
+msgid "Leer otro NetBox"
+msgstr "Read another NetBox"
+
+#: agent/app/strings.py:118 agent/app/view.py:628
+msgid "Escribe la dirección de NetBox."
+msgstr "Type the NetBox address."
+
+#: agent/app/strings.py:119 agent/app/view.py:632
+msgid "Pega el token de NetBox."
+msgstr "Paste the NetBox token."
+
+#: agent/app/strings.py:120
+msgid "El token se ha borrado de este formulario."
+msgstr "The token has been cleared from this form."
+
+#: agent/app/strings.py:122
+msgid "Analizar una IP"
+msgstr "Analyse an IP"
+
+#: agent/app/strings.py:123
+msgid "Prueba SNMP, SSH y WinRM contra una sola dirección y dice qué pasó con cada uno."
+msgstr "Tries SNMP, SSH and WinRM against a single address and says what happened with each."
+
+#: agent/app/strings.py:124
+msgid "192.168.1.20"
+msgstr "192.168.1.20"
+
+#: agent/app/strings.py:125
+msgid "Analizar"
+msgstr "Analyse"
+
+#: agent/app/strings.py:126
+msgid "Probar la conexión con el portal"
+msgstr "Test the connection to the portal"
+
+#: agent/app/strings.py:127
+msgid "Nombre, puerto, certificado y token, paso a paso."
+msgstr "Name, port, certificate and token, step by step."
+
+#: agent/app/strings.py:129
+msgid "Autocomprobación"
+msgstr "Self-test"
+
+#: agent/app/strings.py:130
+msgid "Qué puede hacer esta instalación: colectores, librerías e idiomas."
+msgstr "What this installation can do: collectors, libraries and languages."
+
+#: agent/app/strings.py:131
+msgid "Comprobar"
+msgstr "Check"
+
+#: agent/app/strings.py:132
+msgid "Paquete de soporte"
+msgstr "Support bundle"
+
+#: agent/app/strings.py:134
+msgid "Un fichero con el registro, los ajustes locales y el estado, sin contraseñas ni tokens, para enviarlo a soporte."
+msgstr "A file with the log, the local settings and the status, without passwords or tokens, to send to support."
+
+#: agent/app/strings.py:136
+msgid "Guardar el paquete…"
+msgstr "Save the bundle…"
+
+#: agent/app/strings.py:137
+msgid "Trabajando…"
+msgstr "Working…"
+
+#: agent/app/strings.py:139
+msgid "Portal"
+msgstr "Portal"
+
+#: agent/app/strings.py:140
+msgid "Este equipo aparece como"
+msgstr "This computer appears as"
+
+#: agent/app/strings.py:141
+msgid "Abrir en el navegador"
+msgstr "Open in the browser"
+
+#: agent/app/strings.py:142
+msgid "Conectar o cambiar de portal"
+msgstr "Connect or change portal"
+
+#: agent/app/strings.py:143
+msgid "Pega una cadena de conexión o un código del portal."
+msgstr "Paste a connection string or a code from the portal."
+
+#: agent/app/strings.py:144
+msgid "¿Cambiar de portal?"
+msgstr "Change portal?"
+
+#: agent/app/strings.py:145
+#, python-format
+msgid "Este equipo dejará de informar a %(portal)s y pasará a informar al portal nuevo."
+msgstr "This computer will stop reporting to %(portal)s and will report to the new portal."
+
+#: agent/app/strings.py:146
+msgid "Cambiar de portal"
+msgstr "Change portal"
+
+#: agent/app/strings.py:147
+msgid "Certificado de la empresa"
+msgstr "Company certificate"
+
+#: agent/app/strings.py:149
+msgid "Si la salida a internet pasa por una inspección TLS con una autoridad propia, indica aquí su certificado (.pem, .crt o .cer)."
+msgstr "If internet access goes through TLS inspection with your own authority, choose its certificate here (.pem, .crt or .cer)."
+
+#: agent/app/strings.py:151
+msgid "Elegir fichero…"
+msgstr "Choose file…"
+
+#: agent/app/strings.py:152 agent/app/strings.py:175
+msgid "Quitar"
+msgstr "Remove"
+
+#: agent/app/strings.py:153
+msgid "Ninguno: se usan los certificados de Windows."
+msgstr "None: Windows' certificates are used."
+
+#: agent/app/strings.py:154
+msgid "Proxy"
+msgstr "Proxy"
+
+#: agent/app/strings.py:155
+msgid "El del sistema"
+msgstr "The system's"
+
+#: agent/app/strings.py:156
+msgid "Manual"
+msgstr "Manual"
+
+#: agent/app/strings.py:157
+msgid "Ninguno"
+msgstr "None"
+
+#: agent/app/strings.py:158
+msgid "http://proxy.midominio.local:8080"
+msgstr "http://proxy.mydomain.local:8080"
+
+#: agent/app/strings.py:159
+msgid "Si lleva usuario y contraseña, no se vuelven a mostrar."
+msgstr "If it has a user and password, they are not shown again."
+
+#: agent/app/strings.py:160
+msgid "Desconectar este equipo"
+msgstr "Disconnect this computer"
+
+#: agent/app/strings.py:162
+msgid "Avisa al portal, borra el enrolamiento y deja de barrer. Para volver hará falta una cadena de conexión nueva."
+msgstr "Tells the portal, deletes the enrolment and stops sweeping. Coming back will need a new connection string."
+
+#: agent/app/strings.py:164
+msgid "Desconectar…"
+msgstr "Disconnect…"
+
+#: agent/app/strings.py:165
+msgid "¿Desconectar este equipo?"
+msgstr "Disconnect this computer?"
+
+#: agent/app/strings.py:166
+#, python-format
+msgid "El agente dejará de informar a %(portal)s. Lo ya inventariado se queda en el portal."
+msgstr "The agent will stop reporting to %(portal)s. What is already inventoried stays in the portal."
+
+#: agent/app/strings.py:167
+msgid "Desconectar"
+msgstr "Disconnect"
+
+#: agent/app/strings.py:169
+msgid "Redes y direcciones que nunca se barren"
+msgstr "Networks and addresses that are never swept"
+
+#: agent/app/strings.py:170
+msgid "El agente no hace ping ni entra en ellas, tampoco si se pide desde el portal."
+msgstr "The agent neither pings nor logs into them, not even when asked from the portal."
+
+#: agent/app/strings.py:171
+msgid "10.0.5.0/24 o 10.0.5.7"
+msgstr "10.0.5.0/24 or 10.0.5.7"
+
+#: agent/app/strings.py:172
+msgid "Añadir"
+msgstr "Add"
+
+#: agent/app/strings.py:173
+msgid "Ninguna: se barre todo lo que diga el portal."
+msgstr "None: everything the portal says is swept."
+
+#: agent/app/strings.py:174
+msgid "Redes de este equipo"
+msgstr "This computer's networks"
+
+#: agent/app/strings.py:176 agent/app/view.py:806
+msgid "Red"
+msgstr "Network"
+
+#: agent/app/strings.py:177 agent/app/view.py:807
+msgid "Dirección"
+msgstr "Address"
+
+#: agent/app/strings.py:178
+msgid "Suavidad máxima"
+msgstr "Gentleness cap"
+
+#: agent/app/strings.py:179
+msgid "Cuántas conexiones a la vez puede abrir el agente. Puede bajar lo que diga el portal, nunca subirlo."
+msgstr "How many connections the agent may open at once. It can lower what the portal says, never raise it."
+
+#: agent/app/strings.py:180
+msgid "Actualizaciones"
+msgstr "Updates"
+
+#: agent/app/strings.py:181
+msgid "Automáticas"
+msgstr "Automatic"
+
+#: agent/app/strings.py:182
+msgid "Solo avisar"
+msgstr "Notify only"
+
+#: agent/app/strings.py:183
+msgid "Buscar ahora"
+msgstr "Check now"
+
+#: agent/app/strings.py:184
+msgid "Instalada"
+msgstr "Installed"
+
+#: agent/app/strings.py:185
+msgid "Vigente"
+msgstr "Current"
+
+#: agent/app/strings.py:186
+msgid "Servicio"
+msgstr "Service"
+
+#: agent/app/strings.py:187
+msgid "Iniciar"
+msgstr "Start"
+
+#: agent/app/strings.py:188
+msgid "Detener"
+msgstr "Stop"
+
+#: agent/app/strings.py:189
+msgid "Reiniciar"
+msgstr "Restart"
+
+#: agent/app/strings.py:190
+msgid "Arrancar con Windows"
+msgstr "Start with Windows"
+
+#: agent/app/strings.py:191
+msgid "Icono de bandeja al iniciar sesión"
+msgstr "Tray icon at sign-in"
+
+#: agent/app/strings.py:192
+msgid "Para todas las personas que usan este equipo."
+msgstr "For everyone who uses this computer."
+
+#: agent/app/strings.py:193
+msgid "Avisos de Windows"
+msgstr "Windows notifications"
+
+#: agent/app/strings.py:194
+msgid "Un aviso cuando el agente deja de poder trabajar."
+msgstr "A notification when the agent can no longer work."
+
+#: agent/app/strings.py:195
+msgid "Idioma"
+msgstr "Language"
+
+#: agent/app/strings.py:197
+msgid "Versión"
+msgstr "Version"
+
+#: agent/app/strings.py:198
+msgid "Licencia"
+msgstr "Licence"
+
+#: agent/app/strings.py:199
+msgid "Apache 2.0, código abierto"
+msgstr "Apache 2.0, open source"
+
+#: agent/app/strings.py:200
+msgid "Código fuente"
+msgstr "Source code"
+
+#: agent/app/strings.py:201
+msgid "Qué hace el agente con tus datos"
+msgstr "What the agent does with your data"
+
+#: agent/app/strings.py:203
+msgid "El agente descubre la red de tu empresa y la propone en Cenya. Solo habla con el portal por HTTPS saliente: no abre puertos."
+msgstr "The agent discovers your company's network and proposes it in Cenya. It only talks to the portal over outgoing HTTPS: it opens no ports."
+
+#: agent/app/strings.py:205
+msgid "Equipo"
+msgstr "Computer"
+
+#: agent/app/strings.py:206
+msgid "Sistema"
+msgstr "System"
+
+#: agent/app/strings.py:207
+msgid "Iconos: Lucide (licencia ISC)."
+msgstr "Icons: Lucide (ISC licence)."
+
+#: agent/app/view.py:84
+msgid "ahora"
+msgstr "now"
+
+#: agent/app/view.py:86
+#, python-format
+msgid "hoy, %(clock)s"
+msgstr "today, %(clock)s"
+
+#: agent/app/view.py:88
+#, python-format
+msgid "mañana, %(clock)s"
+msgstr "tomorrow, %(clock)s"
+
+#: agent/app/view.py:104
+msgid "Presencia"
+msgstr "Presence"
+
+#: agent/app/view.py:105
+msgid "Inventario"
+msgstr "Inventory"
+
+#: agent/app/view.py:106
+msgid "Copias de configuración"
+msgstr "Configuration backups"
+
+#: agent/app/view.py:107
+msgid "SAI"
+msgstr "UPS"
+
+#: agent/app/view.py:108 agent/app/view.py:123
+msgid "Hipervisores"
+msgstr "Hypervisors"
+
+#: agent/app/view.py:109
+msgid "Lectura de NetBox"
+msgstr "NetBox read"
+
+#: agent/app/view.py:118
+msgid "Este equipo"
+msgstr "This computer"
+
+#: agent/app/view.py:119
+msgid "Ping y ARP"
+msgstr "Ping and ARP"
+
+#: agent/app/view.py:131
+msgid "El servicio del agente no está en marcha."
+msgstr "The agent's service is not running."
+
+#: agent/app/view.py:135
+msgid "Se ha perdido la comunicación con el servicio. Vuelve a intentarlo."
+msgstr "Communication with the service was lost. Try again."
+
+#: agent/app/view.py:137
+msgid "El servicio está ocupado. Vuelve a intentarlo en unos segundos."
+msgstr "The service is busy. Try again in a few seconds."
+
+#: agent/app/view.py:139
+msgid "Windows no deja a esta cuenta hablar con el servicio del agente."
+msgstr "Windows does not let this account talk to the agent's service."
+
+#: agent/app/view.py:143
+#, python-format
+msgid "El servicio no ha podido hacerlo (%(code)s)."
+msgstr "The service could not do it (%(code)s)."
+
+#: agent/app/view.py:280
+msgid "La conexión anterior de este equipo estaba guardada en una carpeta sin proteger y se ha apartado por seguridad. Vuelve a conectarlo con una cadena nueva."
+msgstr "This machine's previous connection was stored in an unprotected folder and has been set aside for safety. Connect it again with a new string."
+
+#: agent/app/view.py:285
+msgid "La configuración de este agente no es válida."
+msgstr "This agent's configuration is not valid."
+
+#: agent/app/view.py:286
+msgid "El servicio está en marcha y esperando: pega una cadena de conexión para conectarlo a tu portal."
+msgstr "The service is running and waiting: paste a connection string to connect it to your portal."
+
+#: agent/app/view.py:298
+#, python-format
+msgid "Último contacto %(ago)s"
+msgstr "Last contact %(ago)s"
+
+#: agent/app/view.py:300
+#, python-format
+msgid "Último intento %(ago)s"
+msgstr "Last attempt %(ago)s"
+
+#: agent/app/view.py:303
+#, python-format
+msgid "Conectado a %(portal)s"
+msgstr "Connected to %(portal)s"
+
+#: agent/app/view.py:307
+msgid "El portal ha rechazado este agente"
+msgstr "The portal has rejected this agent"
+
+#: agent/app/view.py:308
+msgid "No barre ni usa ninguna credencial hasta que el portal lo acepte de nuevo. Si se revocó, hay que conectarlo otra vez."
+msgstr "It does not sweep or use any credential until the portal accepts it again. If it was revoked, it has to be connected again."
+
+#: agent/app/view.py:314
+msgid "La instalación de Cenya está en solo lectura"
+msgstr "The Cenya installation is read-only"
+
+#: agent/app/view.py:315
+msgid "El agente no empieza ninguna tarea hasta que el portal vuelva a aceptar resultados."
+msgstr "The agent starts no task until the portal accepts results again."
+
+#: agent/app/view.py:319
+msgid "Sin conexión con el portal"
+msgstr "No connection to the portal"
+
+#: agent/app/view.py:320
+msgid "Conectando con el portal…"
+msgstr "Connecting to the portal…"
+
+#: agent/app/view.py:339
+#, python-format
+msgid "%(done)d de %(total)d"
+msgstr "%(done)d of %(total)d"
+
+#: agent/app/view.py:340
+#, python-format
+msgid "Empezó %(ago)s"
+msgstr "Started %(ago)s"
+
+#: agent/app/view.py:354 agent/app/view.py:356
+msgid "En pausa hasta que se reanude"
+msgstr "Paused until resumed"
+
+#: agent/app/view.py:358
+#, python-format
+msgid "En pausa hasta que se reanude (como mucho, hasta el %(date)s)"
+msgstr "Paused until resumed (at most until %(date)s)"
+
+#: agent/app/view.py:362
+#, python-format
+msgid "En pausa hasta las %(clock)s"
+msgstr "Paused until %(clock)s"
+
+#: agent/app/view.py:364
+#, python-format
+msgid "En pausa hasta mañana a las %(clock)s"
+msgstr "Paused until tomorrow at %(clock)s"
+
+#: agent/app/view.py:366
+#, python-format
+msgid "En pausa hasta el %(date)s"
+msgstr "Paused until %(date)s"
+
+#: agent/app/view.py:370
+msgid "No empieza ninguna tarea programada. Lo que se pida desde el portal sí se atiende."
+msgstr "No scheduled task starts. What is requested from the portal is still carried out."
+
+#: agent/app/view.py:379
+msgid "Una hora"
+msgstr "One hour"
+
+#: agent/app/view.py:382
+#, python-format
+msgid "Hasta mañana a las %(clock)s"
+msgstr "Until tomorrow at %(clock)s"
+
+#: agent/app/view.py:387
+msgid "Hasta que se reanude"
+msgstr "Until resumed"
+
+#: agent/app/view.py:393
+msgid "En curso"
+msgstr "Running"
+
+#: agent/app/view.py:395
+msgid "Correcta"
+msgstr "Successful"
+
+#: agent/app/view.py:396
+msgid "Parcial"
+msgstr "Partial"
+
+#: agent/app/view.py:397
+msgid "Con errores"
+msgstr "With errors"
+
+#: agent/app/view.py:398
+msgid "Sin ejecutar"
+msgstr "Not run"
+
+#: agent/app/view.py:406
+msgid "Este equipo no está conectado a ningún portal."
+msgstr "This computer is not connected to any portal."
+
+#: agent/app/view.py:409
+msgid "El portal ha rechazado este agente: conéctalo de nuevo."
+msgstr "The portal has rejected this agent: connect it again."
+
+#: agent/app/view.py:411
+msgid "La instalación de Cenya está en solo lectura: no se guardaría nada."
+msgstr "The Cenya installation is read-only: nothing would be saved."
+
+#: agent/app/view.py:430
+msgid "Desactivada"
+msgstr "Disabled"
+
+#: agent/app/view.py:432
+msgid "En pausa"
+msgstr "Paused"
+
+#: agent/app/view.py:441
+msgid "Nunca"
+msgstr "Never"
+
+#: agent/app/view.py:468
+msgid "Equipos vivos"
+msgstr "Devices up"
+
+#: agent/app/view.py:469
+msgid "Equipos nuevos"
+msgstr "New devices"
+
+#: agent/app/view.py:470
+msgid "Hallazgos enviados"
+msgstr "Findings sent"
+
+#: agent/app/view.py:471
+msgid "Nuevos en la bandeja"
+msgstr "New in the inbox"
+
+#: agent/app/view.py:472
+msgid "Ya conocidos"
+msgstr "Already known"
+
+#: agent/app/view.py:473
+msgid "Envíos pendientes"
+msgstr "Pending uploads"
+
+#: agent/app/view.py:490
+msgid "El resultado espera en la cola local: el portal aún no ha dicho qué había de nuevo."
+msgstr "The result is waiting in the local queue: the portal has not said yet what was new."
+
+#: agent/app/view.py:492
+#, python-format
+msgid "%(n)d aviso: los detalles, en Actividad."
+msgid_plural "%(n)d avisos: los detalles, en Actividad."
+msgstr[0] "%(n)d warning: details in Activity."
+msgstr[1] "%(n)d warnings: details in Activity."
+
+#: agent/app/view.py:534
+#, python-format
+msgid "La siguiente es %(task)s: %(when)s."
+msgstr "Next is %(task)s: %(when)s."
+
+#: agent/app/view.py:663
+#, python-format
+msgid "%(n)d objeto leído"
+msgid_plural "%(n)d objetos leídos"
+msgstr[0] "%(n)d object read"
+msgstr[1] "%(n)d objects read"
+
+#: agent/app/view.py:672
+msgid "Enviado al portal. La revisión se abre en el navegador: nada se importa hasta que lo confirmes allí."
+msgstr "Sent to the portal. The review opens in the browser: nothing is imported until you confirm it there."
+
+#: agent/app/view.py:711
+msgid "Nombre del portal"
+msgstr "Portal name"
+
+#: agent/app/view.py:712
+msgid "Puerto"
+msgstr "Port"
+
+#: agent/app/view.py:713
+msgid "Certificado"
+msgstr "Certificate"
+
+#: agent/app/view.py:714
+msgid "Token del agente"
+msgstr "Agent token"
+
+#: agent/app/view.py:727 agent/app/view.py:732
+msgid "No se llegó a comprobar."
+msgstr "Not checked."
+
+#: agent/app/view.py:737
+msgid "Todo en orden: el agente llega al portal y el portal lo acepta."
+msgstr "All good: the agent reaches the portal and the portal accepts it."
+
+#: agent/app/view.py:737
+msgid "Algo falla: el primer paso en rojo dice qué."
+msgstr "Something is wrong: the first step in red says what."
+
+#: agent/app/view.py:752
+#, python-format
+msgid "Falta: %(names)s"
+msgstr "Missing: %(names)s"
+
+#: agent/app/view.py:757
+msgid "Colectores"
+msgstr "Collectors"
+
+#: agent/app/view.py:758
+msgid "Librerías opcionales"
+msgstr "Optional libraries"
+
+#: agent/app/view.py:759
+msgid "Idiomas"
+msgstr "Languages"
+
+#: agent/app/view.py:760
+msgid "Librerías de Windows"
+msgstr "Windows libraries"
+
+#: agent/app/view.py:767
+msgid "No encontrado"
+msgstr "Not found"
+
+#: agent/app/view.py:772
+msgid "Instalación completa"
+msgstr "Complete installation"
+
+#: agent/app/view.py:772
+msgid "Falta algo en esta instalación"
+msgstr "Something is missing from this installation"
+
+#: agent/app/view.py:785 agent/app/view.py:796
+msgid "Escribe una red (10.0.5.0/24) o una dirección (10.0.5.7)."
+msgstr "Type a network (10.0.5.0/24) or an address (10.0.5.7)."
+
+#: agent/app/view.py:798
+msgid "Ya está en la lista."
+msgstr "It is already on the list."
+
+#: agent/app/view.py:835
+msgid "Suave"
+msgstr "Gentle"
+
+#: agent/app/view.py:835
+msgid "Normal"
+msgstr "Normal"
+
+#: agent/app/view.py:835
+msgid "Rápida"
+msgstr "Fast"
+
+#: agent/app/view.py:835
+msgid "Sin tope"
+msgstr "No cap"
+
+#: agent/app/view.py:844
+#, python-format
+msgid "Ahora trabaja en modo %(level)s."
+msgstr "It is currently working in %(level)s mode."
+
+#: agent/app/view.py:853
+#, python-format
+msgid "Descargando la versión %(version)s…"
+msgstr "Downloading version %(version)s…"
+
+#: agent/app/view.py:854
+#, python-format
+msgid "La versión %(version)s está verificada: se instala en cuanto termine la tarea en curso."
+msgstr "Version %(version)s is verified: it will be installed as soon as the current task ends."
+
+#: agent/app/view.py:855
+#, python-format
+msgid "Instalando la versión %(version)s…"
+msgstr "Installing version %(version)s…"
+
+#: agent/app/view.py:856
+#, python-format
+msgid "La actualización a %(version)s no se pudo completar; se sigue con la versión instalada."
+msgstr "The update to %(version)s could not be completed; the installed version keeps running."
+
+#: agent/app/view.py:879
+msgid "El portal tarda en contestar; el resultado aparecerá aquí en cuanto llegue."
+msgstr "The portal is slow to answer; the result will appear here as soon as it arrives."
+
+#: agent/app/view.py:881
+#, python-format
+msgid "No se pudo preguntar al portal: %(error)s"
+msgstr "The portal could not be asked: %(error)s"
+
+#: agent/app/view.py:883
+#, python-format
+msgid "Hay una versión nueva: %(version)s"
+msgstr "New version available: %(version)s"
+
+#: agent/app/view.py:885
+msgid "Se instalará sola, sin cortar ninguna tarea."
+msgstr "It will install itself without interrupting any task."
+
+#: agent/app/view.py:887
+msgid "Las actualizaciones automáticas están desactivadas en este equipo."
+msgstr "Automatic updates are turned off on this machine."
+
+#: agent/app/view.py:903
+#, python-format
+msgid "Comprobado %(ago)s"
+msgstr "Checked %(ago)s"
+
+#: agent/app/view.py:911
+msgid "Detenido"
+msgstr "Stopped"
+
+#: agent/app/view.py:912
+msgid "Arrancando…"
+msgstr "Starting…"
+
+#: agent/app/view.py:913
+msgid "Deteniéndose…"
+msgstr "Stopping…"
+
+#: agent/app/view.py:914
+msgid "No instalado"
+msgstr "Not installed"
+
+#: agent/app/view.py:916
+msgid "Desconocido"
+msgstr "Unknown"
+
+#: agent/app/view.py:934
+msgid "El de Windows"
+msgstr "Windows' language"
+
+#: agent/app/view.py:953
+msgid "Abrir"
+msgstr "Open"
+
+#: agent/app/view.py:957
+msgid "Ejecutar Presencia ahora"
+msgstr "Run Presence now"
+
+#: agent/app/view.py:958
+msgid "Pausar una hora"
+msgstr "Pause for an hour"
+
+#: agent/app/view.py:960
+msgid "Abrir Cenya en el navegador"
+msgstr "Open Cenya in the browser"
+
+#: agent/app/view.py:961
+msgid "Buscar actualizaciones"
+msgstr "Check for updates"
+
+#: agent/app/view.py:963
+msgid "Cerrar este icono"
+msgstr "Close this icon"
