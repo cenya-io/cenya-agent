@@ -68,7 +68,10 @@ UPDATES_FOLDER = "updates"
 #: ejecuta SYSTEM, así que una `previous` que otro usuario creara antes de
 #: instalar el agente sería suya, y con ella lo que SYSTEM ejecuta.
 PREVIOUS_FOLDER = "previous"
-PRIVATE_FILES = (FILE_NAME, IDENTITY_FILE, SETTINGS_FILE, MEMORY_FILE, CA_FILE)
+#: Las claves de otros agentes para las que alguien ha permitido resellar
+#: (`agent/approvals.py`). Una puesta por otro usuario abriría la puerta.
+RESEAL_TRUST_FILE = "reseal-trust.json"
+PRIVATE_FILES = (FILE_NAME, IDENTITY_FILE, SETTINGS_FILE, MEMORY_FILE, CA_FILE, RESEAL_TRUST_FILE)
 PRIVATE_FOLDERS = ("outbox", "logs", UPDATES_FOLDER, PREVIOUS_FOLDER)
 
 #: Cómo se renombra lo que se aparta cuando la carpeta no estaba protegida:

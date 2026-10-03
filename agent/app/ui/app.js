@@ -420,6 +420,38 @@ function renderBanner() {
   );
 }
 
+/* Otro agente pide las credenciales selladas: solo pasa si alguien lo permite aquí. */
+function renderRequests() {
+  const host = $("requests");
+  const requests = (S.shell && S.shell.reseal_requests) || [];
+  patch(host, { requests, act: S.perms.can_act }, () =>
+    requests.map((r) =>
+      el(
+        "div",
+        { class: "banner request", "data-tone": "info", role: "alert" },
+        ico("shield-alert"),
+        el(
+          "div",
+          { class: "grow" },
+          el("strong", { text: fmt(T.reseal_title, { name: r.name }) }),
+          el("div", { text: T.reseal_body }),
+          el("div", { class: "request-meta" }, el("span", { text: fmt(T.reseal_count, { count: num(r.count) }) }), el("span", { class: "mono", text: fmt(T.reseal_fingerprint, { fingerprint: r.fingerprint }) }))
+        ),
+        el(
+          "div",
+          { class: "row" },
+          btn(T.reseal_deny, { size: "sm", act: true, onClick: () => decide(r.id, false) }),
+          btn(T.reseal_allow, { size: "sm", variant: "primary", act: true, onClick: () => decide(r.id, true) })
+        )
+      )
+    )
+  );
+  async function decide(id, allow) {
+    const r = await call("decide_reseal", id, allow);
+    if (report(r, allow ? T.reseal_allowed : T.reseal_denied)) await refreshShell(false);
+  }
+}
+
 function renderFoot() {
   const shell = S.shell || {};
   const tone = shell.tone || "neutral";
@@ -447,6 +479,7 @@ async function refreshShell(first) {
   S.perms = v.perms;
   S.dev = v.dev;
   renderBanner();
+  renderRequests();
   renderFoot();
   const unenrolled = (mode) => mode === "not_enrolled";
   if (first) {

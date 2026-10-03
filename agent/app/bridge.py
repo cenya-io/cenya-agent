@@ -263,6 +263,17 @@ class Api:
             return self._error(exc)
         return self.status()
 
+    def decide_reseal(self, request_id: str, allow: bool) -> dict[str, Any]:
+        """Permitir o rechazar que otro agente reciba las credenciales selladas."""
+        refused = self._refuse_if_readonly()
+        if refused:
+            return refused
+        try:
+            self._call("reseal.decide", {"id": str(request_id), "allow": bool(allow)})
+        except channel.ChannelError as exc:
+            return self._error(exc)
+        return _ok()
+
     def resume(self) -> dict[str, Any]:
         refused = self._refuse_if_readonly()
         if refused:

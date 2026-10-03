@@ -28,7 +28,7 @@ from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 from typing import Any
 
-from agent import __version__, about, identity, logs, notes, orders, outbox, probe, status, store, tasks
+from agent import __version__, about, approvals, identity, logs, notes, orders, outbox, probe, sealing, status, store, tasks
 from agent import credentials as creds
 from agent import settings as local_settings
 from agent.client import AgentClient, PushError, result_parts
@@ -151,6 +151,8 @@ class Runtime:
         self._clock = clock
         self._report = report
         self._say = say or logs.info
+        #: Los resellados que esperan a una persona en la ventana (`agent.approvals`).
+        self.approvals = approvals.ResealApprovals(environ, clock=clock, say=self._say)
         base = store.state_dir(environ)
         self.settings = local_settings.load(environ)
         self.shared = Shared()
@@ -307,6 +309,37 @@ class Runtime:
         return orders.test_credential(params, ctx)
 
     def _reseal(self, order_id: str, params: dict[str, Any]) -> tuple[str, dict[str, Any], list[notes.Note]]:
+        """Solo para una clave que alguien ha permitido en la ventana de este equipo.
+
+        El servidor es quien dice qué clave tiene el agente nuevo: sin esto,
+        quien se hiciera con el servidor se llevaría todas las contraseñas
+        presentándose como uno (`agent.approvals`). Lo que no se puede ni
+        identificar lo rechaza `orders.reseal` con su nota, sin preguntar.
+        """
+        if self._order_ctx() is None:
+            return self._rejected_outcome("reseal")
+        try:
+            target = sealing.canonical_uuid(params.get("agent"))  # type: ignore[arg-type]
+            key_fingerprint = approvals.fingerprint(params.get("public_key"))  # type: ignore[arg-type]
+        except (sealing.SealError, TypeError, ValueError, ImportError):
+            target = key_fingerprint = ""
+        if target and key_fingerprint and not self.approvals.trusted(target, key_fingerprint):
+            ids = params.get("credential_ids")
+            name = params.get("agent_name")
+            decision = self.approvals.ask(
+                order_id,
+                target,
+                name.strip()[:120] if isinstance(name, str) else "",
+                key_fingerprint,
+                len(ids) if isinstance(ids, list) else 0,
+            )
+            if decision == approvals.DENY:
+                return orders.FAILED, {}, [collector_note("reseal", "denied", "rechazado en la ventana de este agente")]
+            if decision != approvals.ALLOW:
+                return orders.FAILED, {}, [
+                    collector_note("reseal", "not_approved", "nadie lo permitió a tiempo en la ventana de este agente")
+                ]
+        # Con la configuración de ahora: pudo cambiar mientras se esperaba.
         ctx = self._order_ctx()
         if ctx is None:
             return self._rejected_outcome("reseal")
@@ -403,6 +436,7 @@ class Runtime:
             "update": update,
             "updater": self.updater.state(),
             "gentleness": self.gentleness(),
+            "reseal_requests": self.approvals.pending(),
             "last_run": last_runs,
             # La clave del agente ante el portal (spec 1.2): sin problema, `problem` vacío.
             "identity": {

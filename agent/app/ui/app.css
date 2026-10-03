@@ -207,6 +207,10 @@ table { font-variant-numeric: tabular-nums; }
 }
 .banner .grow { flex: 1; }
 .banner[data-tone="info"] { background: var(--info-subtle); color: var(--info-fg); border-color: var(--info-border); }
+.banner.request { align-items: flex-start; padding-top: 0.75rem; padding-bottom: 0.75rem; font-weight: 450; }
+.banner.request strong { display: block; font-weight: 600; margin-bottom: 0.125rem; }
+.request-meta { display: flex; flex-wrap: wrap; gap: 0.25rem 1rem; margin-top: 0.375rem; font-size: var(--text-xs); }
+.request-meta .mono { word-break: break-all; }
 
 /* --- Panels -------------------------------------------------------------- */
 

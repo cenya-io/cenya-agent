@@ -65,6 +65,7 @@ SCENARIOS = (
     "offline",
     "rejected",
     "update",
+    "reseal",
     "forbidden",
     "down",
 )
@@ -160,6 +161,19 @@ class FakeAgent:
             self.last_ok_at = self.last_checkin["at"]
         self.update: dict[str, Any] | None = {"version": "0.11.1"} if scenario == "update" else None
         self.updater: dict[str, Any] = {"state": "idle", "version": "0.11.0", "error": ""}
+        #: Otro agente pide las credenciales selladas (`agent.approvals`).
+        self.reseal_requests: list[dict[str, Any]] = []
+        if scenario == "reseal":
+            self.reseal_requests = [
+                {
+                    "id": "7c1e2b8a-4d1f-4a7e-9a55-2f0d6b3c9e10",
+                    "agent": "4b9d6f0e-2a71-4c3b-8e5d-9f1a2c7b6e43",
+                    "agent_name": "SRV-ALMACEN",
+                    "fingerprint": "3F2A 91C4 7B0D E615 2A9F 0C3E 88B1 D4F7 6E02 5A19 C3B8 7F41 0D9E 2B6A 5C17 E8F3",
+                    "count": 7,
+                    "received_at": _iso(now - timedelta(minutes=2)),
+                }
+            ]
         self.server_pause: datetime | None = None
         self.settings: dict[str, Any] = {
             "language": "",
@@ -388,6 +402,7 @@ class FakeAgent:
                     "gentleness": "gentle" if self.settings.get("gentleness_cap") == "gentle" else "normal",
                     "last_run": copy.deepcopy(self.last_run),
                     "identity": {"server_has_key": True, "problem": None},
+                    "reseal_requests": copy.deepcopy(self.reseal_requests),
                 }
             )
             return data
@@ -635,6 +650,18 @@ class FakeAgent:
         self._sleep(1.0)
         target.write_bytes(b"PK\x05\x06" + b"\x00" * 18)  # un zip vacío
         return {"path": str(target)}
+
+    def op_reseal_decide(self, args: dict) -> dict:
+        self._need_enrolled()
+        request_id, allow = args.get("id"), args.get("allow")
+        if not isinstance(request_id, str) or not isinstance(allow, bool):
+            raise OpError(INVALID, "Hacen falta «id» (el de la petición) y «allow» (true o false).")
+        with self._lock:
+            before = len(self.reseal_requests)
+            self.reseal_requests = [r for r in self.reseal_requests if r["id"] != request_id]
+            if len(self.reseal_requests) == before:
+                raise OpError(INVALID, "Esa petición ya no está pendiente (se contestó o caducó).")
+        return {"id": request_id, "allowed": allow}
 
     def op_check_update(self, args: dict) -> dict:
         self._need_enrolled()

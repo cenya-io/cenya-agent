@@ -63,6 +63,7 @@ OPERATIONS: dict[str, str] = {
     "netbox.export": ACT,
     "support_bundle": ACT,
     "check_update": ACT,
+    "reseal.decide": ACT,
 }
 
 # Los códigos de error: estables, para que el cliente decida qué decir sin

@@ -296,7 +296,7 @@ class WorkflowTests(unittest.TestCase):
         release_job = WORKFLOW.split("\n  release:\n", 1)[1]
         self.assertIn("startsWith(github.ref, 'refs/tags/agent-v')", release_job)
         for needle in ("latest.json", "latest.json.sig", "install.sh", "Cenya-Agent-Setup-", "cenya-agent-${version}.tar.gz",
-                       "CENYA_RELEASE_SIGNING_KEY", "::warning", "embed-keys", "release_key.py verify"):
+                       "CENYA_RELEASE_SIGNING_KEY", "::error", "embed-keys", "release_key.py verify"):
             with self.subTest(needle=needle):
                 self.assertIn(needle, release_job)
 
@@ -356,7 +356,9 @@ class LinuxFilesTests(unittest.TestCase):
                 self.assertIn(f'"$SRC/deploy/{unit}"', script)
         self.assertIn("run_as_agent goodbye", script.split("uninstall() {", 1)[1].split("\n}\n", 1)[0])
         self.assertIn("healthy-$next", script)
-        self.assertIn("failed-$next", script)
+        # La marca de «falló» la deja el usuario del agente, no root (revisión de seguridad).
+        self.assertIn('mark_as_agent "$next"', script)
+        self.assertIn('failed-$2', script)
         # El vigilante queda puesto antes de cambiar de versión.
         main = script.split("main() {", 1)[1]
         self.assertLess(main.index("install_watchdog"), main.index('switch_current "$PREFIX/$VERSION"'))

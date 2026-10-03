@@ -591,11 +591,21 @@ Sustituye a `communities` y a los secretos en claro de 1.4:
 | `kind` | `params` | Qué hace el agente | `result` |
 |---|---|---|---|
 | `test_credential` | `{"credential_id": "<uuid>", "ip": "10.0.0.5"}` | Prueba **esa** credencial contra esa IP (para un hipervisor, contra su servidor; `ip` puede faltar) | `{"ok": true, "line": {código y parámetros, como un informe de sondeo}}` |
-| `reseal` | `{"agent": "<uuid del agente nuevo>", "public_key": "<PEM>", "credential_ids": ["…"]}` | Abre sus sobres de esas credenciales y los cierra para la otra clave (AAD con el uuid del agente nuevo) | `{"envelopes": {"<id>": {sobre}}, "missing": ["<id>"]}` |
+| `reseal` | `{"agent": "<uuid del agente nuevo>", "agent_name": "<su nombre>", "public_key": "<PEM>", "credential_ids": ["…"]}` | Abre sus sobres de esas credenciales y los cierra para la otra clave (AAD con el uuid del agente nuevo) | `{"envelopes": {"<id>": {sobre}}, "missing": ["<id>"]}` |
 | `netbox_export` | `{"url": "https://netbox…", "verify_tls": true, "sealed_token": {sobre}}` | Lee ese NetBox (`agent/netbox_export.py`) y sube el resultado a 3.4 | `{"import": "<uuid>", "summary": {"devices": 214, …}}` |
 
 - `test_credential` no consulta ni altera el límite de rondas de la memoria
   (lo pide una persona), pero apunta un acierto.
+- **`reseal` espera a una persona en la máquina del agente** (revisión de
+  seguridad del 03-10-2026). El servidor es quien dice qué clave tiene el
+  agente nuevo; sin esto, quien se hiciera con el servidor presentaría su
+  propia clave y se llevaría todas las contraseñas. El agente enseña la
+  petición en su ventana con el nombre del otro agente y la huella SHA-256 de
+  su clave (`status.reseal_requests`, 4.6) y solo resella si alguien lo
+  permite (`reseal.decide`). Una clave permitida (uuid + huella) se recuerda
+  en `reseal-trust.json`: los resellados siguientes para ella no preguntan.
+  Rechazado, contesta `failed` con la nota `reseal/denied`; sin respuesta en
+  23 h, `reseal/not_approved` (el encargo vive 24 h).
 - Ninguna respuesta cita un secreto, tampoco en un error.
 - `netbox_export` informa de su avance en `activity` (paso = colección).
 
@@ -643,6 +653,7 @@ un puerto de red.**
 | `netbox.export` | actuar | `args.url`, `args.token`, `args.verify_tls`, `args.send`: lee un NetBox; con `send` lo sube (3.4) y contesta `review_url`, sin él lo guarda en `args.path` |
 | `support_bundle` | actuar | escribe el paquete de soporte en `args.path`, sin secretos |
 | `check_update` | actuar | un checkin **ahora** y lo que trajo (detalle abajo) |
+| `reseal.decide` | actuar | `args.id`, `args.allow`: permite o rechaza un resellado que espera (4.6) |
 
 Un secreto que llega por este canal (el token de NetBox) se usa y se olvida:
 no se guarda, no se registra, no vuelve en ninguna respuesta. Las operaciones
@@ -727,6 +738,18 @@ espera su respuesta como mucho 30 s. Contesta:
 que traiga se verá en `status`). `error`: por qué falló, sin secretos. Lo que
 ofrezca el servidor lo recibe el actualizador como en cualquier checkin bueno.
 Con el protocolo 1 no hay checkin: contesta lo que se sabía.
+
+### 4.6 Resellados que esperan
+
+`status.reseal_requests` es la lista de los que esperan a una persona:
+
+```json
+[{"id": "<id del encargo>", "agent": "<uuid>", "agent_name": "SRV-ALMACEN",
+  "fingerprint": "3F2A 91C4 …", "count": 7, "received_at": "…"}]
+```
+
+`reseal.decide` con `{"id": "…", "allow": true}` lo permite (y recuerda la
+clave); con `false` lo rechaza. Una petición que ya no espera es `invalid`.
 
 ### 4.5 `netbox.export` con `send`: dónde revisar
 

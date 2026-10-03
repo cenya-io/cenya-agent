@@ -115,7 +115,7 @@ class PermissionTests(unittest.TestCase):
     def test_the_table_is_the_spec(self) -> None:
         reads = {"status", "log", "about", "settings.get"}
         acts = {"run", "pause", "resume", "settings.set", "probe", "test_connection", "connect", "disconnect",
-                "netbox.export", "support_bundle", "check_update"}
+                "netbox.export", "support_bundle", "check_update", "reseal.decide"}
         self.assertEqual({op for op, kind in OPERATIONS.items() if kind == READ}, reads)
         self.assertEqual({op for op, kind in OPERATIONS.items() if kind == ACT}, acts)
 

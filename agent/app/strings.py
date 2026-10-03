@@ -44,6 +44,18 @@ def ui_strings() -> dict[str, str]:
         # Permisos.
         "readonly_banner": _t("Solo lectura — reiniciar como administrador para hacer cambios"),
         "readonly_button": _t("Reiniciar como administrador"),
+        # Otro agente pide las credenciales selladas (agent/approvals.py).
+        "reseal_title": _t("El agente «%(name)s» pide las credenciales de este perfil"),
+        "reseal_body": _t(
+            "Se cerrarán con la clave de ese agente para que pueda usarlas. Permítelo solo si acabas de "
+            "añadir ese agente en Cenya; si no lo reconoces, recházalo: alguien podría estar intentando llevárselas."
+        ),
+        "reseal_count": _t("Credenciales: %(count)s"),
+        "reseal_fingerprint": _t("Huella de su clave: %(fingerprint)s"),
+        "reseal_allow": _t("Permitir"),
+        "reseal_deny": _t("Rechazar"),
+        "reseal_allowed": _t("Permitido: el otro agente recibirá las credenciales."),
+        "reseal_denied": _t("Rechazado: no se ha compartido nada."),
         "readonly_tip": _t("Hace falta abrir Cenya Agent como administrador para hacer cambios."),
         # Servicio parado.
         "down_title": _t("El servicio del agente no está en marcha"),

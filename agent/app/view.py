@@ -243,6 +243,7 @@ def shell_view(
         "tone": NEUTRAL,
         "start_why": "",
         "enrollment": "",
+        "reseal_requests": [],
     }
     if error_code is not None:
         if service_state == "not_installed":
@@ -263,6 +264,7 @@ def shell_view(
     status = status or {}
     view["agent_name"] = str(status.get("agent_name") or "")
     view["portal"] = str(status.get("portal") or "")
+    view["reseal_requests"] = reseal_requests_view(status.get("reseal_requests"))
     if status.get("enrolled") is False:
         view["mode"] = "not_enrolled"
         view["tone"] = WARNING
@@ -270,6 +272,26 @@ def shell_view(
     else:
         view["tone"] = connection_view(status, now or datetime.now(timezone.utc))["tone"]
     return view
+
+
+def reseal_requests_view(raw: Any) -> list[dict[str, Any]]:
+    """Los resellados que esperan a una persona (`agent.approvals`), como los pinta la ventana."""
+    if not isinstance(raw, list):
+        return []
+    requests = []
+    for item in raw[:10]:
+        if not isinstance(item, dict) or not isinstance(item.get("id"), str):
+            continue
+        count = item.get("count")
+        requests.append(
+            {
+                "id": item["id"],
+                "name": str(item.get("agent_name") or item.get("agent") or "")[:120],
+                "fingerprint": str(item.get("fingerprint") or "")[:120],
+                "count": count if isinstance(count, int) and not isinstance(count, bool) else 0,
+            }
+        )
+    return requests
 
 
 def enrollment_text(status: dict[str, Any]) -> str:

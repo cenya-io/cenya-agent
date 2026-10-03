@@ -669,6 +669,7 @@ class LocalService:
                 "netbox.export": self.op_netbox_export,
                 "support_bundle": self.op_support_bundle,
                 "check_update": self.op_check_update,
+                "reseal.decide": self.op_reseal_decide,
             }
         )
 
@@ -1113,6 +1114,21 @@ class LocalService:
         except OSError as exc:
             raise OpError(FAILED, _t("No se pudo escribir %(path)s: %(error)s") % {"path": output, "error": exc.strerror or exc}) from None
         return {"path": str(output)}
+
+    def op_reseal_decide(self, args: dict[str, Any], caller: Caller) -> dict[str, Any]:
+        """Permitir o rechazar un resellado que espera (`status` → ``reseal_requests``)."""
+        request_id = args.get("id")
+        allow = args.get("allow")
+        if not isinstance(request_id, str) or not request_id.strip() or not isinstance(allow, bool):
+            raise OpError(INVALID, _t("Hacen falta «id» (el de la petición) y «allow» (true o false)."))
+        runtime = self._need_runtime()
+        if not runtime.approvals.decide(request_id.strip(), allow):
+            raise OpError(INVALID, _t("Esa petición ya no está pendiente (se contestó o caducó)."))
+        if allow:
+            logs.info(_t("[agente] Resellado permitido en este equipo para el agente que lo pidió."))
+        else:
+            logs.info(_t("[agente] Resellado rechazado en este equipo."))
+        return {"id": request_id.strip(), "allowed": allow}
 
     def op_check_update(self, args: dict[str, Any], caller: Caller) -> dict[str, Any]:
         """Pregunta de verdad: un checkin ahora y lo que trajo, con la espera acotada.

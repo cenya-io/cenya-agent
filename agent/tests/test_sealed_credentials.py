@@ -770,7 +770,7 @@ class CanaryTests(StateTestCase):
              mock.patch.object(probe.ssh, "run", side_effect=lambda **kw: used.append(kw["secret"]) or
                                ssh.Answer(connected=False, error=f"rechazada {kw['secret']}")), \
              mock.patch.object(probe.winrm, "query", side_effect=lambda **kw: used.append(kw["secret"]) or
-                               mock.Mock(connected=False, error=f"401 {kw['secret']}")),              mock.patch.object(probe.snmp, "AVAILABLE", True),              mock.patch.object(probe.snmp, "query_hosts", return_value={}),              mock.patch("agent.netbox_export.fetch_bundle", side_effect=fetch):
+                               mock.Mock(connected=False, error=f"401 {kw['secret']}")),              mock.patch.object(probe.snmp, "AVAILABLE", True),              mock.patch.object(probe.snmp, "query_hosts", return_value={}),              mock.patch("agent.netbox_export.fetch_bundle", side_effect=fetch),              mock.patch("agent.approvals.ResealApprovals.trusted", return_value=True):
             runtime = Runtime(AgentClient(url, "cya_token"), Config(url=url, token="cya_token"),
                               environ=self.environ, report=True)
             self.assertEqual(runtime.negotiate(), "v2")
