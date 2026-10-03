@@ -20,18 +20,21 @@ Imprime dos cosas, y cada mitad va a un sitio distinto:
 
 * **La privada** (PEM PKCS8) se pega entera como secreto del repositorio en
   GitHub, Settings → Secrets and variables → Actions, con el nombre
-  ``CENYA_RELEASE_SIGNING_KEY``. No se guarda en ningún fichero ni en ningún
-  otro sitio: si se pierde, se genera otra y se rota.
+  ``CENYA_RELEASE_SIGNING_KEY``. GitHub no deja leerla de vuelta, así que el
+  dueño guarda una copia en su gestor de contraseñas: sin ella, si se pierde
+  el secreto, los agentes instalados no aceptarían más versiones (rotar pide
+  publicar la clave nueva en una versión firmada con la vieja).
 * **La pública** es una línea en base64 que se pega aquí abajo, en
   ``PUBLIC_KEYS``, y también en la configuración del servidor (que verifica lo
   mismo antes de servir un instalador).
 
-Sin el secreto, el flujo de publicación publica sin firma y lo avisa; sin
-ninguna clave aquí, los agentes no se actualizan solos.
+Sin el secreto, o sin ninguna clave aquí, el flujo de publicación no publica.
+
+La clave actual se generó el 03-10-2026.
 """
 
 from __future__ import annotations
 
 PUBLIC_KEYS: list[str] = [
-    # "<44 caracteres en base64, terminados en =>",  <- la línea que imprime `release_key.py generate`
+    "l+M3HdnWcfG7+V+kQVaTR1AXjDg1H+h2w5M59PczxfA=",  # 03-10-2026
 ]

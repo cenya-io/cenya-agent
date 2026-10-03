@@ -288,7 +288,9 @@ class SpecAndBuildTests(unittest.TestCase):
     def test_the_repository_ships_no_release_key(self) -> None:
         from agent.release_keys import PUBLIC_KEYS
 
-        self.assertEqual(PUBLIC_KEYS, [], "the owner pastes the public key; nobody else adds one")
+        # La del dueño, generada el 03-10-2026 (y nada más: una clave de más aquí
+        # dejaría a su dueño publicar versiones que los agentes aceptan).
+        self.assertEqual(PUBLIC_KEYS, ["l+M3HdnWcfG7+V+kQVaTR1AXjDg1H+h2w5M59PczxfA="])
 
 
 class WorkflowTests(unittest.TestCase):
@@ -429,7 +431,10 @@ class ReleaseToolTests(unittest.TestCase):
         self.assertEqual(self.call("embed-keys", str(DEPLOY / "install.sh"), str(self.dir / "install.sh"), "--key", public), 0)
 
         text = (self.dir / "install.sh").read_text(encoding="utf-8")
-        self.assertIn(f"\nRELEASE_KEYS='{public}'\n", text)
+        # Las de agent/release_keys.py y, detrás, la que se pase con --key.
+        from agent.release_keys import PUBLIC_KEYS
+
+        self.assertIn(f"\nRELEASE_KEYS='{' '.join([*PUBLIC_KEYS, public])}'\n", text)
         self.assertNotIn("\r", text)
 
 
