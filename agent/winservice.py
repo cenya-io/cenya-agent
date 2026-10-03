@@ -363,6 +363,9 @@ def main(argv: list[str] | None = None) -> None:
     argv = list(sys.argv if argv is None else argv)
     if _frozen() and len(argv) == 1 and _host_as_frozen_service():
         return
+    # Instalar, actualizar, parar: lo lanza el instalador con la salida
+    # redirigida, y una frase traducida no puede tumbarlo por la codificación.
+    logs.tolerant_console()
     if not _frozen() and any(command in argv[1:] for command in ("install", "update")):
         import pywintypes
 

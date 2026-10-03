@@ -689,13 +689,25 @@ begin
       Result := 'unknown';
 end;
 
+{ Texto para el XML de la tarea. Lo que no es ASCII sale como referencia
+  numérica (&#220; para la Ü del alemán): así el resultado no depende de con
+  qué codificación lea el fichero schtasks. }
 function XmlEscape(const Value: String): String;
+var
+  I: Integer;
+  C: String;
 begin
-  Result := Value;
-  StringChangeEx(Result, '&', '&amp;', True);
-  StringChangeEx(Result, '<', '&lt;', True);
-  StringChangeEx(Result, '>', '&gt;', True);
-  StringChangeEx(Result, '"', '&quot;', True);
+  Result := '';
+  for I := 1 to Length(Value) do
+  begin
+    C := Value[I];
+    if C = '&' then Result := Result + '&amp;'
+    else if C = '<' then Result := Result + '&lt;'
+    else if C = '>' then Result := Result + '&gt;'
+    else if C = '"' then Result := Result + '&quot;'
+    else if Ord(Value[I]) > 127 then Result := Result + '&#' + IntToStr(Ord(Value[I])) + ';'
+    else Result := Result + C;
+  end;
 end;
 
 { Copia la carpeta del programa a previous\app: primero a app.partial y solo
@@ -754,8 +766,11 @@ begin
   { El vigilante espera a que esta marca desaparezca (DeinitializeSetup). }
   SaveStringToFile(PreviousDir + '\installing', '{#AppVersion}', False);
   Arguments := '"' + ExpandConstant('{app}') + '" ' + SafeVersion(InstalledVersion) + ' {#AppVersion} ' + IntToStr(WatchdogSeconds);
+  { Sin declaración <?xml ... encoding=...?>: schtasks pasa el fichero a texto
+    UTF-16 antes de analizarlo, y una declaración UTF-8 choca con eso («unable to
+    switch the encoding»), que aquí solo se veía como un código 1. El texto es
+    ASCII puro (XmlEscape), así que cualquier lectura lo entiende igual. }
   Xml :=
-    '<?xml version="1.0" encoding="UTF-8"?>' + #13#10 +
     '<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">' + #13#10 +
     '  <RegistrationInfo><Description>' + XmlEscape(CustomMessage('WatchdogDescription')) + '</Description></RegistrationInfo>' + #13#10 +
     '  <Triggers>' + #13#10 +

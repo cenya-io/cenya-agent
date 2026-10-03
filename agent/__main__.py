@@ -208,6 +208,7 @@ def main(argv: list[str] | None = None, stop_event: StopSignal | None = None) ->
     siguiente. La siesta, en cambio, se corta en el acto.
     """
     args = argv if argv is not None else sys.argv[1:]
+    logs.tolerant_console()
     from agent import localclient
 
     if args[:1] and args[0] in localclient.COMMANDS:

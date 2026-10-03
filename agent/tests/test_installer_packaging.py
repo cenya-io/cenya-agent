@@ -418,5 +418,35 @@ class PascalCommentTests(unittest.TestCase):
         self.assertEqual(nested, [], "comentarios con una llave dentro, en estas líneas del .iss")
 
 
+
+class WatchdogTaskXmlTests(unittest.TestCase):
+    """El XML de la tarea del vigilante tiene que poder leerlo `schtasks /XML`.
+
+    Con `<?xml ... encoding="UTF-8"?>` delante, schtasks fallaba con un código 1
+    y el instalador abortaba la actualización: el analizador de tareas recibe el
+    texto ya en UTF-16 y una declaración UTF-8 le hace fallar («unable to switch
+    the encoding»). Solo se veía en el Windows de CI, al actualizar de verdad.
+    """
+
+    def setUp(self) -> None:
+        script = (Path(__file__).resolve().parents[1] / "packaging" / "cenya-agent.iss").read_text(encoding="utf-8")
+        start = script.index("function CreateWatchdog")
+        self.create = script[start : script.index("end;", script.index("Result := ResultCode;", start))]
+        start = script.index("function XmlEscape")
+        self.escape = script[start : script.index(nl_end := "end;" + "\n", start) + len(nl_end)]
+
+    def test_the_task_xml_carries_no_encoding_declaration(self) -> None:
+        # Solo las cadenas que construyen el XML (entre comillas simples), no los comentarios.
+        built = "".join(re.findall(r"'([^']*)'", self.create))
+        self.assertNotIn("<?xml", built)
+        self.assertIn("<Task version=", self.create)
+
+    def test_the_description_is_escaped_to_plain_ascii(self) -> None:
+        # La descripción alemana lleva «Ü»: sale como referencia numérica.
+        self.assertIn("Ord(Value[I]) > 127", self.escape)
+        self.assertIn("'&#' + IntToStr(Ord(Value[I])) + ';'", self.escape)
+        self.assertIn("XmlEscape(CustomMessage('WatchdogDescription'))", self.create)
+
+
 if __name__ == "__main__":
     unittest.main()
