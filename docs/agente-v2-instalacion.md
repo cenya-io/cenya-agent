@@ -144,3 +144,17 @@ petición en `updates/request.json` y una unidad `cenya-agent-update.path` la
 recoge como root, que **vuelve a verificar** firma, versión y huellas con el
 código y las claves ya instalados antes de ejecutar nada.
 Volver a ejecutarlo actualiza. `--uninstall` se despide y quita todo.
+
+**Como root no se instala nada sin huella.** Las dependencias salen de
+`agent/deploy/requirements-linux.txt`, que viaja dentro del archivo firmado:
+versiones exactas y el SHA-256 de cada fichero publicado (x86_64 y aarch64,
+Python 3.10–3.13), instaladas con `pip install --require-hashes --no-deps
+--only-binary :all:` (solo ruedas: ningún `setup.py` ajeno se ejecuta). El
+agente entra después con la huella del propio archivo, `--no-deps
+--no-build-isolation --no-index` y el `setuptools` del lock. El `cryptography`
+que hace falta para verificar la firma del manifiesto (antes de tener el
+archivo) va en `install.sh`, entre `# BEGIN/END verify-requirements`, con las
+mismas líneas del lock. Un archivo sin lock (una versión anterior) no se
+instala. Ambos los genera `python agent/packaging/lock_linux.py` (con
+`uv==0.12.23`; `--upgrade` sube las versiones) y CI falla si no corresponden a
+`pyproject.toml` (`--check`) o si el lock no se instala de verdad en Ubuntu.

@@ -33,6 +33,28 @@ jobs:
         run: |
           sh -n agent/deploy/install.sh
           shellcheck --shell=sh agent/deploy/install.sh
+      # install.sh instala como root solo lo que tiene huella: el lock tiene que
+      # corresponder a pyproject.toml, y tiene que instalarse de verdad.
+      - name: El lock de Linux corresponde a pyproject.toml
+        run: |
+          python -m pip install "uv==0.12.23"
+          python agent/packaging/lock_linux.py --check
+      - name: El lock de Linux y el agente se instalan con huellas, como en install.sh
+        run: |
+          set -eu
+          hashed="-q --disable-pip-version-check --require-hashes --no-deps"
+          python -m venv "$RUNNER_TEMP/verify"
+          sed -n '/# BEGIN verify-requirements/,/# END verify-requirements/p' agent/deploy/install.sh > "$RUNNER_TEMP/verify.txt"
+          "$RUNNER_TEMP/verify/bin/pip" install $hashed --only-binary :all: -r "$RUNNER_TEMP/verify.txt"
+          "$RUNNER_TEMP/verify/bin/python" -c "from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey"
+          python -m venv "$RUNNER_TEMP/lock"
+          "$RUNNER_TEMP/lock/bin/pip" install $hashed --only-binary :all: -r agent/deploy/requirements-linux.txt
+          git archive --format=tar.gz --prefix=cenya-agent-ci/ HEAD:agent > "$RUNNER_TEMP/agent.tar.gz"
+          printf 'cenya-agent @ file://%s --hash=sha256:%s\n' "$RUNNER_TEMP/agent.tar.gz" \
+            "$(sha256sum "$RUNNER_TEMP/agent.tar.gz" | cut -d ' ' -f 1)" > "$RUNNER_TEMP/agent.txt"
+          "$RUNNER_TEMP/lock/bin/pip" install $hashed --no-build-isolation --no-index -r "$RUNNER_TEMP/agent.txt"
+          "$RUNNER_TEMP/lock/bin/pip" check
+          cd "$RUNNER_TEMP" && lock/bin/python -c "import agent, cryptography, certifi, pysnmp, winrm, requests_ntlm"
 
   # A la vez que `tests`, no detrás: un fallo del instalador se ve sin esperar a
   # la batería. Lo que no se publica sin las dos es la Release.
