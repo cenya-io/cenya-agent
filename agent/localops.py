@@ -496,6 +496,10 @@ def connection_test(
 # --- Secretos y el paquete de soporte ----------------------------------------------
 
 
+#: Lo de `about` que puede leer cualquier usuario de la máquina.
+ABOUT_FOR_EVERYONE = ("hostname", "os", "agent_version", "python", "frozen")
+
+
 def redact(text: str, secrets: list[str]) -> str:
     """`text` without any private key, any of `secrets`, any bearer token or URL password."""
     text = _PRIVATE_KEY.sub("[clave privada retirada]", text)
@@ -721,13 +725,19 @@ class LocalService:
     def op_about(self, args: dict[str, Any], caller: Caller) -> dict[str, Any]:
         runtime, *_ = self._current()
         if runtime is not None:
-            return runtime.about()
-        current = local_settings.load(self.env())
-        return about.build(
-            excluded_subnets=current.excluded_subnets,
-            excluded_addresses=current.excluded_addresses,
-            auto_update=current.auto_update,
-        )
+            data = runtime.about()
+        else:
+            current = local_settings.load(self.env())
+            data = about.build(
+                excluded_subnets=current.excluded_subnets,
+                excluded_addresses=current.excluded_addresses,
+                auto_update=current.auto_update,
+            )
+        if caller.admin:
+            return data
+        # Un usuario cualquiera ve qué es esto, no el mapa de la red: ni las
+        # redes del equipo ni lo que se excluye del barrido.
+        return {key: data[key] for key in ABOUT_FOR_EVERYONE if key in data}
 
     def _locked_fields(self) -> list[str]:
         env = self.env()

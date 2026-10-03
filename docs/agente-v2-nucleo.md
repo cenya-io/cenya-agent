@@ -640,8 +640,8 @@ un puerto de red.**
 | `op` | Tipo | Qué hace |
 |---|---|---|
 | `status` | leer | conexión, tarea en curso y progreso, agenda, pausa, versión, cola (detalle abajo) |
-| `log` | leer | últimas líneas del registro (`args.lines`, `args.after`) |
-| `about` | leer | la presentación de 1.5 |
+| `log` | leer (administrador) | últimas líneas del registro (`args.lines`, `args.after`). Solo un administrador: el registro nombra equipos, direcciones y usuarios de la red |
+| `about` | leer | la presentación de 1.5; a quien no es administrador, solo `hostname`, `os`, `agent_version`, `python` y `frozen` (ni redes ni exclusiones) |
 | `settings.get` | leer | ajustes locales, sin secretos |
 | `run` | actuar | `args.task`: ejecuta ya esa tarea |
 | `pause` / `resume` | actuar | `args.until` (ISO), `args.seconds` o `args.indefinite: true` (detalle abajo) |

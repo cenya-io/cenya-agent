@@ -297,6 +297,8 @@ class Api:
         try:
             data = self._call("log", args)
         except channel.ChannelError as exc:
+            if exc.code == channel.FORBIDDEN:
+                return _fail(exc.code, _t("El registro solo lo ven los administradores: abre Cenya Agent como administrador para verlo."))
             return self._error(exc)
         result = view.log_view(data, after, self._log_n)
         self._log_n += len(result["rows"])

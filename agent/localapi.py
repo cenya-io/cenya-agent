@@ -45,11 +45,14 @@ MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 
 READ = "read"
 ACT = "act"
+#: Leer, pero solo un administrador: el registro nombra equipos, direcciones y
+#: usuarios de la red, y cualquier usuario de la máquina no tiene por qué verlos.
+ADMIN_READ = "admin_read"
 
 #: Las operaciones de la especificación (4) y su tipo. Lo que no está aquí no existe.
 OPERATIONS: dict[str, str] = {
     "status": READ,
-    "log": READ,
+    "log": ADMIN_READ,
     "about": READ,
     "settings.get": READ,
     "run": ACT,
@@ -106,14 +109,15 @@ def kind_of(op: str) -> str | None:
 def may(op: str, caller: Caller) -> bool:
     """Whether `caller` may run `op`. Pure: the whole permission policy.
 
-    Leer, cualquiera de la máquina; actuar, solo un administrador. Una
-    operación que no existe no la puede nadie (el que pregunta recibe
-    ``unknown_op``, no ``forbidden``: eso lo decide el despachador).
+    Leer, cualquiera de la máquina; actuar, y leer el registro, solo un
+    administrador. Una operación que no existe no la puede nadie (el que
+    pregunta recibe ``unknown_op``, no ``forbidden``: eso lo decide el
+    despachador).
     """
     kind = OPERATIONS.get(op)
     if kind == READ:
         return True
-    if kind == ACT:
+    if kind in (ACT, ADMIN_READ):
         return bool(caller.admin)
     return False
 

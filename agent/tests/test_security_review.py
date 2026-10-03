@@ -134,3 +134,29 @@ class InstallerTextTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WhatEveryoneMayReadTests(unittest.TestCase):
+    """Un usuario cualquiera de la máquina: el estado sí, el registro y el mapa de la red no."""
+
+    def test_the_log_is_for_administrators(self) -> None:
+        from agent.localapi import may
+
+        self.assertFalse(may("log", Caller(admin=False, who="u")))
+        self.assertTrue(may("log", Caller(admin=True, who="a")))
+        self.assertTrue(may("status", Caller(admin=False, who="u")))
+
+    def test_about_without_admin_hides_the_networks(self) -> None:
+        from unittest import mock
+
+        from agent.localops import LocalService
+
+        full = {"hostname": "PC", "os": {"system": "Windows"}, "agent_version": "0.11.0", "networks": [{"cidr": "10.0.0.0/24"}],
+                "excluded": {"subnets": ["10.0.0.0/28"], "addresses": []}, "capabilities": {"snmp": True}}
+        service = LocalService()
+        with mock.patch("agent.localops.about.build", return_value=full):
+            reader = service.op_about({}, Caller(admin=False, who="u"))
+            admin = service.op_about({}, Caller(admin=True, who="a"))
+
+        self.assertEqual(set(reader), {"hostname", "os", "agent_version"})
+        self.assertEqual(admin, full)

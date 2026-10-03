@@ -16,6 +16,7 @@ import unittest
 
 from agent import localapi
 from agent.localapi import (
+    ADMIN_READ,
     ACT,
     ANONYMOUS,
     OPERATIONS,
@@ -113,7 +114,8 @@ class RequestParsingTests(unittest.TestCase):
 
 class PermissionTests(unittest.TestCase):
     def test_the_table_is_the_spec(self) -> None:
-        reads = {"status", "log", "about", "settings.get"}
+        reads = {"status", "about", "settings.get"}
+        self.assertEqual({op for op, kind in OPERATIONS.items() if kind == ADMIN_READ}, {"log"})
         acts = {"run", "pause", "resume", "settings.set", "probe", "test_connection", "connect", "disconnect",
                 "netbox.export", "support_bundle", "check_update", "reseal.decide"}
         self.assertEqual({op for op, kind in OPERATIONS.items() if kind == READ}, reads)
@@ -183,7 +185,7 @@ class DispatcherTests(unittest.TestCase):
         for op, kind in OPERATIONS.items():
             with self.subTest(op=op):
                 answer = dispatcher.handle_line(json.dumps({"id": 1, "op": op}).encode(), USER)
-                if kind == ACT:
+                if kind in (ACT, ADMIN_READ):
                     self.assertEqual((answer["ok"], answer["error"]), (False, "forbidden"))
                 else:
                     self.assertTrue(answer["ok"])
