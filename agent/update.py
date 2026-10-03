@@ -933,15 +933,33 @@ def _write_result(folder: Path, version: str, code: str) -> None:
     """Tell the unprivileged agent why its request was refused (it reads `result.json`)."""
     target = folder / RESULT_FILE
     try:
+        # Root, en una carpeta que escribe el usuario del agente: nada por ruta
+        # después de abrir. Un `chown` por nombre tras cerrar dejaba cambiar el
+        # fichero por un enlace en medio y regalarle al agente otro fichero.
+        # La carpeta se abre una vez, sin seguir enlaces, y todo va relativo a
+        # ella: cambiarla por un enlace a mitad ya no lleva a ningún otro sitio.
+        if hasattr(os, "fchown") and os.open in os.supports_dir_fd:
+            folder_fd = os.open(folder, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            try:
+                owner = os.fstat(folder_fd)
+                try:
+                    os.unlink(RESULT_FILE, dir_fd=folder_fd)
+                except FileNotFoundError:
+                    pass
+                fd = os.open(
+                    RESULT_FILE, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=folder_fd
+                )
+                with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                    os.fchown(handle.fileno(), owner.st_uid, owner.st_gid)
+                    json.dump({"version": version, "error": code}, handle)
+            finally:
+                os.close(folder_fd)
+            return
+        # Windows no tiene ayudante con privilegios: aquí escribe el propio agente.
         target.unlink(missing_ok=True)
-        fd = os.open(
-            target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0), 0o600
-        )
+        fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             json.dump({"version": version, "error": code}, handle)
-        owner = os.stat(folder)
-        if hasattr(os, "chown"):
-            os.chown(target, owner.st_uid, owner.st_gid)
     except OSError:
         pass
 

@@ -164,7 +164,28 @@ $candidates = @(
 if (-not $candidates) { throw "No se encuentra Inno Setup 6 (ISCC.exe)." }
 $iscc = @($candidates)[0]
 
-$arguments = @("/Qp", "/DAppVersion=$version", "/DSourceDir=..\dist\cenya-agent")
+# --- El instalador de WebView2 que viaja dentro ----------------------------------
+# El «Evergreen Bootstrapper» de Microsoft (unos 2 MB): el instalador lo lanza
+# solo si el equipo no tiene WebView2, y él descarga el runtime. Microsoft
+# permite redistribuirlo con las aplicaciones. Su enlace siempre da la última
+# versión, así que no se fija un SHA-256: se exige la firma Authenticode válida
+# de Microsoft, y uno que no la tenga no entra en el instalador.
+$webView2Cache = Join-Path $repo "agent\build-webview2"
+New-Item -ItemType Directory -Force $webView2Cache | Out-Null
+$webView2Setup = Join-Path $webView2Cache "MicrosoftEdgeWebview2Setup.exe"
+if (-not (Test-Path $webView2Setup)) {
+    Write-Host "Descargando el instalador de WebView2"
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    $previous = $ProgressPreference; $ProgressPreference = "SilentlyContinue"
+    try { Invoke-WebRequest -Uri "https://go.microsoft.com/fwlink/p/?LinkId=2124703" -OutFile $webView2Setup -UseBasicParsing } finally { $ProgressPreference = $previous }
+}
+$signature = Get-AuthenticodeSignature -FilePath $webView2Setup
+if ($signature.Status -ne "Valid" -or $signature.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation') {
+    Remove-Item -Force $webView2Setup
+    throw "El instalador de WebView2 no lleva una firma válida de Microsoft ($($signature.Status): $($signature.SignerCertificate.Subject))."
+}
+
+$arguments = @("/Qp", "/DAppVersion=$version", "/DSourceDir=..\dist\cenya-agent", "/DWebView2Setup=$webView2Setup")
 if ($Unprivileged) { $arguments += "/DUnprivileged=1" }
 $output = if ($OutputDir) { [IO.Path]::GetFullPath($OutputDir) } else { Join-Path $repo "agent\installer" }
 if ($OutputDir) { $arguments += "/O$output" }

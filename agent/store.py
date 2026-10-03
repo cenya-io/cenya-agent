@@ -64,8 +64,12 @@ CA_FILE = "ca.pem"
 #: Las descargas del actualizador (`agent/update.py`): lo que se va a ejecutar
 #: como administrador no puede haberlo dejado otro usuario.
 UPDATES_FOLDER = "updates"
+#: La copia de la versión anterior y el vigilante que la restaura (Windows): lo
+#: ejecuta SYSTEM, así que una `previous` que otro usuario creara antes de
+#: instalar el agente sería suya, y con ella lo que SYSTEM ejecuta.
+PREVIOUS_FOLDER = "previous"
 PRIVATE_FILES = (FILE_NAME, IDENTITY_FILE, SETTINGS_FILE, MEMORY_FILE, CA_FILE)
-PRIVATE_FOLDERS = ("outbox", "logs", UPDATES_FOLDER)
+PRIVATE_FOLDERS = ("outbox", "logs", UPDATES_FOLDER, PREVIOUS_FOLDER)
 
 #: Cómo se renombra lo que se aparta cuando la carpeta no estaba protegida:
 #: todo lo que alguien pudo dejar para que el agente lo creyera suyo. El

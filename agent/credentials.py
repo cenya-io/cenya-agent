@@ -182,6 +182,11 @@ def _kind(raw: dict) -> str:
     return str(raw.get("kind") or "").strip().lower()
 
 
+def _plain_argument(value: str) -> bool:
+    """Si un usuario o un equipo puede ir tal cual como argumento de un programa."""
+    return not value.startswith("-") and not any(ch.isspace() or ord(ch) < 32 or ord(ch) == 127 for ch in value)
+
+
 def _one(raw: Any, position: int = 0, secrets: Mapping[str, Any] | None = None) -> Credential | None:
     """Una entrada de la lista, o `None` si no sirve.
 
@@ -195,11 +200,15 @@ def _one(raw: Any, position: int = 0, secrets: Mapping[str, Any] | None = None) 
     # Una comunidad v2c no tiene usuario: es la única clase a la que no se le pide.
     if not kind or (not username and kind != SNMP):
         return None
+    host = str(raw.get("host") or "").strip()
+    # Van a la línea de órdenes de `ssh` y otros: nada que empiece por «-» (se
+    # leería como opción) ni caracteres de control o espacios en blanco.
+    if not (_plain_argument(username) and _plain_argument(host)):
+        return None
     try:
         port = int(raw.get("port") or 0)
     except (TypeError, ValueError):
         port = 0
-    host = str(raw.get("host") or "").strip()
     # `name` es como lo llama la spec 3.2; `label`, como lo llamaba la 1.4.
     label = str(raw.get("label") or raw.get("name") or "").strip()
     server_id = str(raw.get("id") or "").strip()

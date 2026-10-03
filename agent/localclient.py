@@ -160,9 +160,9 @@ def is_default_address(address: str) -> bool:
     return address.lower() == DEFAULT_PIPE.lower()
 
 
-def trusted_pipe_owner(owner_sid: str, own_sid: str) -> bool:
+def trusted_pipe_owner(owner_sid: str, own_sid: str, *, allow_own: bool = True) -> bool:
     """Si se le habla a un pipe de ese dueño (la regla es la de `agent.localpipe`)."""
-    return localpipe.trusted_pipe_owner(owner_sid, own_sid)
+    return localpipe.trusted_pipe_owner(owner_sid, own_sid, allow_own=allow_own)
 
 
 def random_pipe_name(prefix: str = "CenyaAgentDev") -> str:

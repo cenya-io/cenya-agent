@@ -187,7 +187,7 @@ class PasswordRunTests(unittest.TestCase):
         ):
             self.assertIn(option, argv)
         self.assertNotIn("-A", argv)
-        self.assertEqual(argv[-2:], ["admin@10.0.0.5", "show version"])
+        self.assertEqual(argv[-5:], ["-l", "admin", "--", "10.0.0.5", "show version"])
         self.assertEqual(captured["timeout"], ssh.COMMAND_TIMEOUT_SECONDS)
 
     def test_sshpass_is_the_fallback_and_keeps_working_as_before(self) -> None:

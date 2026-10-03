@@ -272,7 +272,9 @@ def argv_for(
         options += ["-i", key_file, "-o", "IdentitiesOnly=yes"]
     if port and port != DEFAULT_PORT:
         options += ["-p", str(port)]
-    argv = [BINARY or "ssh", *options, f"{username}@{host}"]
+    # Usuario con `-l` y destino detrás de `--`: los dos vienen del servidor o
+    # de la red, y uno que empezara por «-» lo leería `ssh` como una opción.
+    argv = [BINARY or "ssh", *options, "-l", username, "--", host]
     if with_password and not askpass:
         argv = ["sshpass", "-e", *argv]
     if command:

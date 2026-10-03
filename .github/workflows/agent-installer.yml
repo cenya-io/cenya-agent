@@ -158,7 +158,14 @@ jobs:
             # agent/release_keys.py, ningún agente la aceptaría. Mejor no publicar.
             python agent/packaging/release_key.py verify release/latest.json release/latest.json.sig
           else
-            echo "::warning title=Release sin firmar::Falta el secreto CENYA_RELEASE_SIGNING_KEY: latest.json se publica sin firma y ningún agente se actualizará a esta versión."
+            # Sin firma no se publica: ningún agente se actualizaría a esta
+            # versión, e install.sh instalaría fiándose solo de HTTPS.
+            echo "::error title=Release sin firmar::Falta el secreto CENYA_RELEASE_SIGNING_KEY (docs/agente-v2-instalacion.md, sección 1)."
+            exit 1
+          fi
+          if [ "$(python -c 'from agent import release_keys as k; print(len(k.PUBLIC_KEYS))')" = 0 ]; then
+            echo "::error title=Sin claves de publicación::agent/release_keys.py está vacío: los agentes de esta versión no podrían verificar la siguiente."
+            exit 1
           fi
           ls -l release
 

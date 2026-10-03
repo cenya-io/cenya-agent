@@ -97,27 +97,13 @@ if ($Update) {
     Copy-Item "$keys\private.pem" (Join-Path $out "test-key.pem")
     $updateArgs = " -UpdateBase 'C:\cenya\installers\Cenya-Agent-Setup-$version.exe' -UpdateNext 'C:\cenya\installers\Cenya-Agent-Setup-$version.1.exe' -UpdateBroken 'C:\cenya\installers\Cenya-Agent-Setup-$version.2.exe' -TestKey 'C:\cenya\out\test-key.pem'"
 }
-# El WebView2 de este equipo, si lo tiene: el Sandbox no lo trae, y sin él
-# fallan los pasos de la ventana. Se monta en solo lectura y se anota dentro
-# donde lo buscan WebView2 y el agente.
-$webview2Client = "SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
-$webview2Dir = Join-Path ${env:ProgramFiles(x86)} "Microsoft\EdgeWebView"
-$webview2 = (Get-ItemProperty "HKLM:\$webview2Client" -ErrorAction SilentlyContinue).pv
-if (-not ($webview2 -and (Test-Path (Join-Path $webview2Dir "Application\$webview2")))) {
-    $webview2 = ""
-    Write-Host "Este equipo no tiene WebView2: los pasos de la ventana fallarán en el Sandbox."
-}
-
+# El Sandbox no trae WebView2: es justo el equipo en el que el instalador
+# tiene que ponerlo él (con la red del Sandbox), y la prueba lo comprueba.
 @"
 `$env:PATH = "C:\cenya\python;C:\cenya\pwsh;`$env:PATH"
 `$env:PYTHONPATH = "C:\cenya\pylibs"
 `$env:PYTHONDONTWRITEBYTECODE = "1"
 `$code = 99
-if ("$webview2") {
-    New-Item -Path "HKLM:\$webview2Client" -Force | Out-Null
-    Set-ItemProperty -Path "HKLM:\$webview2Client" -Name pv -Value "$webview2"
-    Set-ItemProperty -Path "HKLM:\$webview2Client" -Name location -Value "C:\Program Files (x86)\Microsoft\EdgeWebView\Application"
-}
 try {
     & C:\cenya\repo\agent\packaging\smoke-test.ps1 -Installer 'C:\cenya\installers\Cenya-Agent-Setup-$version.exe'$updateArgs *>&1 |
         Tee-Object -FilePath C:\cenya\out\smoke.log
@@ -136,8 +122,7 @@ $started = Get-Date
 $id = ((& wsb start --raw | Out-String | ConvertFrom-Json).Id)
 if (-not $id) { throw "wsb start no devolvió un identificador." }
 function Share($HostFolder, $Name, [switch] $Write) {
-    $target = if ($Name -like "?:\*") { $Name } else { "C:\cenya\$Name" }
-    $arguments = @("share", "--id", $id, "-f", $HostFolder, "-s", $target)
+    $arguments = @("share", "--id", $id, "-f", $HostFolder, "-s", "C:\cenya\$Name")
     if ($Write) { $arguments += "--allow-write" }
     & wsb @arguments | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "No se pudo montar $HostFolder en el Sandbox." }
@@ -148,7 +133,6 @@ Share $pylibs "pylibs"
 Share $pythonHome "python"
 Share $pwshDir "pwsh"
 Share $out "out" -Write
-if ($webview2) { Share $webview2Dir "C:\Program Files (x86)\Microsoft\EdgeWebView" }
 # La sesión de usuario (la ventana): la prueba abre la aplicación de verdad.
 # `wsb connect` no vuelve hasta que se cierra la ventana, así que va aparte.
 Start-Process wsb -ArgumentList "connect", "--id", $id

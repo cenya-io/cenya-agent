@@ -24,6 +24,7 @@ Rules every handler keeps:
 from __future__ import annotations
 
 import ipaddress
+import io
 import json
 import os
 import platform
@@ -1090,9 +1091,15 @@ class LocalService:
         }
         base = logs.path(self.env())
         candidates = [base] + [base.with_name(f"{base.name}.{n}") for n in range(1, 5)]
-        buffer_path = output.with_name(f".{output.name}.tmp")
+        # En los .json un secreto con comillas o barras sale escapado: se busca
+        # también así, o pasaría sin tachar.
+        secrets = [*secrets, *(json.dumps(s, ensure_ascii=False)[1:-1] for s in secrets)]
+        # Se arma en memoria y se escribe con un nombre temporal al azar
+        # (`_write_atomic`): lo escribe SYSTEM en la carpeta que se le diga, y
+        # un nombre fijo al lado del destino se podía preparar de antemano.
+        buffer = io.BytesIO()
         try:
-            with zipfile.ZipFile(buffer_path, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
+            with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
                 for name, value in parts.items():
                     text = json.dumps(value, ensure_ascii=False, indent=1, default=str)
                     bundle.writestr(name, redact(text, secrets))
@@ -1102,9 +1109,8 @@ class LocalService:
                     except OSError:
                         continue
                     bundle.writestr(f"logs/{log_file.name}", redact(text, secrets))
-            os.replace(buffer_path, output)
+            _write_atomic(output, buffer.getvalue())
         except OSError as exc:
-            Path(buffer_path).unlink(missing_ok=True)
             raise OpError(FAILED, _t("No se pudo escribir %(path)s: %(error)s") % {"path": output, "error": exc.strerror or exc}) from None
         return {"path": str(output)}
 

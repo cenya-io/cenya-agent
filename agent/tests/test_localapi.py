@@ -338,8 +338,15 @@ class ConversationTests(unittest.TestCase):
         self.assertTrue(other.sent[0]["ok"])
         self.assertTrue(admission.claim(ADMIN) and admission.claim(ADMIN))
 
+    def test_readers_never_take_the_slots_kept_for_admins(self) -> None:
+        admission = Admission(total=8, per_caller=8, reserve=2)
+        readers = [Caller(admin=False, who=f"S-1-5-21-{n}") for n in range(8)]
+        self.assertEqual(sum(admission.claim(reader) for reader in readers), 6)
+        self.assertTrue(admission.claim(ADMIN) and admission.claim(ADMIN))
+        self.assertFalse(admission.claim(ADMIN))
+
     def test_admission_counts_connections(self) -> None:
-        admission = Admission(total=2)
+        admission = Admission(total=2, pending=2)
         self.assertTrue(admission.enter() and admission.enter())
         self.assertFalse(admission.enter())
         admission.leave()

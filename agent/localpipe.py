@@ -109,15 +109,21 @@ def groups_grant_admin(groups: list[tuple[str, int]]) -> bool:
     return False
 
 
-def trusted_pipe_owner(owner_sid: str, own_sid: str) -> bool:
+def trusted_pipe_owner(owner_sid: str, own_sid: str, *, allow_own: bool = True) -> bool:
     """Whether a client should talk to a pipe owned by `owner_sid`. Pure.
 
     El servicio corre como SYSTEM y el dueño del pipe sale SYSTEM o
     Administradores. Un agente lanzado a mano desde la consola de uno mismo es
     de uno mismo. Cualquier otro dueño es alguien que se ha quedado con el
     nombre antes que el servicio.
+
+    `allow_own=False` (un cliente elevado, o el nombre del servicio de verdad):
+    solo SYSTEM o Administradores. Un proceso sin elevar de la misma cuenta
+    también es «uno mismo», y a una ventana elevada le llegaría lo que el
+    administrador teclea en ella: la cadena de conexión, el token de NetBox.
     """
-    return bool(owner_sid) and owner_sid in (_WELL_KNOWN_SYSTEM, _WELL_KNOWN_ADMINS, own_sid)
+    trusted = (_WELL_KNOWN_SYSTEM, _WELL_KNOWN_ADMINS, own_sid) if allow_own else (_WELL_KNOWN_SYSTEM, _WELL_KNOWN_ADMINS)
+    return bool(owner_sid) and owner_sid in trusted
 
 
 class Unavailable(OSError):
@@ -434,6 +440,16 @@ def _own_sid(w: Any) -> str:
     return _runner_sid(w)
 
 
+def _process_is_admin() -> bool:
+    """SYSTEM o un administrador elevado (lo que pide `allow_own=False`)."""
+    try:
+        import ctypes
+
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:  # noqa: BLE001 - sin saberlo, se trata como elevado: más estricto
+        return True
+
+
 def connect_pipe(name: str, timeout: float = 5.0) -> PipeConnection:
     """A client end of the pipe, after checking who owns it. Raises `Unavailable`."""
     try:
@@ -477,7 +493,8 @@ def connect_pipe(name: str, timeout: float = 5.0) -> PipeConnection:
         owner = w.win32security.ConvertSidToStringSid(sd.GetSecurityDescriptorOwner())
     except Exception:  # noqa: BLE001
         owner = ""
-    if not trusted_pipe_owner(owner, _own_sid(w)):
+    allow_own = name.lower() != DEFAULT_PIPE_NAME.lower() and not _process_is_admin()
+    if not trusted_pipe_owner(owner, _own_sid(w), allow_own=allow_own):
         w.win32file.CloseHandle(handle)
         raise Unavailable("untrusted")
     return PipeConnection(handle, w)

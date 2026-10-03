@@ -307,7 +307,8 @@ IDLE_SECONDS = 300.0
 #: manda un byte cada minuto para quedarse con el hueco).
 LINE_SECONDS = 30.0
 #: La primera petición: quien conecta y no dice nada ocupa un hueco sin nombre.
-FIRST_LINE_SECONDS = 10.0
+#: Corto: hasta que habla no se sabe quién es, y esos huecos son de todos.
+FIRST_LINE_SECONDS = 3.0
 #: Un cliente que no lee su respuesta en esto se cierra.
 SEND_SECONDS = 30.0
 
@@ -398,19 +399,27 @@ class Admission:
 
     Un usuario cualquiera puede leer, pero no puede llenar todos los huecos y
     dejar fuera al administrador o a la aplicación: cada identidad tiene su
-    propio tope, por debajo del total.
+    propio tope, por debajo del total, y `reserve` huecos son solo de quien
+    puede actuar. Las conexiones que aún no han dicho nada (`enter`, antes de
+    saber quién es) tienen su propio tope, `pending`, más holgado: duran
+    `FIRST_LINE_SECONDS` como mucho, y llenarlas no deja a nadie fuera de los
+    huecos de verdad.
     """
 
-    def __init__(self, total: int = 16, per_caller: int = 4) -> None:
+    def __init__(self, total: int = 16, per_caller: int = 4, *, reserve: int | None = None, pending: int | None = None) -> None:
         self.total = total
         self.per_caller = per_caller
+        self.reserve = min(4, total // 4) if reserve is None else reserve
+        self.pending = total * 3 if pending is None else pending
         self._lock = threading.Lock()
         self._open = 0
         self._by_caller: dict[str, int] = {}
+        self._claimed = 0
+        self._claimed_readers = 0
 
     def enter(self) -> bool:
         with self._lock:
-            if self._open >= self.total:
+            if self._open >= self.pending:
                 return False
             self._open += 1
             return True
@@ -422,9 +431,14 @@ class Admission:
     def claim(self, caller: Caller) -> bool:
         with self._lock:
             count = self._by_caller.get(caller.who, 0)
-            if count >= self.per_caller:
+            if count >= self.per_caller or self._claimed >= self.total:
+                return False
+            if not caller.admin and self._claimed_readers >= self.total - self.reserve:
                 return False
             self._by_caller[caller.who] = count + 1
+            self._claimed += 1
+            if not caller.admin:
+                self._claimed_readers += 1
             return True
 
     def release(self, caller: Caller) -> None:
@@ -434,6 +448,9 @@ class Admission:
                 self._by_caller.pop(caller.who, None)
             else:
                 self._by_caller[caller.who] = count
+            self._claimed = max(0, self._claimed - 1)
+            if not caller.admin:
+                self._claimed_readers = max(0, self._claimed_readers - 1)
 
     @property
     def open(self) -> int:

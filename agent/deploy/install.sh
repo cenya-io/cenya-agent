@@ -168,6 +168,18 @@ run_as_agent() {
     runuser -u "$AGENT_USER" -- env CENYA_STATE_DIR="$STATE" HOME="$STATE" "$PREFIX/current/bin/cenya-agent" "$@"
 }
 
+# Las marcas de la actualización (`updates/healthy-X`, `updates/failed-X`) viven
+# en la carpeta del usuario del agente: root no las toca por ruta.
+# shellcheck disable=SC2016 # $1 y $2 son de la sh hija, a propósito
+mark_as_agent() {
+    runuser -u "$AGENT_USER" -- sh -c 'mkdir -p "$1/updates" && : >"$1/updates/failed-$2"' sh "$STATE" "$1" || true
+}
+
+# shellcheck disable=SC2016
+unmark_as_agent() {
+    runuser -u "$AGENT_USER" -- sh -c 'rm -f "$1/updates/healthy-$2"' sh "$STATE" "$1" || true
+}
+
 ensure_user() {
     if ! id -u "$AGENT_USER" >/dev/null 2>&1; then
         nologin=$(command -v nologin || echo /bin/false)
@@ -284,9 +296,9 @@ watchdog() {
     if [ -x "$PREFIX/$previous/bin/cenya-agent" ]; then
         say "La versión $next no ha conectado en $seconds s: se vuelve a la $previous."
         switch_current "$PREFIX/$previous"
-        mkdir -p "$STATE/updates"
-        : >"$STATE/updates/failed-$next"
-        chown "$AGENT_USER:$AGENT_USER" "$STATE/updates" "$STATE/updates/failed-$next" 2>/dev/null || true
+        # Como el usuario del agente, nunca como root: la carpeta es suya y un
+        # enlace puesto ahí llevaría a root a crear o truncar otro fichero.
+        mark_as_agent "$next"
         systemctl restart cenya-agent || true
     else
         say "No queda la versión $previous: no hay a qué volver."
@@ -357,7 +369,7 @@ main() {
     if [ -n "$previous" ] && [ "$previous" != "$VERSION" ] && is_version "$previous"; then
         # Una actualización: la marca de «sana» de un intento anterior no vale,
         # y el vigilante queda puesto ANTES de cambiar de versión.
-        rm -f "$STATE/updates/healthy-$VERSION"
+        unmark_as_agent "$VERSION"
         install -m 0755 "$SRC/deploy/install.sh" "$PREFIX/install.sh"
         seconds="${CENYA_UPDATE_WATCHDOG_SECONDS:-600}"
         case "$seconds" in '' | *[!0-9]*) seconds=600 ;; esac

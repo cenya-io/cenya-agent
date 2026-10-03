@@ -63,8 +63,11 @@
 ;    el servicio: quien despliega en masa ve el error.
 ;  * La aplicación (cenya-agent-app.exe) necesita el runtime WebView2 de
 ;    Microsoft, que traen Windows 11 y Windows 10 al día pero puede faltar en un
-;    Windows Server o un LTSC. Si falta, se avisa en la última página (y en el
-;    registro de la instalación) y se instala igual: el servicio no lo necesita.
+;    Windows Server o un LTSC. Si falta, el instalador lo pone con el
+;    «Evergreen Bootstrapper» de Microsoft que lleva dentro (build.ps1 lo
+;    descarga y comprueba su firma; Microsoft permite redistribuirlo), que a su
+;    vez lo descarga. Sin red, se avisa en la última página (y en el registro)
+;    y se instala igual: el servicio no lo necesita.
 ;  * La carpeta del programa entra en el PATH del sistema (una sola vez, aunque
 ;    se actualice) para que `cenya-agent` funcione en cualquier consola nueva,
 ;    que es lo que enseñan las pantallas de Cenya. Al desinstalar se quita esa
@@ -149,6 +152,7 @@ spanish.ServiceFailed=No se pudo instalar el servicio de Windows (código %1). M
 spanish.NotEnrolledNote=El servicio está en marcha esperando a que conectes este equipo: abre Cenya Agent en el menú Inicio y pulsa «Conectar».
 spanish.AppShortcut=Cenya Agent
 spanish.OpenAppToConnect=Abrir Cenya Agent para conectar este equipo
+spanish.WebView2Installing=Instalando el componente WebView2 de Microsoft para la ventana de Cenya Agent (puede tardar unos minutos)...
 spanish.WebView2Missing=Aviso: la ventana de Cenya Agent necesita el componente Microsoft Edge WebView2 Runtime, que no está instalado en este equipo. El agente funciona igual. Para usar la ventana, instálalo desde https://developer.microsoft.com/microsoft-edge/webview2/ («Evergreen Bootstrapper»).
 spanish.TrayTask=Mostrar el icono de estado en la bandeja del sistema
 spanish.UpdateBackupFailed=No se pudo guardar la versión instalada antes de actualizar (código %1). No se ha cambiado nada.
@@ -169,6 +173,7 @@ english.ServiceFailed=The Windows service could not be installed (code %1). See 
 english.NotEnrolledNote=The service is running and waiting for you to connect this machine: open Cenya Agent from the Start menu and click "Connect".
 english.AppShortcut=Cenya Agent
 english.OpenAppToConnect=Open Cenya Agent to connect this machine
+english.WebView2Installing=Installing the Microsoft WebView2 component for the Cenya Agent window (this may take a few minutes)...
 english.WebView2Missing=Note: the Cenya Agent window needs the Microsoft Edge WebView2 Runtime, which is not installed on this machine. The agent works anyway. To use the window, install it from https://developer.microsoft.com/microsoft-edge/webview2/ ("Evergreen Bootstrapper").
 english.TrayTask=Show the status icon in the system tray
 english.UpdateBackupFailed=The installed version could not be saved before updating (code %1). Nothing has been changed.
@@ -189,6 +194,7 @@ german.ServiceFailed=Der Windows-Dienst konnte nicht installiert werden (Code %1
 german.NotEnrolledNote=Der Dienst läuft und wartet darauf, dass Sie diesen Rechner verbinden: Öffnen Sie Cenya Agent im Startmenü und klicken Sie auf „Verbinden“.
 german.AppShortcut=Cenya Agent
 german.OpenAppToConnect=Cenya Agent öffnen, um diesen Rechner zu verbinden
+german.WebView2Installing=Die Microsoft-Komponente WebView2 für das Fenster von Cenya Agent wird installiert (das kann einige Minuten dauern)...
 german.WebView2Missing=Hinweis: Das Fenster von Cenya Agent benötigt die Microsoft Edge WebView2 Runtime, die auf diesem Rechner nicht installiert ist. Der Agent funktioniert trotzdem. Um das Fenster zu nutzen, installieren Sie sie von https://developer.microsoft.com/microsoft-edge/webview2/ („Evergreen Bootstrapper“).
 german.TrayTask=Statussymbol im Infobereich der Taskleiste anzeigen
 german.UpdateBackupFailed=Die installierte Version konnte vor dem Update nicht gesichert werden (Code %1). Es wurde nichts geändert.
@@ -209,6 +215,7 @@ french.ServiceFailed=Le service Windows n'a pas pu être installé (code %1). Co
 french.NotEnrolledNote=Le service est en cours d'exécution et attend que vous connectiez cette machine : ouvrez Cenya Agent depuis le menu Démarrer et cliquez sur « Connecter ».
 french.AppShortcut=Cenya Agent
 french.OpenAppToConnect=Ouvrir Cenya Agent pour connecter cette machine
+french.WebView2Installing=Installation du composant Microsoft WebView2 pour la fenêtre de Cenya Agent (cela peut prendre quelques minutes)...
 french.WebView2Missing=Remarque : la fenêtre de Cenya Agent a besoin du composant Microsoft Edge WebView2 Runtime, qui n'est pas installé sur cette machine. L'agent fonctionne quand même. Pour utiliser la fenêtre, installez-le depuis https://developer.microsoft.com/microsoft-edge/webview2/ (« Evergreen Bootstrapper »).
 french.TrayTask=Afficher l'icône d'état dans la zone de notification
 french.UpdateBackupFailed=La version installée n'a pas pu être sauvegardée avant la mise à jour (code %1). Rien n'a été modifié.
@@ -229,6 +236,7 @@ brazilianportuguese.ServiceFailed=Não foi possível instalar o serviço do Wind
 brazilianportuguese.NotEnrolledNote=O serviço está em execução esperando que você conecte esta máquina: abra o Cenya Agent no menu Iniciar e clique em "Conectar".
 brazilianportuguese.AppShortcut=Cenya Agent
 brazilianportuguese.OpenAppToConnect=Abrir o Cenya Agent para conectar esta máquina
+brazilianportuguese.WebView2Installing=Instalando o componente Microsoft WebView2 para a janela do Cenya Agent (pode levar alguns minutos)...
 brazilianportuguese.WebView2Missing=Aviso: a janela do Cenya Agent precisa do Microsoft Edge WebView2 Runtime, que não está instalado nesta máquina. O agente funciona mesmo assim. Para usar a janela, instale-o em https://developer.microsoft.com/microsoft-edge/webview2/ ("Evergreen Bootstrapper").
 brazilianportuguese.TrayTask=Mostrar o ícone de status na área de notificação
 brazilianportuguese.UpdateBackupFailed=Não foi possível guardar a versão instalada antes de atualizar (código %1). Nada foi alterado.
@@ -243,6 +251,10 @@ Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdi
 ; El vigilante de /UPDATE: no se instala con el programa (se reemplazaría a sí
 ; mismo); se extrae y se copia a %ProgramData%\Cenya\previous en PrepareToInstall.
 Source: "update-watchdog.cmd"; Flags: dontcopy
+#ifdef WebView2Setup
+; El instalador de WebView2 de Microsoft: solo se extrae si falta (InstallWebView2).
+Source: "{#WebView2Setup}"; DestName: "MicrosoftEdgeWebview2Setup.exe"; Flags: dontcopy
+#endif
 
 [Registry]
 ; El icono arranca al iniciar sesión cualquier usuario de este equipo, y se
@@ -449,11 +461,14 @@ begin
 end;
 
 { Una actualización de un equipo ya enrolado no vuelve a pedir nada, ni quien
-  trae la conexión en la línea de comandos o en el nombre. }
+  trae la conexión en la línea de comandos. La del nombre, con ventana, se
+  enseña rellena antes de usarla: el nombre de un fichero lo puede cambiar
+  cualquiera que lo reenvíe, y el equipo quedaría enrolado en el portal de otro
+  (que es quien decide qué redes barre). En silencio se usa tal cual. }
 function NeedsConnection: Boolean;
 begin
-  Result := (ConnectionParam = '') and (InstallerNameConnection = '') and
-    (not FileExists(EnrollmentFile)) and (not IsUpdateMode);
+  Result := (ConnectionParam = '') and (not FileExists(EnrollmentFile)) and (not IsUpdateMode) and
+    ((InstallerNameConnection = '') or (not WizardSilent));
 end;
 
 { Ya enrolado, /CONNECTION y el nombre se ignoran: ver la cabecera.
@@ -468,7 +483,7 @@ begin
   end
   else if ConnectionParam <> '' then
     Result := ConnectionParam
-  else if InstallerNameConnection <> '' then
+  else if (InstallerNameConnection <> '') and WizardSilent then
     Result := InstallerNameConnection
   else
     Result := Trim(ConnectionPage.Values[0]);
@@ -513,6 +528,7 @@ begin
   CaBrowseButton.Left := ConnectionPage.SurfaceWidth - CaBrowseButton.Width;
   ConnectionPage.Edits[1].Width := CaBrowseButton.Left - ScaleX(8) - ConnectionPage.Edits[1].Left;
   CaBrowseButton.OnClick := @CaBrowseClick;
+  ConnectionPage.Values[0] := InstallerNameConnection;
 end;
 
 function InitializeSetup: Boolean;
@@ -712,7 +728,10 @@ end;
 
 { Copia la carpeta del programa a previous\app: primero a app.partial y solo
   entera se renombra. Un instalador matado a mitad nunca deja una copia a
-  medias que el vigilante pudiera restaurar. 0 si fue bien. }
+  medias que el vigilante pudiera restaurar. 0 si fue bien.
+  previous se rehace entera cada vez: SYSTEM ejecuta lo que hay dentro, y una
+  carpeta que no ha creado este instalador puede ser de otro usuario (con su
+  dueño y sus permisos). Si no se puede borrar, no hay actualización. }
 function BackupPrevious: Integer;
 var
   Partial, Target: String;
@@ -720,8 +739,12 @@ var
 begin
   Partial := PreviousDir + '\app.partial';
   Target := PreviousDir + '\app';
-  ForceDirectories(PreviousDir);
-  DelTree(Partial, True, True, True);
+  DelTree(PreviousDir, True, True, True);
+  if DirExists(PreviousDir) or not ForceDirectories(PreviousDir) then
+  begin
+    Result := 1006;
+    Exit;
+  end;
   if not Exec(ExpandConstant('{sys}\robocopy.exe'),
       '"' + ExpandConstant('{app}') + '" "' + Partial + '" /MIR /R:2 /W:2 /NP /NFL /NDL /NJH /NJS',
       '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
@@ -868,13 +891,59 @@ begin
   end;
 end;
 
+{ La carpeta del programa: la del servicio (SYSTEM) y la que va en el PATH del
+  sistema. En Archivos de programa ya viene cerrada; con /DIR= en otro sitio
+  (C:\Cenya) heredaría permisos que dejan escribir a cualquiera, y una DLL
+  puesta ahí la cargaría SYSTEM. Se cierra siempre, antes de copiar nada:
+  dueño Administradores, sin herencia, y Usuarios solo leen y ejecutan. }
+procedure ProtectAppDir;
+var
+  Dir: String;
+  ResultCode: Integer;
+begin
+  if not IsAdminInstallMode then
+    Exit;
+  Dir := ExpandConstant('{app}');
+  ForceDirectories(Dir);
+  Exec(ExpandConstant('{sys}\icacls.exe'), '"' + Dir + '" /setowner *S-1-5-32-544 /T /C /Q', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{sys}\icacls.exe'), '"' + Dir + '" /reset /T /C /Q', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  if not Exec(ExpandConstant('{sys}\icacls.exe'),
+      '"' + Dir + '" /inheritance:r /grant:r *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F *S-1-5-32-545:(OI)(CI)RX /C /Q',
+      '', SW_HIDE, ewWaitUntilTerminated, ResultCode) or (ResultCode <> 0) then
+    Log('icacls en ' + Dir + ': ' + IntToStr(ResultCode));
+end;
+
+{ WebView2 si falta, con el instalador de Microsoft que viaja dentro. Nunca
+  bloquea: si no puede (sin red, sin permisos), queda el aviso de siempre. }
+procedure InstallWebView2;
+var
+  ResultCode: Integer;
+begin
+#ifdef WebView2Setup
+  if WebView2Present or not IsAdminInstallMode then
+    Exit;
+  WizardForm.StatusLabel.Caption := CustomMessage('WebView2Installing');
+  Log(CustomMessage('WebView2Installing'));
+  try
+    ExtractTemporaryFile('MicrosoftEdgeWebview2Setup.exe');
+    Exec(ExpandConstant('{tmp}\MicrosoftEdgeWebview2Setup.exe'), '/silent /install', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Log('WebView2: ' + IntToStr(ResultCode));
+  except
+    Log('WebView2: ' + GetExceptionMessage);
+  end;
+#endif
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   Connection, Reason, Ca: String;
   Enrolled: Boolean;
 begin
   if CurStep = ssInstall then
+  begin
     StopRunningAgent;
+    ProtectAppDir;
+  end;
 
   if CurStep = ssPostInstall then
   begin
@@ -918,6 +987,7 @@ begin
     RunService('--wait 60 start');
     if not Enrolled then
       Log(CustomMessage('NotEnrolledNote'));
+    InstallWebView2;
     if not WebView2Present then
       Log(CustomMessage('WebView2Missing'));
   end;
