@@ -17,3 +17,6 @@ dist/
 
 # Vistas previas locales de la ventana (agent/app, sin control de versiones)
 .preview/
+
+# Trabajo de sandbox-test.ps1 (instaladores de prueba, clave de prueba, registros)
+.sandbox/
