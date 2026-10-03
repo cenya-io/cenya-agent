@@ -744,6 +744,25 @@ begin
   Result := 0;
 end;
 
+{ Registra la tarea por COM (Schedule.Service). 6 = crear o actualizar;
+  5 = cuenta de servicio (SYSTEM, la que dice el XML). False, con el motivo en
+  el registro de la instalación, si esa interfaz no está o rechaza la tarea. }
+function RegisterWatchdogTask(const Xml: String): Boolean;
+var
+  Service, Folder: Variant;
+begin
+  Result := False;
+  try
+    Service := CreateOleObject('Schedule.Service');
+    Service.Connect;
+    Folder := Service.GetFolder('\');
+    Folder.RegisterTask('{#WatchdogTask}', Xml, 6, Null, Null, 5);
+    Result := True;
+  except
+    Log('Schedule.Service: ' + GetExceptionMessage);
+  end;
+end;
+
 { La tarea programada: al registrarse (30 s después) y en cada arranque del
   equipo, como SYSTEM, una sola instancia a la vez. El .cmd hace el resto y
   borra la tarea al terminar. }
@@ -752,6 +771,7 @@ var
   Script, XmlFile, Arguments, Xml: String;
   Lines: TArrayOfString;
   ResultCode: Integer;
+  Output: TExecOutput;
 begin
   Script := PreviousDir + '\update-watchdog.cmd';
   ExtractTemporaryFile('update-watchdog.cmd');
@@ -796,9 +816,20 @@ begin
     Result := 1004;
     Exit;
   end;
-  if not Exec(ExpandConstant('{sys}\schtasks.exe'), '/Create /F /TN "{#WatchdogTask}" /XML "' + XmlFile + '"',
-      '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+  { Primero por la interfaz del Programador de tareas, que recibe el XML como
+    texto: no hay fichero ni codificación de por medio, y si lo rechaza dice
+    por qué. }
+  if RegisterWatchdogTask(Xml) then
+  begin
+    Result := 0;
+    Exit;
+  end;
+  { Y si no, schtasks, dejando en el registro lo que conteste: un código 1
+    a secas no dice a nadie qué arreglar. }
+  if not ExecAndCaptureOutput(ExpandConstant('{sys}\schtasks.exe'), '/Create /F /TN "{#WatchdogTask}" /XML "' + XmlFile + '"',
+      '', SW_HIDE, ewWaitUntilTerminated, ResultCode, Output) then
     ResultCode := 1005;
+  Log('schtasks (' + IntToStr(ResultCode) + '): ' + OutputText(Output));
   Result := ResultCode;
   if Result <> 0 then
     DeleteFile(PreviousDir + '\installing');

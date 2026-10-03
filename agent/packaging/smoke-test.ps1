@@ -276,7 +276,9 @@ try {
     try {
         $said = WaitFor { $text = (& $cli status 2>&1 | Out-String); if ($LASTEXITCODE -eq 0) { $text } } 60
         Check "cenya-agent status contesta por el canal" ($null -ne $said) ((& $cli status 2>&1 | Out-String))
-        Check "y dice que no está conectado" ($said -match "No está conectado") $said
+        # «est.»: PowerShell lee la salida del ejecutable con otra página de códigos
+        # y la «á» llega cambiada; la frase es la misma.
+        Check "y dice que no está conectado" ($said -match "No est. conectado") $said
         Start-Sleep -Seconds 5
         $service = Get-Service -Name "CenyaAgent" -ErrorAction SilentlyContinue
         Check "y no se para ni se reinicia" ($service -and $service.Status -eq "Running")
