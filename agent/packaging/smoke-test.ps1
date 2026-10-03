@@ -419,3 +419,7 @@ if ($failures.Count -gt 0) {
 }
 Write-Host ""
 Write-Host "Todo en orden."
+# Explícito: GitHub Actions termina el paso con el último $LASTEXITCODE, y el de
+# un programa nativo que aquí se esperaba distinto de cero (sc query de un
+# servicio que ya no existe) marcaba como fallida una prueba en la que todo pasó.
+exit 0
