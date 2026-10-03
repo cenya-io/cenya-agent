@@ -375,7 +375,9 @@ install_version() {
     [ -f "$SRC/deploy/cenya-agent.service" ] || die "el archivo no trae deploy/cenya-agent.service."
     [ -f "$SRC/deploy/requirements-linux.txt" ] ||
         die "el archivo no trae deploy/requirements-linux.txt: sin dependencias fijadas no se instala."
-    case "$ARCHIVE" in *[[:space:]]*) die "la ruta del archivo no puede tener espacios: $ARCHIVE" ;; esac
+    # Va dentro de una línea de requisitos de pip: solo caracteres que no se
+    # puedan leer como otra cosa (ni espacios, ni «#», ni «;»).
+    case "$ARCHIVE" in *[!A-Za-z0-9._/-]*) die "la ruta del archivo solo puede tener letras, números y . _ - /: $ARCHIVE" ;; esac
     current_target=$(readlink "$PREFIX/current" 2>/dev/null || true)
     if [ "$current_target" = "$dest" ] && [ -x "$dest/bin/cenya-agent" ]; then
         say "La versión $VERSION ya está instalada."
