@@ -441,6 +441,11 @@ class WatchdogTaskXmlTests(unittest.TestCase):
         self.assertNotIn("<?xml", built)
         self.assertIn("<Task version=", self.create)
 
+    def test_the_file_for_schtasks_is_written_without_a_byte_order_mark(self) -> None:
+        # Con la marca de UTF-8 delante, schtasks decía «The task XML is malformed».
+        self.assertNotIn("SaveStringsToUTF8File(XmlFile", self.create)
+        self.assertIn("SaveStringToFile(XmlFile, AnsiString(Xml), False)", self.create)
+
     def test_the_description_is_escaped_to_plain_ascii(self) -> None:
         # La descripción alemana lleva «Ü»: sale como referencia numérica.
         self.assertIn("Ord(Value[I]) > 127", self.escape)

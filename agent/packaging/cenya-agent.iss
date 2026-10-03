@@ -756,7 +756,7 @@ begin
     Service := CreateOleObject('Schedule.Service');
     Service.Connect;
     Folder := Service.GetFolder('\');
-    Folder.RegisterTask('{#WatchdogTask}', Xml, 6, Null, Null, 5);
+    Folder.RegisterTask('{#WatchdogTask}', Xml, 6, Unassigned, Unassigned, 5);
     Result := True;
   except
     Log('Schedule.Service: ' + GetExceptionMessage);
@@ -769,7 +769,6 @@ end;
 function CreateWatchdog: Integer;
 var
   Script, XmlFile, Arguments, Xml: String;
-  Lines: TArrayOfString;
   ResultCode: Integer;
   Output: TExecOutput;
 begin
@@ -809,9 +808,11 @@ begin
     '  <Actions Context="Author"><Exec><Command>' + XmlEscape(Script) + '</Command><Arguments>' + XmlEscape(Arguments) + '</Arguments></Exec></Actions>' + #13#10 +
     '</Task>' + #13#10;
   XmlFile := ExpandConstant('{tmp}\cenya-watchdog.xml');
-  SetArrayLength(Lines, 1);
-  Lines[0] := Xml;
-  if not SaveStringsToUTF8File(XmlFile, Lines, False) then
+  { ASCII puro y sin marca de orden de bytes. schtasks convierte el fichero a
+    texto antes de analizarlo: con la marca de UTF-8 delante le quedaban tres
+    caracteres sueltos antes de <Task> («The task XML is malformed»), y con
+    una declaración de codificación tampoco podía. }
+  if not SaveStringToFile(XmlFile, AnsiString(Xml), False) then
   begin
     Result := 1004;
     Exit;
