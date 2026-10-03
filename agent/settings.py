@@ -39,6 +39,25 @@ GENTLENESS_LEVELS = ("gentle", "normal", "fast")
 _TRUE = {"1", "true", "yes", "on"}
 _FALSE = {"0", "false", "no", "off"}
 
+#: Una pausa local «hasta que la reanude» (spec 4, `pause` con `indefinite`).
+#: Dentro del agente es una fecha más (la más lejana que se puede escribir),
+#: para que comparar y elegir la más tardía de dos pausas siga siendo comparar
+#: fechas; en `settings.json`, en el checkin y en el canal se escribe como lo
+#: que es: ``"indefinite"`` / ``indefinite: true``, nunca como el año 9999.
+PAUSE_INDEFINITE = datetime(9999, 12, 31, 23, 59, 59, tzinfo=timezone.utc)
+INDEFINITE = "indefinite"
+
+
+def is_indefinite(moment: datetime | None) -> bool:
+    return moment is not None and moment >= PAUSE_INDEFINITE
+
+
+def pause_text(moment: datetime | None) -> str | None:
+    """Cómo se guarda una pausa: ISO, ``"indefinite"`` o `None`."""
+    if moment is None:
+        return None
+    return INDEFINITE if is_indefinite(moment) else moment.isoformat()
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -76,7 +95,7 @@ class Settings:
             "gentleness_cap": self.gentleness_cap,
             "auto_update": self.auto_update,
             "notifications": self.notifications,
-            "paused_until": self.paused_until.isoformat() if self.paused_until else None,
+            "paused_until": pause_text(self.paused_until),
         }
 
 
@@ -132,6 +151,8 @@ def _addresses(values: object) -> tuple[str, ...]:
 def _moment(value: object) -> datetime | None:
     if not isinstance(value, str) or not value.strip():
         return None
+    if value.strip().lower() == INDEFINITE:
+        return PAUSE_INDEFINITE
     try:
         parsed = datetime.fromisoformat(value.strip())
     except ValueError:

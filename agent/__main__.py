@@ -20,12 +20,12 @@ import time
 from datetime import datetime, timezone
 from typing import Protocol
 
-from agent import __version__, enroll, logs, notes, probe, status, store
+from agent import __version__, enroll, localops, localpipe, logs, notes, probe, status, store
 from agent import settings as local_settings
 from agent.notes import collector_note
 from agent.client import AgentClient, PushError
 from agent.collectors import all_collectors
-from agent.config import Config, from_env
+from agent.config import Config, from_env, setting
 from agent.i18n import _t, _tn
 from agent.memory import Excluded, Memory
 from agent.runtime import FALLBACK, V1, V2, Runtime
@@ -208,6 +208,13 @@ def main(argv: list[str] | None = None, stop_event: StopSignal | None = None) ->
     siguiente. La siesta, en cambio, se corta en el acto.
     """
     args = argv if argv is not None else sys.argv[1:]
+    logs.tolerant_console()
+    from agent import localclient
+
+    if args[:1] and args[0] in localclient.COMMANDS:
+        # Clientes del canal local: hablan con el servicio que ya corre en
+        # esta máquina, no arrancan otro agente.
+        raise SystemExit(localclient.run(args))
     if args[:1] == ["enroll"]:
         raise SystemExit(enroll.run(args[1:]))
     if args[:1] == ["goodbye"]:
@@ -216,6 +223,18 @@ def main(argv: list[str] | None = None, stop_event: StopSignal | None = None) ->
         from agent import goodbye
 
         raise SystemExit(goodbye.run(args[1:]))
+    if args[:1] == ["settings"]:
+        # Un ajuste local desde una consola o el instalador (/CA=): spec 2.6.
+        from agent import settings_command
+
+        raise SystemExit(settings_command.run(args[1:]))
+    if args[:1] == ["update"]:
+        # Linux, como root, desde la unidad cenya-agent-update.service: verifica
+        # otra vez lo que pidió el agente y ejecuta install.sh --update. Antes de
+        # proteger la carpeta de estado: root no debe hacerse su dueño.
+        from agent import update
+
+        raise SystemExit(update.run(args[1:]))
     if args[:1] == ["selftest"]:
         from agent import selftest
 
@@ -235,22 +254,24 @@ def main(argv: list[str] | None = None, stop_event: StopSignal | None = None) ->
     except store.StoreError as exc:
         _say(str(exc), error=True)
         raise SystemExit(str(exc)) from exc
-    # Un contenedor o un script que arranca el agente directamente puede traer
-    # la cadena de conexión en el entorno: se canjea aquí, la primera vez.
-    enroll.ensure_enrolled()
+    once = "--once" in args
     logs.setup()
     if securing.moved:
         _say(store.moved_line(securing), error=True)
     local = local_settings.load()
+    language_locked = bool(os.environ.get("CENYA_LANGUAGE"))
     # El idioma de `settings.json`, si nadie lo fijó en el entorno: lo leen
     # `agent.i18n` (lo que se imprime) y `accept_language` (los errores del
     # servidor). Las variables mandan, como en el resto de ajustes.
     if local.language and not os.environ.get("CENYA_LANGUAGE"):
         os.environ["CENYA_LANGUAGE"] = local.language
-    config = from_env()
-    client = AgentClient(config.url, config.token, ca_bundle=config.ca_bundle or local.ca_bundle, proxy=local.proxy)
 
-    if "--once" in args:
+    if once:
+        # Un contenedor o un script que arranca el agente directamente puede
+        # traer la cadena de conexión en el entorno: se canjea aquí, la primera vez.
+        enroll.ensure_enrolled()
+        config = from_env()
+        client = _client_for(config, local)
         # Un servidor caído aquí es un mensaje, no un volcado de pila: `--once`
         # es lo que alguien ejecuta a mano para comprobar que el enrolado
         # funciona, y es justo cuando la URL o el token suelen estar mal.
@@ -267,11 +288,94 @@ def main(argv: list[str] | None = None, stop_event: StopSignal | None = None) ->
             raise SystemExit(1) from exc
         return
 
-    runtime = Runtime(client, config, say=_say)
+    # El canal local (spec 4): la aplicación de escritorio y los comandos
+    # `status`, `pause`... hablan con este proceso por él. Vive lo que vive el
+    # proceso, también sin enrolar: un equipo recién instalado se conecta
+    # desde la aplicación (`connect`), y para eso el servicio tiene que estar
+    # ahí escuchando, no salir al arrancar. Cada identidad es una sesión.
+    channel = localops.LocalService(language_locked=language_locked)
+    server = localpipe.serve(channel.dispatcher())
+    try:
+        config = _identity(channel, first=True)
+        while True:
+            if config is None:
+                # Sin identidad: el canal contesta (`status` dice por qué) y se
+                # espera a un `connect`. Para Windows el servicio está en marcha
+                # y sano: nada de salir con error y reiniciarse en bucle.
+                if not channel.wait_for_connect(stop_event):
+                    break
+                config = _identity(channel)
+                continue
+            client = _client_for(config, local_settings.load())
+            runtime = Runtime(client, config, say=_say)
+            channel.attach(runtime, client, config)
+            _session(client, config, runtime, channel, channel.stop_signal(stop_event), stop_event)
+            if _stopping(stop_event):
+                break
+            change = channel.take_change()
+            if change is None:
+                break
+            channel.detach()
+            # Lo que esperaba en la cola era de la identidad de antes.
+            channel.discard_outbox()
+            config = None if change == localops.DISCONNECTED else _identity(channel)
+    finally:
+        if server is not None:
+            server.close()
+    _say(_t("[agente] Detenido."))
+    status.stopped()
+
+
+def _identity(channel: localops.LocalService, *, first: bool = False) -> Config | None:
+    """La identidad con la que trabajar, o `None` (y el canal sabe por qué) si no hay una usable.
+
+    La primera vez también canjea ``CENYA_CONNECTION`` si la hay (un
+    contenedor que arranca el agente directamente). Lo que antes hacía salir
+    al agente --sin enrolar, un enrolamiento apartado por inseguro, una
+    dirección http:// sin permiso-- ahora se dice y se espera.
+    """
+    try:
+        if first:
+            enroll.ensure_enrolled()
+        return from_env()
+    except SystemExit as exc:
+        message = str(exc.code) if exc.code not in (None, 0) else ""
+        if store.untrusted_enrollment():
+            reason = localops.UNTRUSTED_STATE
+        elif store.load() is None and not setting(os.environ, "AGENT_TOKEN"):
+            reason = localops.NOT_ENROLLED_STATE
+        else:
+            reason = localops.INVALID_STATE
+        channel.set_unenrolled(reason, message)
+        _say(message or _t("[agente] Sin enrolar: esperando una conexión."), error=True)
+        _say(_t("[agente] Esperando a que se conecte este equipo (cenya-agent connect <cadena>, o la aplicación Cenya Agent)."))
+        status.stopped(reason=message)
+        return None
+
+
+def _client_for(config: Config, local: local_settings.Settings) -> AgentClient:
+    return AgentClient(config.url, config.token, ca_bundle=config.ca_bundle or local.ca_bundle, proxy=local.proxy)
+
+
+def _session(
+    client: AgentClient,
+    config: Config,
+    runtime: Runtime,
+    channel: localops.LocalService,
+    stop: StopSignal,
+    stop_event: StopSignal | None,
+) -> None:
+    """Una identidad: el protocolo 2, o el 1 si el servidor no sabe del 2, hasta que paren.
+
+    `stop` es la parada del servicio o un cambio de identidad desde el canal
+    local; `stop_event`, solo la del servicio (si ya estaba puesta, ni se
+    pregunta al servidor).
+    """
     mode = V1 if _stopping(stop_event) else runtime.negotiate()
     while True:
+        channel.set_mode(mode)
         if mode == V1:
-            if not _legacy_loop(client, config, runtime, stop_event):
+            if not _legacy_loop(client, config, runtime, stop):
                 break
             mode = V2
             continue
@@ -279,12 +383,10 @@ def main(argv: list[str] | None = None, stop_event: StopSignal | None = None) ->
         # arranca el 2, y si el servidor resulta ser del 1 su 404 lo dirá.
         _say(_t("[agente] Conectado a %(url)s con el protocolo 2.") % {"url": config.url})
         status.started(version=__version__, url=config.url, interval_seconds=0)
-        if runtime.run(stop_event) != FALLBACK:
+        if runtime.run(stop) != FALLBACK:
             break
         _say(_t("[agente] El servidor solo habla el protocolo 1: se sigue con el bucle de siempre."))
         mode = V1
-    _say(_t("[agente] Detenido."))
-    status.stopped()
 
 
 #: Cada cuánto se vuelve a probar el protocolo 2 desde el bucle del 1 (spec 1.8).

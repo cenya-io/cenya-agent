@@ -51,6 +51,13 @@ toma como 1.
 caracteres; algo que no sea una clave RSA pública válida se descarta sin
 fallar el enrolado.
 
+**Un agente que se enroló con la 0.10.x no tiene clave** (la crea `enroll`).
+Al arrancar el runtime del protocolo 2, si está enrolado, la carpeta de estado
+está protegida (`main` la protege antes; `store.write_protected` no escribe en
+una que no puede proteger) y `cryptography` está, y no hay `identity.key`, la
+crea una vez y la presenta en el checkin (1.2, `public_key`). Una clave que
+existe no se regenera nunca: el servidor puede tener ya sobres para ella.
+
 ### 1.2 `POST /api/agent/v2/checkin/` — el canal de control
 
 Cada `checkin_seconds` (30 por defecto), **también en mitad de una tarea**.
@@ -73,13 +80,21 @@ Petición:
   "config_etag": "<el que tiene el agente, o \"\">",
   "about_hash": "<sha256 hex del about canónico>",
   "about": { … solo si cambió o el servidor lo pidió … },
-  "outbox": 0
+  "outbox": 0,
+  "public_key": "-----BEGIN PUBLIC KEY-----\n… (solo mientras el servidor no confirme que la tiene)"
 }
 ```
 
 - `state`: `idle` | `running` | `paused`. `activity` es `null` si no hay tarea.
 - `paused_until`: la pausa **local** (puesta en la máquina del agente), o `null`.
+- `paused_indefinitely`: `true` solo si la pausa local es «hasta que la
+  reanude» (spec 4, `pause` con `indefinite`); entonces `paused_until` va
+  `null` y `state` es `paused`. Sin pausa sin plazo, el campo no va. El portal
+  la enseña como «en pausa hasta que se reanude en el equipo».
 - `outbox`: cuántos envíos tiene pendientes en su cola local.
+- `public_key`: la clave del agente (1.1), en cada checkin mientras la
+  respuesta no traiga `has_public_key: true`. El servidor la acepta **solo si
+  no tiene ninguna** para ese agente y nunca sustituye una guardada.
 
 Respuesta:
 
@@ -96,7 +111,9 @@ Respuesta:
     {"id": "<uuid>", "kind": "run_task", "params": {"task": "presence"}}
   ],
   "paused_until": null,
-  "update": null
+  "update": null,
+  "has_public_key": true,
+  "public_key_sha256": "<hex>"
 }
 ```
 
@@ -117,6 +134,14 @@ Respuesta:
 - `update`: `null` o `{"version": "0.11.1"}`. En la fase 1 el agente solo lo
   registra; actualizarse es de la fase 6.
 - `checkin_seconds`: el agente lo acota a [10, 300].
+- `has_public_key`: si el servidor guarda una clave pública para este agente.
+  Si falta, el agente lo toma como «no se sabe» y sigue presentando la suya.
+- `public_key_sha256` (opcional): SHA-256 hex del DER (SubjectPublicKeyInfo)
+  de la clave que guarda el servidor. Si no coincide con la del agente, el
+  agente no puede hacer nada (el servidor no la sustituye): lo dice **una vez**
+  en su registro y en `status` (`identity.problem`, nota `identity` /
+  `key_mismatch`) para que se enrole de nuevo, y deja de presentarla. Sin este
+  campo, una clave distinta solo se nota en `sealed_unreadable` (3.1).
 
 ### 1.3 Encargos (`orders`)
 
@@ -451,6 +476,8 @@ El ajuste local `gentleness_cap` puede bajarla, nunca subirla.
 }
 ```
 
+`paused_until`: ISO, `null` o `"indefinite"` (pausa hasta que se reanude).
+
 Las variables `CENYA_*` mandan sobre `settings.json`.
 
 **La carpeta se protege en cada arranque** (servicio, consola, `enroll`,
@@ -475,7 +502,8 @@ Las variables `CENYA_*` mandan sobre `settings.json`.
   `outbox/` y `logs/` se renombran con el sufijo `.untrusted-<fecha>` dentro de
   la carpeta (nunca se borran) y se dice en una línea. El enrolamiento apartado
   no se usa: el agente dice que hay que repetirlo
-  (`cenya-agent enroll <cadena> --force`) y sale como cuando no está enrolado.
+  (`cenya-agent enroll <cadena> --force`) y espera como cuando no está enrolado
+  (4, «Sin identidad»): `status.enrollment.state` es `untrusted`.
   La disposición que dejaba el instalador 0.10.x (SYSTEM y Administradores
   total; Usuarios y OWNER RIGHTS lectura heredada) cuenta como protegida.
 - Si una carpeta sin proteger no se puede proteger (sin derechos), el agente no
@@ -563,11 +591,21 @@ Sustituye a `communities` y a los secretos en claro de 1.4:
 | `kind` | `params` | Qué hace el agente | `result` |
 |---|---|---|---|
 | `test_credential` | `{"credential_id": "<uuid>", "ip": "10.0.0.5"}` | Prueba **esa** credencial contra esa IP (para un hipervisor, contra su servidor; `ip` puede faltar) | `{"ok": true, "line": {código y parámetros, como un informe de sondeo}}` |
-| `reseal` | `{"agent": "<uuid del agente nuevo>", "public_key": "<PEM>", "credential_ids": ["…"]}` | Abre sus sobres de esas credenciales y los cierra para la otra clave (AAD con el uuid del agente nuevo) | `{"envelopes": {"<id>": {sobre}}, "missing": ["<id>"]}` |
+| `reseal` | `{"agent": "<uuid del agente nuevo>", "agent_name": "<su nombre>", "public_key": "<PEM>", "credential_ids": ["…"]}` | Abre sus sobres de esas credenciales y los cierra para la otra clave (AAD con el uuid del agente nuevo) | `{"envelopes": {"<id>": {sobre}}, "missing": ["<id>"]}` |
 | `netbox_export` | `{"url": "https://netbox…", "verify_tls": true, "sealed_token": {sobre}}` | Lee ese NetBox (`agent/netbox_export.py`) y sube el resultado a 3.4 | `{"import": "<uuid>", "summary": {"devices": 214, …}}` |
 
 - `test_credential` no consulta ni altera el límite de rondas de la memoria
   (lo pide una persona), pero apunta un acierto.
+- **`reseal` espera a una persona en la máquina del agente** (revisión de
+  seguridad del 03-10-2026). El servidor es quien dice qué clave tiene el
+  agente nuevo; sin esto, quien se hiciera con el servidor presentaría su
+  propia clave y se llevaría todas las contraseñas. El agente enseña la
+  petición en su ventana con el nombre del otro agente y la huella SHA-256 de
+  su clave (`status.reseal_requests`, 4.6) y solo resella si alguien lo
+  permite (`reseal.decide`). Una clave permitida (uuid + huella) se recuerda
+  en `reseal-trust.json`: los resellados siguientes para ella no preguntan.
+  Rechazado, contesta `failed` con la nota `reseal/denied`; sin respuesta en
+  23 h, `reseal/not_approved` (el encargo vive 24 h).
 - Ninguna respuesta cita un secreto, tampoco en un error.
 - `netbox_export` informa de su avance en `activity` (paso = colección).
 
@@ -576,7 +614,8 @@ Sustituye a `communities` y a los secretos en claro de 1.4:
 El cuerpo es el JSON del exportador (el mismo fichero de hoy), con
 `Content-Type: application/json` y la cabecera `X-Cenya-Order: <id>` cuando
 viene de un encargo. Tope de 50 MB. Respuesta
-`{"ok": true, "import": "<uuid>"}`. El servidor lo valida con el mismo lector
+`{"ok": true, "import": "<uuid>", "review_url": "<dónde se revisa>"}` (`review_url`
+opcional pero recomendado: absoluta del mismo portal o una ruta; ver 4.5). El servidor lo valida con el mismo lector
 que la subida a mano y lo deja como lectura pendiente; no importa nada hasta
 que una persona lo confirma.
 
@@ -600,22 +639,123 @@ un puerto de red.**
 
 | `op` | Tipo | Qué hace |
 |---|---|---|
-| `status` | leer | conexión, tarea en curso y progreso, agenda, pausa, versión, cola |
-| `log` | leer | últimas líneas del registro (`args.lines`, `args.after`) |
-| `about` | leer | la presentación de 1.5 |
+| `status` | leer | conexión, tarea en curso y progreso, agenda, pausa, versión, cola (detalle abajo) |
+| `log` | leer (administrador) | últimas líneas del registro (`args.lines`, `args.after`). Solo un administrador: el registro nombra equipos, direcciones y usuarios de la red |
+| `about` | leer | la presentación de 1.5; a quien no es administrador, solo `hostname`, `os`, `agent_version`, `python` y `frozen` (ni redes ni exclusiones) |
 | `settings.get` | leer | ajustes locales, sin secretos |
 | `run` | actuar | `args.task`: ejecuta ya esa tarea |
-| `pause` / `resume` | actuar | `args.until` (ISO) o `args.seconds` |
+| `pause` / `resume` | actuar | `args.until` (ISO), `args.seconds` o `args.indefinite: true` (detalle abajo) |
 | `settings.set` | actuar | cambia ajustes locales (2.6) y los aplica sin reiniciar |
 | `probe` | actuar | `args.ip`: sondeo dirigido, devuelve el informe |
 | `test_connection` | actuar | nombre, puerto, certificado y token, paso a paso |
 | `connect` | actuar | `args.connection` (cadena o código + portal): enrola o cambia de portal |
 | `disconnect` | actuar | se despide del servidor (1.7) y borra el enrolado |
-| `netbox.export` | actuar | `args.url`, `args.token`, `args.verify_tls`, `args.send`: lee un NetBox; con `send` lo sube (3.4), sin él lo guarda en `args.path` |
+| `netbox.export` | actuar | `args.url`, `args.token`, `args.verify_tls`, `args.send`: lee un NetBox; con `send` lo sube (3.4) y contesta `review_url`, sin él lo guarda en `args.path` |
 | `support_bundle` | actuar | escribe el paquete de soporte en `args.path`, sin secretos |
-| `check_update` | actuar | pregunta por la versión vigente |
+| `check_update` | actuar | un checkin **ahora** y lo que trajo (detalle abajo) |
+| `reseal.decide` | actuar | `args.id`, `args.allow`: permite o rechaza un resellado que espera (4.6) |
 
 Un secreto que llega por este canal (el token de NetBox) se usa y se olvida:
 no se guarda, no se registra, no vuelve en ninguna respuesta. Las operaciones
 largas (`netbox.export`, `probe`) contestan al terminar; su avance se lee con
 `status`.
+
+### 4.1 `status`, campo a campo
+
+Siempre: `version`, `pid`, `enrolled`, `enrollment`, `protocol`, `portal`,
+`name`, `may_act` (si quien pregunta puede actuar), `local` (avance de lo
+largo pedido por el canal: `netbox_export`, `probe`) y `log_folder` (la
+carpeta del registro, para «Abrir carpeta»; no es un secreto).
+
+Con identidad, además: `state`, `activity`, `schedule`, `queued`, `pause`,
+`refusal`, `has_config`, `checkin_seconds`, `last_checkin`, `last_ok_at`,
+`outbox`, `update`, `updater`, `gentleness`, `last_run`, `identity` y
+`connection`.
+
+- `connection`: `{state, at, ok, status, error, last_ok_at}`; `state` es
+  `ok` | `error` | `refused` | `read_only` | `unknown` | `not_enrolled`.
+- `last_ok_at`: la hora del último checkin **bueno**. Se conserva mientras
+  fallan los siguientes («último contacto hace 3 horas»). En memoria: tras un
+  reinicio es `null` hasta el primer checkin bueno.
+- `pause`: `{local, server, until, indefinite}`. Con una pausa local sin plazo
+  `indefinite` es `true` y `local` y `until` van `null`.
+- `gentleness`: la suavidad con la que trabaja ahora (2.5): la del servidor
+  bajada al tope local.
+- `updater`: el estado del actualizador (`agent/update.py`):
+  `{state, version, error}` y, si falló, `note`.
+- `last_run`: la última ejecución de **cada** tarea, por nombre:
+
+  ```json
+  "last_run": {
+    "presence": {"task": "presence", "trigger": "schedule", "started_at": "…",
+                 "finished_at": "…", "status": "ok", "hosts_alive": 41,
+                 "new_hosts": 1, "sent": 41, "delivered": true,
+                 "created": 1, "refreshed": 40, "notes": 0}
+  }
+  ```
+
+  `sent`: hallazgos que salieron; `created`/`refreshed`: lo que contestó el
+  servidor (`null` si el resultado se quedó en la cola, `delivered: false`);
+  `notes`: cuántas notas llevó. Solo cifras: nunca lo hallado. En memoria.
+- `identity`: `{server_has_key, problem}`; `problem` es la nota
+  `identity`/`key_mismatch` de 1.2 o `null`.
+- `enrollment`: `{state, message}`. `state`: `enrolled` | `not_enrolled` |
+  `untrusted` (el enrolamiento se apartó, 2.6) | `invalid` (hay identidad pero
+  no se puede usar: p. ej. una dirección `http://` sin permiso); `message`, la
+  frase del agente, sin secretos.
+
+### 4.2 Sin identidad: el servicio se queda
+
+Un servicio sin enrolar (o con el enrolamiento apartado, o inválido) **no
+sale**: sirve el canal, dice por qué en el registro y en `status`, y espera a
+un `connect` (lo mismo que tras un `disconnect`). Para Windows está en marcha y
+sano: no hay salida con error ni reinicios en bucle. El instalador arranca el
+servicio también sin conexión, y la aplicación conecta el equipo con
+`connect`. `--once` sigue saliendo con el motivo: es alguien probando a mano.
+
+### 4.3 `pause` sin plazo
+
+`{"indefinite": true}` (sin `until` ni `seconds`) para hasta que alguien lo
+reanude: sin el tope de 30 días de una pausa con hora, que sigue valiendo
+(una pausa con hora de más de 30 días es `invalid` y la frase dice cómo
+pararlo sin plazo). Se guarda como `"paused_until": "indefinite"` (2.6), viaja
+al servidor como `paused_indefinitely` (1.2) y `resume` la quita. Respuesta:
+`{"paused_until": null, "indefinite": true, "server_paused_until": …}`.
+
+### 4.4 `check_update`
+
+Lanza un checkin ahora (el mismo del hilo de control; nunca dos a la vez) y
+espera su respuesta como mucho 30 s. Contesta:
+
+```json
+{"current": "0.11.0", "offered": "0.11.1", "update": {"version": "0.11.1"},
+ "checked": true, "pending": false, "error": "", "checked_at": "…",
+ "last_ok_at": "…", "updater": {"state": "idle", "version": "0.11.0", "error": ""},
+ "auto_update": true}
+```
+
+`checked`: el checkin contestó. `pending`: no contestó a tiempo (sigue, y lo
+que traiga se verá en `status`). `error`: por qué falló, sin secretos. Lo que
+ofrezca el servidor lo recibe el actualizador como en cualquier checkin bueno.
+Con el protocolo 1 no hay checkin: contesta lo que se sabía.
+
+### 4.6 Resellados que esperan
+
+`status.reseal_requests` es la lista de los que esperan a una persona:
+
+```json
+[{"id": "<id del encargo>", "agent": "<uuid>", "agent_name": "SRV-ALMACEN",
+  "fingerprint": "3F2A 91C4 …", "count": 7, "received_at": "…"}]
+```
+
+`reseal.decide` con `{"id": "…", "allow": true}` lo permite (y recuerda la
+clave); con `false` lo rechaza. Una petición que ya no espera es `invalid`.
+
+### 4.5 `netbox.export` con `send`: dónde revisar
+
+`{"import": "<uuid>", "summary": {…}, "review_url": "https://portal/…"}`.
+`review_url` sale de la respuesta del servidor a 3.4 si la trae (absoluta, del
+mismo portal, o una ruta); si no, se construye con
+`agent/localops.py::NETBOX_REVIEW_PATH` (`/settings/import/pending/<uuid>/`),
+**un supuesto que el servidor tiene que confirmar** o hacer innecesario
+mandando siempre `review_url`. Una dirección de otro sitio no se usa.

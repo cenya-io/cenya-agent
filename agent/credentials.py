@@ -1,10 +1,16 @@
 """The credentials the collectors log in with, wherever they come from.
 
-The server hands them over decrypted in the heartbeat (``ctx["config"]``); the
-environment can override them for a standalone run. One module so the three
-collectors that need to log in --SSH, WinRM, hypervisors-- read them the same
-way, and so a malformed entry is dropped in one place instead of blowing up
-inside whichever collector happened to run first.
+The server hands them over in the configuration (``ctx["config"]``); the
+environment can override them for a standalone run. One module so the
+collectors that need to log in --SNMP, SSH, WinRM, hypervisors-- read them the
+same way, and so a malformed entry is dropped in one place instead of blowing
+up inside whichever collector happened to run first.
+
+Since phase 3 (spec 3.2) a credential usually arrives **sealed**: its secrets
+are an envelope only this agent can open (`agent/sealing.py`). They are opened
+here, in memory, once per run (`Unsealer`), and never written anywhere. The
+plaintext form (``secret`` and ``communities``) of protocol 1 keeps working
+while a server still sends it.
 
 Nothing here is ever printed: a credential in a log line is a credential in the
 customer's log rotation.
@@ -15,6 +21,8 @@ from __future__ import annotations
 import hashlib
 import ipaddress
 import json
+import threading
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -30,6 +38,15 @@ XCPNG = "xcpng"
 #: fabrica el colector SNMP para que la memoria las trate igual que a un
 #: usuario v3 (`community`).
 COMMUNITY = "snmp-community"
+#: Una comunidad SNMP v2c que sí llega como credencial, sellada (spec 3.2): la
+#: comunidad va en `secret` y `username` se queda vacío. Alimenta al colector
+#: SNMP igual que `communities`, pero la memoria la recuerda por su `id`.
+SNMP = "snmp"
+
+#: Las clases que no necesitan un secreto para existir: una clave SSH en un
+#: fichero, un usuario SNMPv3 noAuthNoPriv. Sin sobre y sin `secret` siguen
+#: valiendo, también en una configuración sellada.
+_SECRETLESS_OK = (SSH, SNMPV3)
 
 
 @dataclass(frozen=True)
@@ -122,6 +139,9 @@ class Credential:
     ident: str = ""
     #: Dónde se puede probar. Vacío: en todo el perfil.
     scope: Scope = field(default_factory=Scope)
+    #: Si `ident` es el `id` del servidor y no uno derivado: solo de esas se
+    #: informa en `stats.credentials_ok` (el servidor no sabe de las otras).
+    from_server: bool = False
 
     def __post_init__(self) -> None:
         if not self.ident:
@@ -158,49 +178,262 @@ def _scope(raw: Any) -> Scope:
     return Scope(subnets=_strings(raw.get("subnets")), hosts=_strings(raw.get("hosts")))
 
 
-def _one(raw: Any, position: int = 0) -> Credential | None:
+def _kind(raw: dict) -> str:
+    return str(raw.get("kind") or "").strip().lower()
+
+
+def _plain_argument(value: str) -> bool:
+    """Si un usuario o un equipo puede ir tal cual como argumento de un programa."""
+    return not value.startswith("-") and not any(ch.isspace() or ord(ch) < 32 or ord(ch) == 127 for ch in value)
+
+
+def _one(raw: Any, position: int = 0, secrets: Mapping[str, Any] | None = None) -> Credential | None:
+    """Una entrada de la lista, o `None` si no sirve.
+
+    `secrets` es lo que salió del sobre (spec 3.2); sin él, los secretos son
+    los que vengan en claro en la propia entrada (spec 1.4).
+    """
     if not isinstance(raw, dict):
         return None
-    kind = str(raw.get("kind") or "").strip().lower()
+    kind = _kind(raw)
     username = str(raw.get("username") or "").strip()
-    if not kind or not username:
+    # Una comunidad v2c no tiene usuario: es la única clase a la que no se le pide.
+    if not kind or (not username and kind != SNMP):
+        return None
+    host = str(raw.get("host") or "").strip()
+    # Van a la línea de órdenes de `ssh` y otros: nada que empiece por «-» (se
+    # leería como opción) ni caracteres de control o espacios en blanco.
+    if not (_plain_argument(username) and _plain_argument(host)):
         return None
     try:
         port = int(raw.get("port") or 0)
     except (TypeError, ValueError):
         port = 0
-    host = str(raw.get("host") or "").strip()
-    label = str(raw.get("label") or "").strip()
-    ident = str(raw.get("id") or "").strip() or derive_ident(kind, username, host, port, label, position)
+    # `name` es como lo llama la spec 3.2; `label`, como lo llamaba la 1.4.
+    label = str(raw.get("label") or raw.get("name") or "").strip()
+    server_id = str(raw.get("id") or "").strip()
+    ident = server_id or derive_ident(kind, username, host, port, label, position)
+    source = secrets if secrets is not None else raw
     return Credential(
         kind=kind,
         username=username,
-        secret=str(raw.get("secret") or ""),
+        secret=_secret_text(source.get("secret")),
         host=host,
         port=port,
         key_file=str(raw.get("key_file") or "").strip(),
         ca_file=str(raw.get("ca_file") or "").strip(),
         auth_protocol=str(raw.get("auth_protocol") or "").strip().lower(),
         priv_protocol=str(raw.get("priv_protocol") or "").strip().lower(),
-        priv_secret=str(raw.get("priv_secret") or ""),
+        priv_secret=_secret_text(source.get("priv_secret")),
         label=label,
         ident=ident,
         scope=_scope(raw.get("scope")),
+        from_server=bool(server_id),
     )
 
 
-def all_from(ctx: dict) -> list[Credential]:
-    """Everything configured: the server's list, or the environment's when the
-    server said nothing. Same precedence as subnets and communities."""
+def _secret_text(value: Any) -> str:
+    return value if isinstance(value, str) else ""
+
+
+# --- Credenciales selladas (spec 3.2) ------------------------------------------------
+
+SEALED = "sealed"
+LEGACY = "legacy"
+UNREADABLE = "unreadable"
+
+
+def entry_state(raw: Any, sealed_config: bool) -> str:
+    """Cómo hay que tratar una entrada: sellada, en claro (1.4) o ilegible.
+
+    * Con la clave ``sealed`` (aunque sea ``null``): sellada. Si el sobre no
+      está o no abre, ilegible.
+    * Sin ella, en una configuración en la que alguna entrada viene sellada, y
+      sin ``secret``: es «sin sobre para este agente» (spec 3.2), ilegible.
+      Salvo las clases que no necesitan secreto (`_SECRETLESS_OK`).
+    * Si no, en claro, como siempre.
+    """
+    if not isinstance(raw, dict):
+        return LEGACY
+    if SEALED in raw:
+        return SEALED
+    if sealed_config and "secret" not in raw and _kind(raw) not in _SECRETLESS_OK:
+        return UNREADABLE
+    return LEGACY
+
+
+class Unsealer:
+    """Opens the sealed credentials of one run, once, in memory only.
+
+    Se abren **todas a la vez la primera vez que alguien pide credenciales**
+    en esa ejecución, y se guardan aquí hasta que la ejecución acaba (el `ctx`
+    que la lleva se tira con ella). Ni una vez por equipo --sería una operación
+    RSA por intento de login, y la nota de ilegibles saldría repetida-- ni una
+    vez por configuración --el texto en claro viviría en el proceso días
+    enteros, también mientras el agente no hace nada--. Así el secreto existe
+    en claro lo que dura la tarea que lo usa, y una tarea que no toca
+    credenciales (la presencia) no abre ninguna.
+
+    Python no permite borrar una cadena de la memoria: «en memoria» quiere
+    decir que no se escribe en ningún sitio y que deja de estar referenciado
+    al acabar, no que se sobrescriba.
+    """
+
+    def __init__(self, agent_uuid: str = "", environ: Mapping[str, str] | None = None) -> None:
+        self.agent_uuid = agent_uuid or ""
+        self._environ = environ
+        self._lock = threading.Lock()
+        self._opened: dict[str, dict[str, str] | None] = {}
+        self._unreadable: set[int] = set()
+        self._done = False
+
+    def __repr__(self) -> str:
+        # Ni el uuid hace falta; solo cifras, para que un volcado no diga nada.
+        return f"Unsealer(opened={len(self._opened)}, unreadable={len(self._unreadable)})"
+
+    def prepare(self, raw: list[Any]) -> None:
+        """Abre todos los sobres de la lista, la primera vez. Nunca lanza."""
+        with self._lock:
+            if self._done:
+                return
+            self._done = True
+            sealed_config = any(isinstance(item, dict) and SEALED in item for item in raw)
+            if not sealed_config:
+                return
+            from agent import sealing
+
+            key = None
+            try:
+                key = sealing.own_private_key(self._environ)
+            except Exception:  # noqa: BLE001 - sin clave, todas ilegibles
+                key = None
+            for position, item in enumerate(raw):
+                state = entry_state(item, sealed_config)
+                if state == UNREADABLE:
+                    self._unreadable.add(position)
+                    continue
+                if state != SEALED:
+                    continue
+                ident = str(item.get("id") or "").strip()
+                opened: dict[str, str] | None = None
+                if ident and key is not None and isinstance(item.get(SEALED), dict):
+                    try:
+                        plaintext = sealing.open_envelope(
+                            item[SEALED], agent_uuid=self.agent_uuid, subject_id=ident, private_key=key
+                        )
+                    except sealing.SealError:
+                        plaintext = None
+                    except Exception:  # noqa: BLE001 - un sobre raro no tumba la tarea
+                        plaintext = None
+                    if plaintext is not None:
+                        opened = {
+                            name: plaintext[name]
+                            for name in ("secret", "priv_secret")
+                            if isinstance(plaintext.get(name), str)
+                        }
+                if opened is None:
+                    self._unreadable.add(position)
+                elif ident:
+                    self._opened[ident] = opened
+            del key
+
+    def secrets(self, raw: dict) -> dict[str, str] | None:
+        """Lo que salió del sobre de esa entrada, o `None` si no abrió."""
+        ident = str(raw.get("id") or "").strip()
+        with self._lock:
+            return self._opened.get(ident) if ident else None
+
+    @property
+    def unreadable(self) -> int:
+        """Cuántas entradas selladas (o sin sobre) no se pudieron usar en esta ejecución."""
+        with self._lock:
+            return len(self._unreadable)
+
+
+#: La clave de `ctx` en la que vive el `Unsealer` de la ejecución.
+CTX_KEY = "unsealer"
+
+
+def unsealer(ctx: dict) -> Unsealer:
+    """El `Unsealer` de esta ejecución: el que puso el bucle, o uno nuevo.
+
+    Sin bucle (el protocolo 1, un test) se crea con el uuid de `ctx["agent_uuid"]`
+    si lo hay; sin uuid ningún sobre abre, que es lo correcto.
+    """
+    found = ctx.get(CTX_KEY)
+    if isinstance(found, Unsealer):
+        return found
+    created = Unsealer(str(ctx.get("agent_uuid") or ""))
+    return ctx.setdefault(CTX_KEY, created)
+
+
+def raw_list(ctx: dict) -> list[Any]:
+    """La lista de credenciales tal como llegó: la del servidor, o la del entorno."""
     raw = (ctx.get("config") or {}).get("credentials") or []
     if not raw:
         env = ctx.get("env")
         raw = list(env.credentials) if env and env.credentials else []
+    return list(raw) if isinstance(raw, (list, tuple)) else []
+
+
+def all_from(ctx: dict) -> list[Credential]:
+    """Everything configured: the server's list, or the environment's when the
+    server said nothing. Same precedence as subnets and communities.
+
+    Sealed entries are opened here (`Unsealer`); one that does not open is
+    left out and counted, never tried with an empty password.
+    """
+    raw = raw_list(ctx)
+    sealed_config = any(isinstance(item, dict) and SEALED in item for item in raw)
+    opener = unsealer(ctx) if sealed_config else None
+    if opener is not None:
+        opener.prepare(raw)
     # La posición es la de la lista entera: es la que se usa para derivar el
     # `ident` cuando el servidor no lo manda, y tiene que ser la misma de un
     # barrido al siguiente mientras nadie toque la lista.
-    found = [_one(item, position) for position, item in enumerate(raw)]
+    found: list[Credential | None] = []
+    for position, item in enumerate(raw):
+        state = entry_state(item, sealed_config)
+        if state == UNREADABLE:
+            continue
+        if state == SEALED:
+            secrets = opener.secrets(item) if opener is not None else None
+            if secrets is None:
+                continue
+            found.append(_one(item, position, secrets))
+        else:
+            found.append(_one(item, position))
     return [credential for credential in found if credential is not None]
+
+
+def find(ctx: dict, ident: str) -> tuple[Credential | None, bool]:
+    """La credencial con ese `id` del servidor, y si existe en la configuración.
+
+    ``(None, True)``: está, pero su sobre no abre. ``(None, False)``: no está.
+    """
+    ident = (ident or "").strip()
+    if not ident:
+        return None, False
+    present = any(isinstance(item, dict) and str(item.get("id") or "").strip() == ident for item in raw_list(ctx))
+    for credential in all_from(ctx):
+        if credential.from_server and credential.ident == ident:
+            return credential, True
+    return None, present
+
+
+def scrub(text: str, credential: Credential | None = None, *secrets: str) -> str:
+    """El texto sin los secretos de esa credencial (ni de los que se añadan) dentro.
+
+    Para los errores que escribe otro (un equipo remoto, una librería) y que el
+    agente repite en una nota: no se sabe qué devuelven de lo que se les dio.
+    """
+    found = [*secrets]
+    if credential is not None:
+        found += [credential.secret, credential.priv_secret]
+    for secret in found:
+        if secret:
+            text = text.replace(secret, "***")
+    return text
 
 
 def community(value: str, index: int) -> Credential:

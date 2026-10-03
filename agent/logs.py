@@ -20,6 +20,7 @@ from __future__ import annotations
 import logging
 import logging.handlers
 import re
+import sys
 import threading
 from collections.abc import Mapping
 from pathlib import Path
@@ -118,3 +119,23 @@ def _write(level: int, text: str) -> None:
             logger.log(level, scrub(str(text)))
     except Exception:  # noqa: BLE001 - el registro es una comodidad
         pass
+
+
+def tolerant_console(streams: tuple[object, ...] | None = None) -> None:
+    """Que escribir en la consola no pueda tumbar un comando por la codificación.
+
+    En Windows, con la salida redirigida (un guion, el instalador, `| more`),
+    Python escribe en la página de códigos del sistema --cp1252 en un Windows
+    en castellano-- y una «→» de «Ajustes → Agentes» lanzaba
+    `UnicodeEncodeError`: `cenya-agent status` moría sin decir nada útil. Se
+    conserva la codificación y lo que no cabe sale como «?»; una consola de
+    verdad sigue recibiendo Unicode completo.
+    """
+    for stream in streams if streams is not None else (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(errors="replace")
+        except (ValueError, OSError):  # un flujo ya cerrado o que no lo admite
+            continue

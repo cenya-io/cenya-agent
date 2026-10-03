@@ -123,6 +123,9 @@ def _plant(folder: Path) -> None:
     (folder / "enrollment.json").write_text('{"url": "https://evil", "token": "t"}', encoding="utf-8")
     (folder / "outbox").mkdir()
     (folder / "outbox" / "forged-1.json").write_text("{}", encoding="utf-8")
+    # Lo que SYSTEM ejecuta al volver atrás una actualización (Windows).
+    (folder / "previous").mkdir()
+    (folder / "previous" / "update-watchdog.cmd").write_text("@echo planted", encoding="ascii")
 
 
 @unittest.skipUnless(sys.platform == "win32", "ACL de Windows")
@@ -150,7 +153,7 @@ class WindowsAclTests(unittest.TestCase):
 
     def assert_moved_aside(self, securing: store.Securing) -> None:
         self.assertFalse(securing.trusted)
-        for name in ("settings.json", "identity.key", "memory.json", "enrollment.json", "outbox"):
+        for name in ("settings.json", "identity.key", "memory.json", "enrollment.json", "outbox", "previous"):
             self.assertFalse((self.folder / name).exists(), name)
             self.assertTrue((self.folder / f"{name}{SUFFIX}").exists(), name)
         # Apartado, nunca borrado.

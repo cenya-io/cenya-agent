@@ -1,0 +1,24 @@
+# Entornos virtuales locales (el de la aplicación de escritorio: .venv-gui)
+.venv/
+.venv-*/
+
+# Cachés de Python
+__pycache__/
+*.py[cod]
+
+# Salidas de construcción del agente (PyInstaller, setuptools, Inno Setup)
+agent/build/
+agent/build-pyi/
+agent/dist/
+agent/*.egg-info/
+*.egg-info/
+build/
+dist/
+
+# Vistas previas locales de la ventana (agent/app, sin control de versiones)
+.preview/
+
+# Trabajo de sandbox-test.ps1 (instaladores de prueba, clave de prueba, registros)
+.sandbox/
+agent/build-openssh/
+agent/build-webview2/

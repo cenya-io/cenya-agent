@@ -140,11 +140,13 @@ class CenyaAgentService(win32serviceutil.ServiceFramework):
     def SvcDoRun(self) -> None:
         """El bucle del agente, en el hilo que pywin32 ya dedica a esto.
 
-        Si el bucle termina sin que nadie haya pedido parar --falta el token,
-        un fallo inesperado--, se lanza: pywin32 lo comunica a Windows como una
-        salida con error, y es lo que activa el reinicio automático que
-        configura `deploy/install-service.ps1`. Devolver sin más dejaría el
-        servicio «detenido» como si todo estuviera bien.
+        Si el bucle termina sin que nadie haya pedido parar --un fallo
+        inesperado, una carpeta de estado que no se puede proteger--, se
+        lanza: pywin32 lo comunica a Windows como una salida con error, y es lo
+        que activa el reinicio automático que configura el instalador.
+        Devolver sin más dejaría el servicio «detenido» como si todo estuviera
+        bien. Sin enrolar ya no es uno de esos casos: el bucle no termina,
+        sirve el canal local y espera a que lo conecten.
         """
         saved = sys.stdout, sys.stderr
         sys.stdout = _EventLogStream(servicemanager.LogInfoMsg)  # type: ignore[assignment]
@@ -153,8 +155,8 @@ class CenyaAgentService(win32serviceutil.ServiceFramework):
         try:
             agent_main(argv=[], stop_event=self.stop_event)
         except SystemExit as exc:
-            # `config.from_env` sale así cuando falta el token o la URL es
-            # insegura, con el motivo ya escrito para una persona.
+            # La carpeta de estado que no se puede proteger sale así, con el
+            # motivo ya escrito para una persona.
             failure = str(exc.code)
         except Exception as exc:  # noqa: BLE001 - se dice en el Visor y se relanza abajo
             failure = unexpected_error(exc)
@@ -309,12 +311,9 @@ def _after_install(opts: list[tuple[str, str]]) -> None:
     if entries:
         has_token = any(f"{prefix}AGENT_TOKEN" in names for prefix in ENV_PREFIXES)
         if not has_token and enrollment_store.load(os.environ) is None:
-            raise SystemExit(
-                _t(
-                    "Este equipo no está enrolado y en esta consola no hay ningún token: el servicio "
-                    "no podría arrancar. Ejecuta antes cenya-agent enroll <cadena> y vuelve a instalar."
-                )
-            )
+            # Ya no es motivo para no instalar: sin enrolar, el servicio arranca
+            # y espera a que lo conecten (la aplicación o `cenya-agent connect`).
+            print(_t("Este equipo aún no está enrolado: el servicio arrancará y esperará a que lo conectes."))
         _store_environment(entries)
         # Nunca el valor: solo qué variables quedaron guardadas.
         print(_t("Variables guardadas en el servicio: %(names)s") % {"names": ", ".join(names)})
@@ -364,6 +363,9 @@ def main(argv: list[str] | None = None) -> None:
     argv = list(sys.argv if argv is None else argv)
     if _frozen() and len(argv) == 1 and _host_as_frozen_service():
         return
+    # Instalar, actualizar, parar: lo lanza el instalador con la salida
+    # redirigida, y una frase traducida no puede tumbarlo por la codificación.
+    logs.tolerant_console()
     if not _frozen() and any(command in argv[1:] for command in ("install", "update")):
         import pywintypes
 

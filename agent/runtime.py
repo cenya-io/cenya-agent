@@ -28,7 +28,8 @@ from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 from typing import Any
 
-from agent import __version__, about, logs, notes, outbox, probe, status, store, tasks
+from agent import __version__, about, approvals, identity, logs, notes, orders, outbox, probe, sealing, status, store, tasks
+from agent import credentials as creds
 from agent import settings as local_settings
 from agent.client import AgentClient, PushError, result_parts
 from agent.config import Config
@@ -36,7 +37,8 @@ from agent.control import REFUSED_UNAUTHORIZED, Control, Hooks, Shared
 from agent.i18n import _t, _tn
 from agent.memory import Excluded, Memory
 from agent.notes import collector_note
-from agent.scheduler import PRESENCE, Job, Scheduler, effective_pause, is_paused
+from agent.scheduler import PRESENCE, TRIGGER_ORDER, Job, Scheduler, effective_pause, is_paused
+from agent.update import Fetcher, Updater
 
 MEMORY_FILE = "memory.json"
 
@@ -103,6 +105,34 @@ class _NeverSet:
         return self._event.wait(timeout)
 
 
+class _CheckinRecorder:
+    """The client as the control channel sees it, noting how each check-in went.
+
+    Para el canal local (`status`, `test_connection`): cuándo fue el último
+    checkin, si salió bien y, si no, qué dijo el servidor. Todo lo demás pasa
+    tal cual al cliente de verdad.
+    """
+
+    def __init__(self, client: AgentClient, note: Callable[[bool, int | None, str], None]) -> None:
+        self._client = client
+        self._note = note
+
+    def checkin(self, body: dict[str, Any]) -> dict[str, Any]:
+        try:
+            answer = self._client.checkin(body)
+        except PushError as exc:
+            self._note(False, exc.status, str(exc))
+            raise
+        except Exception as exc:
+            self._note(False, None, type(exc).__name__)
+            raise
+        self._note(True, None, "")
+        return answer
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._client, name)
+
+
 class Runtime:
     def __init__(
         self,
@@ -121,9 +151,24 @@ class Runtime:
         self._clock = clock
         self._report = report
         self._say = say or logs.info
+        #: Los resellados que esperan a una persona en la ventana (`agent.approvals`).
+        self.approvals = approvals.ResealApprovals(environ, clock=clock, say=self._say)
         base = store.state_dir(environ)
         self.settings = local_settings.load(environ)
         self.shared = Shared()
+        # El uuid del enrolamiento, si lo guardó (0.11 en adelante); si no, lo
+        # trae el checkin. Sin él no abre ninguna credencial sellada.
+        enrolled = store.load(environ)
+        self.shared.agent_uuid = enrolled.uuid if enrolled is not None else ""
+        # Un agente actualizado en su sitio desde la 0.10.x está enrolado pero
+        # no tiene clave (la crea `enroll`): sin ella no recibiría nunca una
+        # credencial sellada. Se crea aquí, una vez y con la misma protección
+        # que el token (`store.write_protected` no escribe en una carpeta que no
+        # puede proteger, y `main` ya ha protegido la carpeta antes de llegar);
+        # el checkin la presenta (`Hooks.public_key`). Nunca se regenera una que exista.
+        if enrolled is not None and not once and identity.available() and not identity.path(environ).exists():
+            if identity.ensure(environ):
+                self._say(_t("[agente] Creada la clave de este agente: se presenta al portal en el próximo checkin."))
         self.scheduler = Scheduler()
         #: Guarda la cola y los vivos: los tocan los dos hilos.
         self._lock = threading.Lock()
@@ -142,8 +187,28 @@ class Runtime:
         self._about: tuple[float, dict[str, Any]] | None = None
         self._step_written = 0.0
         self.tick = TICK_SECONDS
+        #: Cómo fue el último checkin (`_CheckinRecorder`), bajo `_lock`.
+        self.last_checkin: dict[str, Any] = {}
+        #: Cuándo fue el último checkin BUENO: se conserva mientras fallan los
+        #: siguientes («último contacto hace 3 horas» es lo que hay que ver).
+        self.last_ok_at: str | None = None
+        #: Las cifras de la última ejecución de cada tarea (spec 4, `status.last_run`).
+        self.last_runs: dict[str, dict[str, Any]] = {}
+        # La actualización del propio agente (docs/agente-v2-instalacion.md, 4).
+        # `--once` no se actualiza: es alguien probando a mano.
+        self.updater = Updater(
+            base,
+            client=client,
+            fetcher=Fetcher(ca_bundle=env.ca_bundle or self.settings.ca_bundle, proxy=self.settings.proxy),
+            auto_update=lambda: local_settings.load(self._environ).auto_update,
+            busy=lambda: self.shared.activity_snapshot() is not None,
+            environ=environ,
+            enabled=not once,
+            say=self._say,
+        )
+        self.updater.startup()
         self.control = Control(
-            client,
+            _CheckinRecorder(client, self._note_checkin),  # type: ignore[arg-type]
             self.shared,
             self.outbox,
             Hooks(
@@ -155,6 +220,12 @@ class Runtime:
                 probe=self._probe,
                 excluded=self._is_excluded,
                 rejected=self._rejected,
+                test_credential=self._test_credential,
+                reseal=self._reseal,
+                netbox_export=self._netbox_export,
+                update_offered=self.updater.offer,
+                update_state=self.updater.state,
+                public_key=lambda: identity.public_key(self._environ),
             ),
             clock=clock,
             report=report,
@@ -211,6 +282,190 @@ class Runtime:
             raise RuntimeError("el servidor ha rechazado a este agente")
         config, _ = self.shared.config_snapshot()
         return probe.report_for(ip, self._base_ctx(config))
+
+    # --- Los encargos de las credenciales selladas (spec 3.3) -------------------------
+
+    def _order_ctx(self) -> dict[str, Any] | None:
+        """El `ctx` de un encargo, o `None` si el servidor ha rechazado al agente.
+
+        Con un 401 la configuración ya se olvidó, pero un encargo que esperaba
+        su turno desde antes no puede usar ni lo poco que le quedara.
+        """
+        if self.shared.refused():
+            return None
+        config, _ = self.shared.config_snapshot()
+        return self._base_ctx(config)
+
+    @staticmethod
+    def _rejected_outcome(kind: str) -> tuple[str, dict[str, Any], list[notes.Note]]:
+        return orders.FAILED, {}, [
+            collector_note(kind, "agent_refused", "el servidor no acepta ahora a este agente; no se hace nada")
+        ]
+
+    def _test_credential(self, order_id: str, params: dict[str, Any]) -> tuple[str, dict[str, Any], list[notes.Note]]:
+        ctx = self._order_ctx()
+        if ctx is None:
+            return self._rejected_outcome("test_credential")
+        return orders.test_credential(params, ctx)
+
+    def _reseal(self, order_id: str, params: dict[str, Any]) -> tuple[str, dict[str, Any], list[notes.Note]]:
+        """Solo para una clave que alguien ha permitido en la ventana de este equipo.
+
+        El servidor es quien dice qué clave tiene el agente nuevo: sin esto,
+        quien se hiciera con el servidor se llevaría todas las contraseñas
+        presentándose como uno (`agent.approvals`). Lo que no se puede ni
+        identificar lo rechaza `orders.reseal` con su nota, sin preguntar.
+        """
+        if self._order_ctx() is None:
+            return self._rejected_outcome("reseal")
+        try:
+            target = sealing.canonical_uuid(params.get("agent"))  # type: ignore[arg-type]
+            key_fingerprint = approvals.fingerprint(params.get("public_key"))  # type: ignore[arg-type]
+        except (sealing.SealError, TypeError, ValueError, ImportError):
+            target = key_fingerprint = ""
+        if target and key_fingerprint and not self.approvals.trusted(target, key_fingerprint):
+            ids = params.get("credential_ids")
+            name = params.get("agent_name")
+            decision = self.approvals.ask(
+                order_id,
+                target,
+                name.strip()[:120] if isinstance(name, str) else "",
+                key_fingerprint,
+                len(ids) if isinstance(ids, list) else 0,
+            )
+            if decision == approvals.DENY:
+                return orders.FAILED, {}, [collector_note("reseal", "denied", "rechazado en la ventana de este agente")]
+            if decision != approvals.ALLOW:
+                return orders.FAILED, {}, [
+                    collector_note("reseal", "not_approved", "nadie lo permitió a tiempo en la ventana de este agente")
+                ]
+        # Con la configuración de ahora: pudo cambiar mientras se esperaba.
+        ctx = self._order_ctx()
+        if ctx is None:
+            return self._rejected_outcome("reseal")
+        return orders.reseal(params, ctx, agent_uuid=self._agent_uuid(), environ=self._environ)
+
+    def _netbox_export(self, order_id: str, params: dict[str, Any]) -> tuple[str, dict[str, Any], list[notes.Note]]:
+        ctx = self._order_ctx()
+        if ctx is None:
+            return self._rejected_outcome("netbox")
+        started = self._clock().isoformat()
+        mine = {"task": "netbox_export", "order_id": order_id, "run_id": order_id, "step": "", "done": 0,
+                "total": 0, "started_at": started}
+
+        def progress(step: str, done: int, total: int) -> None:
+            # La actividad es una sola: si mientras tanto empezó una tarea, la
+            # suya manda y esta deja de escribir.
+            with self.shared.lock:
+                if self.shared.activity is None:
+                    self.shared.activity = dict(mine)
+                if self.shared.activity.get("order_id") == order_id:
+                    self.shared.activity.update(step=step, done=done, total=total)
+
+        try:
+            return orders.netbox_export(
+                order_id, params, ctx, agent_uuid=self._agent_uuid(), upload=self.client.upload_netbox_bundle,
+                progress=progress, environ=self._environ,
+            )
+        finally:
+            with self.shared.lock:
+                if self.shared.activity is not None and self.shared.activity.get("order_id") == order_id:
+                    self.shared.activity = None
+
+    def _agent_uuid(self) -> str:
+        with self.shared.lock:
+            return self.shared.agent_uuid
+
+    # --- Lo que pide el canal local (agent.localops) ----------------------------------
+
+    def _note_checkin(self, ok: bool, status_code: int | None, error: str) -> None:
+        at = self._clock().isoformat()
+        with self._lock:
+            self.last_checkin = {
+                "at": at,
+                "ok": ok,
+                "status": status_code,
+                "error": logs.scrub(error),
+            }
+            if ok:
+                self.last_ok_at = at
+
+    def gentleness(self) -> str:
+        """La suavidad con la que trabaja ahora: la del servidor, bajada al tope local."""
+        config, _ = self.shared.config_snapshot()
+        return tasks.gentleness(config.get("gentleness"), self.settings.gentleness_cap)
+
+    def snapshot(self) -> dict[str, Any]:
+        """What the agent is doing now, for the local channel's `status`. Nothing secret."""
+        now = self._clock()
+        with self.shared.lock:
+            refusal = self.shared.refusal
+            server_pause = self.shared.server_paused_until
+            update = dict(self.shared.update) if isinstance(self.shared.update, dict) else None
+            has_config = self.shared.has_config
+            checkin_seconds = self.shared.checkin_seconds
+        activity = self.shared.activity_snapshot()
+        local_pause = self._local_pause()
+        until = effective_pause(local_pause, server_pause)
+        paused = is_paused(now, until)
+        indefinite = paused and local_settings.is_indefinite(until)
+        with self._lock:
+            schedule = self.scheduler.view(now)
+            queued = [{"task": job.task, "trigger": job.trigger} for job in self.scheduler.queued]
+            last = dict(self.last_checkin)
+            last_ok_at = self.last_ok_at
+            last_runs = {task: dict(run) for task, run in self.last_runs.items()}
+        return {
+            "state": "running" if activity is not None else ("paused" if paused else "idle"),
+            "activity": activity,
+            "schedule": schedule,
+            "queued": queued,
+            "pause": {
+                "local": None if local_settings.is_indefinite(local_pause) else (local_pause.isoformat() if local_pause else None),
+                "server": server_pause.isoformat() if server_pause else None,
+                # «Hasta que se reanude» no tiene hora: `until` vacío e `indefinite`.
+                "until": until.isoformat() if paused and until and not indefinite else None,
+                "indefinite": indefinite,
+            },
+            "refusal": refusal,
+            "has_config": has_config,
+            "checkin_seconds": checkin_seconds,
+            "last_checkin": last,
+            "last_ok_at": last_ok_at,
+            "outbox": self.outbox.count(),
+            "update": update,
+            "updater": self.updater.state(),
+            "gentleness": self.gentleness(),
+            "reseal_requests": self.approvals.pending(),
+            "last_run": last_runs,
+            # La clave del agente ante el portal (spec 1.2): sin problema, `problem` vacío.
+            "identity": {
+                "server_has_key": self.control.key_confirmed,
+                "problem": dict(self.control.key_problem) if self.control.key_problem else None,
+            },
+        }
+
+    def queue_local(self, task: str) -> None:
+        """«Ejecutar ahora» desde esta máquina: como un encargo, el primero de la cola."""
+        self._queue_order(Job(task, TRIGGER_ORDER))
+        self.shared.wake.set()
+
+    def apply_settings(self, settings: local_settings.Settings) -> None:
+        """Ajustes locales nuevos, sin reiniciar: exclusiones, suavidad, `about`."""
+        self.settings = settings
+        self.excluded = _excluded_for(settings)
+        self._about = None
+        self.shared.wake.set()
+
+    def probe_now(self, ip: str) -> dict[str, Any]:
+        """«Analizar» pedido en esta máquina, con los mismos turnos que los encargos (spec 2.1)."""
+        control = self.control
+        ip_lock = control._ip_lock(ip, take=True)
+        try:
+            with ip_lock, control._probe_slots:
+                return self._probe(ip)
+        finally:
+            control._ip_lock(ip, take=False)
 
     # --- Negociar ------------------------------------------------------------------
 
@@ -277,6 +532,8 @@ class Runtime:
                 # que espera en la cola se queda para cuando vuelva a aceptar.
                 return None
             server_pause = self.shared.server_paused_until
+        if self.updater.holding():
+            return None  # una actualización verificada espera a que no haya tarea en curso
         now = self._clock()
         paused = is_paused(now, effective_pause(self._local_pause(), server_pause))
         with self._lock:
@@ -290,6 +547,7 @@ class Runtime:
             # (que despierta este hilo), no a la hora de la siguiente tarea.
             has_config = self.shared.has_config and not self.shared.refusal
             server_pause = self.shared.server_paused_until
+        has_config = has_config and not self.updater.holding()
         until = effective_pause(self._local_pause(), server_pause)
         paused = is_paused(now, until)
         with self._lock:
@@ -318,6 +576,8 @@ class Runtime:
             "workers": tasks.workers_for(config.get("gentleness"), self.settings.gentleness_cap),
             "excluded": self.excluded,
             "errors": [],
+            # Los sobres de esta ejecución se abren aquí y mueren con el `ctx`.
+            creds.CTX_KEY: creds.Unsealer(self._agent_uuid(), self._environ),
         }
 
     def build_ctx(self, job: Job, config: dict[str, Any]) -> dict[str, Any]:
@@ -421,6 +681,7 @@ class Runtime:
         }
         self.shared.set_activity(None)
         answer = self._deliver(run, items, strict=strict)
+        self._note_run(run, items, answer)
         if self._report:
             with self._lock:
                 wait = self.scheduler.seconds_until_next(self._clock())
@@ -432,6 +693,35 @@ class Runtime:
                 next_in=int(wait) if wait is not None else None,
             )
         return run
+
+    def _note_run(self, run: dict[str, Any], items: list[dict[str, Any]], answer: dict[str, Any] | None) -> None:
+        """Las cifras de esta ejecución para `status.last_run`: solo números y estados, nada de lo hallado.
+
+        `created`/`refreshed` son lo que contestó el servidor; si el resultado
+        se quedó en la cola local (`delivered` falso) no se saben todavía y van
+        vacíos, no a cero.
+        """
+        stats = run.get("stats") or {}
+
+        def number(value: Any) -> int | None:
+            return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+        entry = {
+            "task": run["task"],
+            "trigger": run.get("trigger"),
+            "started_at": run.get("started_at"),
+            "finished_at": run.get("finished_at"),
+            "status": run.get("status"),
+            "hosts_alive": number(stats.get("hosts_alive")),
+            "new_hosts": number(stats.get("new_hosts")),
+            "sent": len(items),
+            "delivered": answer is not None,
+            "created": number((answer or {}).get("created")) if answer is not None else None,
+            "refreshed": number((answer or {}).get("refreshed")) if answer is not None else None,
+            "notes": len(run.get("notes") or []),
+        }
+        with self._lock:
+            self.last_runs[run["task"]] = entry
 
     def _deliver(self, run: dict[str, Any], items: list[dict[str, Any]], *, strict: bool) -> dict[str, Any] | None:
         """Empuja el resultado; lo que no sale va a la cola local."""

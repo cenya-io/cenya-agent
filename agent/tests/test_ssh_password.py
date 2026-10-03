@@ -187,7 +187,7 @@ class PasswordRunTests(unittest.TestCase):
         ):
             self.assertIn(option, argv)
         self.assertNotIn("-A", argv)
-        self.assertEqual(argv[-2:], ["admin@10.0.0.5", "show version"])
+        self.assertEqual(argv[-5:], ["-l", "admin", "--", "10.0.0.5", "show version"])
         self.assertEqual(captured["timeout"], ssh.COMMAND_TIMEOUT_SECONDS)
 
     def test_sshpass_is_the_fallback_and_keeps_working_as_before(self) -> None:
@@ -364,6 +364,7 @@ class SelftestTests(unittest.TestCase):
             "windows_modules": {"win32serviceutil": True},
             "frozen": True,
             "ssh": {"bundled": True, "password_auth": True, **ssh_report},
+            "app": {"executable": True, "page": True, "webview_files": True, "modules": {"view": True}, "webview2_runtime": None},
         }
 
     def test_a_frozen_windows_build_without_its_own_openssh_is_incomplete(self) -> None:
@@ -372,6 +373,24 @@ class SelftestTests(unittest.TestCase):
         self.assertTrue(selftest.complete(self._data()))
         self.assertFalse(selftest.complete(self._data(bundled=False)))
         self.assertFalse(selftest.complete(self._data(password_auth=False)))
+
+    def test_a_frozen_windows_build_without_the_windows_pieces_is_incomplete(self) -> None:
+        from agent import selftest
+
+        for missing in ("executable", "page", "webview_files"):
+            with self.subTest(missing=missing):
+                data = self._data()
+                data["app"][missing] = False
+                self.assertFalse(selftest.complete(data))
+        # El runtime de WebView2 es de Windows, no del instalador: no cuenta.
+        self.assertTrue(selftest.complete(self._data()))
+
+    def test_the_app_report_looks_at_files_not_at_pywebview(self) -> None:
+        from agent import selftest
+
+        report = selftest.app_report()
+        self.assertTrue(report["page"])  # agent/app/ui está en el repositorio
+        self.assertTrue(all(report["modules"].values()))
 
 
 if __name__ == "__main__":

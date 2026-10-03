@@ -32,18 +32,20 @@ import ipaddress
 import socket
 import threading
 import time
+import uuid
 from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from agent import __version__, logs, notes, status
+from agent import __version__, identity, logs, notes, status
 from agent.client import PROTOCOL, AgentClient, PushError
 from agent.i18n import _t
 from agent.notes import Note, collector_note
 from agent.outbox import KIND_ORDER, Entry, Outbox
 from agent.scheduler import TASKS, TRIGGER_ORDER, Job, effective_pause, is_paused
+from agent.settings import is_indefinite
 
 CHECKIN_SECONDS = 30
 MIN_CHECKIN_SECONDS = 10
@@ -76,6 +78,10 @@ MAX_PROBES = 2
 
 KIND_RUN_TASK = "run_task"
 KIND_PROBE = "probe"
+#: Los encargos de las credenciales selladas (spec 3.3).
+KIND_TEST_CREDENTIAL = "test_credential"
+KIND_RESEAL = "reseal"
+KIND_NETBOX_EXPORT = "netbox_export"
 
 DONE = "done"
 FAILED = "failed"
@@ -146,6 +152,10 @@ class Shared:
         #: rotundo: `REFUSED_UNAUTHORIZED` (401, token revocado o no válido),
         #: `REFUSED_READ_ONLY` (402, instalación en solo lectura), o "".
         self.refusal = ""
+        #: El `uuid` de este agente en el servidor: la mitad de la AAD de las
+        #: credenciales selladas (spec 3.1). Lo pone el enrolamiento y, si
+        #: llega, el campo `agent` de cada respuesta del checkin.
+        self.agent_uuid = ""
         #: Hora del servidor menos hora de esta máquina (`Control.exchange`).
         #: Solo para traducir su `paused_until`; la cola caduca con el reloj local.
         self.clock_offset = timedelta(0)
@@ -195,6 +205,18 @@ class Hooks:
     excluded: Callable[[str], bool]
     #: El servidor ha rechazado al agente (401): vaciar la cola de tareas.
     rejected: Callable[[], None] = lambda: None
+    #: Los encargos de la fase 3 (`agent/orders.py`): reciben `(id, params)` y
+    #: devuelven `(status, result, notas)`. Sin ellos, el encargo es `unsupported`.
+    test_credential: Callable[[str, dict[str, Any]], tuple[str, dict[str, Any], list[Note]]] | None = None
+    reseal: Callable[[str, dict[str, Any]], tuple[str, dict[str, Any], list[Note]]] | None = None
+    netbox_export: Callable[[str, dict[str, Any]], tuple[str, dict[str, Any], list[Note]]] | None = None
+    #: Un checkin bueno, con su `update` (o `None`): decide `agent/update.py`.
+    update_offered: Callable[[Any], None] = lambda _update: None
+    #: La clave pública de este agente (PEM) o "" (spec 1.2, `public_key`): se
+    #: presenta en el checkin mientras el servidor no confirme que la tiene.
+    public_key: Callable[[], str] = lambda: ""
+    #: El `update_state` del checkin (docs/agente-v2-instalacion.md, 4), o `None`.
+    update_state: Callable[[], dict[str, Any] | None] = lambda: None
 
 
 class Control:
@@ -220,6 +242,15 @@ class Control:
         self._take_orders = take_orders
         self._handled: OrderedDict[str, None] = OrderedDict()
         self._handled_lock = threading.Lock()
+        #: Un checkin cada vez: el del hilo de control y el que pide el canal
+        #: local («Buscar actualizaciones», «Probar la conexión») no se cruzan
+        #: (dos a la vez atenderían dos veces los mismos encargos).
+        self._checkin_lock = threading.RLock()
+        #: Si el servidor ha confirmado (`has_public_key: true`) que guarda la
+        #: clave de este agente. Sin confirmar, cada checkin la presenta.
+        self.key_confirmed = False
+        #: `identity`/`key_mismatch`, dicho una vez: el servidor guarda OTRA clave.
+        self.key_problem: dict[str, Any] | None = None
         for order_id in outbox.order_ids():
             self._remember(order_id)
         self._about_sent: str | None = None
@@ -260,11 +291,22 @@ class Control:
             "state": state,
             "activity": activity,
             "schedule": self.hooks.schedule(now),
-            "paused_until": local_pause.isoformat() if local_pause else None,
+            # Una pausa «hasta que la reanude» no es una fecha (spec 1.2): va
+            # como `paused_indefinitely` y sin `paused_until`.
+            "paused_until": local_pause.isoformat() if local_pause and not is_indefinite(local_pause) else None,
             "config_etag": etag,
             "about_hash": about_hash,
             "outbox": self.outbox.count(),
         }
+        if is_indefinite(local_pause):
+            body["paused_indefinitely"] = True
+        if not self.key_confirmed and (pem := self._safely(self.hooks.public_key)):
+            # Un agente que llegó de la 0.10.x enrolado no presentó su clave al
+            # enrolarse: se presenta aquí. El servidor solo la acepta si no
+            # tiene ninguna, y nunca sustituye la que tenga.
+            body["public_key"] = pem
+        if (update_state := self._safely(self.hooks.update_state)) is not None:
+            body["update_state"] = update_state
         # El `about` entero solo si cambió desde el último que llegó, o si el
         # servidor lo pidió; el primero de cada arranque siempre va.
         if self._need_about or about_hash != self._about_sent:
@@ -277,6 +319,10 @@ class Control:
         Devuelve si el servidor contestó. Un 404 pone `gone`: quien corre el
         bucle vuelve al protocolo 1.
         """
+        with self._checkin_lock:
+            return self._checkin_once()
+
+    def _checkin_once(self) -> bool:
         try:
             body, about_hash = self.body(self._clock())
             answer = self.exchange(body)
@@ -381,9 +427,32 @@ class Control:
         if self._report:
             status.contact()
 
+    def _check_key(self, answer: dict[str, Any]) -> None:
+        """¿Guarda el servidor la clave de este agente? (spec 1.2, `has_public_key` / `public_key_sha256`)."""
+        if answer.get("has_public_key") is not True:
+            return  # falta o es falso: no se sabe, y se sigue presentando
+        theirs = answer.get("public_key_sha256")
+        mine = self._safely(self.hooks.public_key) or ""
+        if isinstance(theirs, str) and theirs and mine and theirs.lower() != identity.fingerprint(mine):
+            if self.key_problem is None:
+                note = collector_note(
+                    "identity",
+                    "key_mismatch",
+                    "el servidor guarda otra clave para este agente: no podrá abrir credenciales selladas hasta enrolarlo de nuevo",
+                )
+                self.key_problem = notes.to_json(note)
+                logs.error(
+                    _t(
+                        "[agente] El portal guarda otra clave para este agente: no podrá abrir las credenciales "
+                        "selladas. Enrólalo de nuevo (cenya-agent enroll <cadena> --force)."
+                    )
+                )
+        self.key_confirmed = True
+
     def apply(self, answer: dict[str, Any]) -> None:
         """Aplica la respuesta de un checkin (spec 1.2)."""
         self._need_about = bool(answer.get("need_about"))
+        self._check_key(answer)
         etag = answer.get("config_etag")
         config = answer.get("config")
         changed = False
@@ -405,14 +474,18 @@ class Control:
             self.shared.checkin_seconds = bound_checkin(answer.get("checkin_seconds"), self.shared.checkin_seconds)
             update = answer.get("update")
             self.shared.update = dict(update) if isinstance(update, dict) else None
+            agent_uuid = _agent_uuid(answer.get("agent"))
+            if agent_uuid:
+                self.shared.agent_uuid = agent_uuid
         if changed:
             self._say(_t("[agente] Configuración nueva recibida."))
             self._safely(lambda: self.hooks.config_changed(etag))
         offered = str(update.get("version") or "") if isinstance(update, dict) else ""
         if offered and offered != self._announced_update:
-            # En la fase 1 solo se anota; actualizarse llega en la fase 6.
+            # Se anota aquí; si se actualiza o no lo decide `agent/update.py`.
             self._announced_update = offered
             self._say(_t("[agente] Hay una versión nueva del agente: %(version)s.") % {"version": offered})
+        self._safely(lambda: self.hooks.update_offered(dict(update) if isinstance(update, dict) else None))
         orders = answer.get("orders") if self._take_orders else None
         for order in orders if isinstance(orders, list) else []:
             self.handle_order(order)
@@ -454,7 +527,56 @@ class Control:
         if kind == KIND_PROBE:
             self._start_probe(order_id, params.get("ip"))
             return
+        if kind in (KIND_TEST_CREDENTIAL, KIND_RESEAL, KIND_NETBOX_EXPORT):
+            self._start_sealed(order_id, str(kind), params)
+            return
         self.answer(order_id, UNSUPPORTED)
+
+    def _start_sealed(self, order_id: str, kind: str, params: dict[str, Any]) -> None:
+        """Un encargo de la fase 3 en su propio hilo, con el mismo turno que «Analizar».
+
+        `test_credential` entra en un equipo como un sondeo: espera el turno de
+        su IP (o de su credencial, si es un hipervisor) y uno de los
+        `MAX_PROBES` huecos. `netbox_export` va de uno en uno y sin ocupar
+        hueco (puede tardar minutos y no tiene por qué parar los sondeos);
+        `reseal` solo hace cuentas.
+        """
+        hook = {
+            KIND_TEST_CREDENTIAL: self.hooks.test_credential,
+            KIND_RESEAL: self.hooks.reseal,
+            KIND_NETBOX_EXPORT: self.hooks.netbox_export,
+        }[kind]
+        if hook is None:
+            self.answer(order_id, UNSUPPORTED)
+            return
+        if kind == KIND_TEST_CREDENTIAL:
+            # La misma clave que usa «Analizar» (la IP normalizada): una prueba
+            # y un sondeo contra el mismo equipo tampoco van a la vez.
+            try:
+                turn = str(ipaddress.ip_address(str(params.get("ip") or "").strip()))
+            except ValueError:
+                turn = f"credential:{params.get('credential_id')}"
+            slot = True
+        else:
+            turn, slot = f"order:{kind}", False
+
+        def work() -> None:
+            try:
+                outcome, result, entries = hook(order_id, params)
+            except Exception as exc:  # noqa: BLE001
+                # Solo el tipo: el texto de una excepción de estos encargos
+                # pudo pasar cerca de un secreto abierto.
+                name = type(exc).__name__
+                outcome, result, entries = FAILED, {}, [
+                    collector_note(kind, "crashed", f"error inesperado ({name})", error=name)
+                ]
+            self.answer(order_id, outcome, result, entries)
+
+        thread = threading.Thread(
+            target=self._in_turn, args=(turn, slot, work), name=f"{kind}-{order_id[:8]}", daemon=True
+        )
+        self.probe_threads = [t for t in self.probe_threads if t.is_alive()] + [thread]
+        thread.start()
 
     def _start_probe(self, order_id: str, raw_ip: object) -> None:
         try:
@@ -493,12 +615,20 @@ class Control:
         equipo), luego uno de los `MAX_PROBES` huecos. Siempre en ese orden,
         así que no hay abrazo mortal.
         """
-        ip_lock = self._ip_lock(ip, take=True)
+        self._in_turn(ip, True, lambda: self._probe_now(order_id, ip))
+
+    def _in_turn(self, turn: str, slot: bool, work: Callable[[], None]) -> None:
+        """`work` con el cerrojo de `turn` y, si `slot`, uno de los `MAX_PROBES` huecos."""
+        ip_lock = self._ip_lock(turn, take=True)
         try:
-            with ip_lock, self._probe_slots:
-                self._probe_now(order_id, ip)
+            if slot:
+                with ip_lock, self._probe_slots:
+                    work()
+            else:
+                with ip_lock:
+                    work()
         finally:
-            self._ip_lock(ip, take=False)
+            self._ip_lock(turn, take=False)
 
     def _probe_now(self, order_id: str, ip: str) -> None:
         try:
@@ -582,6 +712,18 @@ class Control:
             logs.error(_t("[agente] %(error)s") % {"error": text})
         if self._report:
             status.contact(error=text)
+
+
+def _agent_uuid(value: object) -> str:
+    """El uuid del agente que manda el checkin (`"agent": "<uuid>"` o `{"uuid": ...}`), o ""."""
+    if isinstance(value, dict):
+        value = value.get("uuid")
+    if not isinstance(value, str):
+        return ""
+    try:
+        return str(uuid.UUID(value.strip()))
+    except ValueError:
+        return ""
 
 
 def _about_hash(about: dict[str, Any]) -> str:

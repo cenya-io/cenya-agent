@@ -147,6 +147,7 @@ class PackagingAgreesWithTheCodeTests(unittest.TestCase):
             "entry_service.py": "agent.winservice",
             "entry_tray.py": "agent.tray",
             "entry_askpass.py": "agent.askpass",
+            "entry_app.py": "agent.app.main",
         }
         spec = (PACKAGING / "cenya-agent.spec").read_text(encoding="utf-8")
         for script, module in targets.items():
@@ -164,12 +165,66 @@ class PackagingAgreesWithTheCodeTests(unittest.TestCase):
     def test_the_installer_ships_every_executable_and_the_tray_starts_at_logon(self) -> None:
         # El askpass no se nombra en el .iss: `Source: {#SourceDir}\*` copia la
         # carpeta entera, y lo que importa es que el spec lo construya.
-        for exe in ("cenya-agent.exe", "cenya-agent-service.exe", "cenya-agent-tray.exe"):
+        for exe in ("cenya-agent.exe", "cenya-agent-service.exe", "cenya-agent-tray.exe", "cenya-agent-app.exe"):
             with self.subTest(exe=exe):
                 self.assertIn(exe, ISS)
         # La misma clave de arranque que ya usaba `install-service.ps1`.
         self.assertIn('ValueName: "Cenya Agent"', ISS)
         self.assertIn("uninsdeletevalue", ISS)
+
+    def test_the_window_and_its_page_travel_with_pywebview_only_where_needed(self) -> None:
+        spec = (PACKAGING / "cenya-agent.spec").read_text(encoding="utf-8")
+        # La página se lee de disco al lado de agent/app/main.py.
+        self.assertIn('(str(AGENT / "app" / "ui"), "agent/app/ui")', spec)
+        for package in ("webview", "pythonnet", "clr_loader"):
+            with self.subTest(package=package):
+                self.assertIn(f'"{package}"', spec)
+        # Sin consola, como el icono.
+        app = spec[spec.index("exe_app = EXE("):]
+        self.assertIn("console=False", app[: app.index(")\n")])
+        self.assertIn("a_app.datas", spec)
+
+    def test_the_start_menu_opens_the_window_grouped_with_it_in_the_taskbar(self) -> None:
+        from agent.app import main
+
+        icons = ISS.split("[Icons]", 1)[1].split("\n[", 1)[0]
+        self.assertIn('Filename: "{app}\\cenya-agent-app.exe"', icons)
+        self.assertIn(f'AppUserModelID: "{main.APP_USER_MODEL_ID}"', icons)
+
+    def test_the_window_is_closed_before_files_are_replaced_or_removed(self) -> None:
+        self.assertIn('Parameters: "/im cenya-agent-app.exe /f"', ISS)
+        self.assertIn("/im cenya-agent-app.exe /f", pascal_routine("procedure StopRunningAgent;"))
+        watchdog = (PACKAGING / "update-watchdog.cmd").read_text(encoding="utf-8")
+        rollback = watchdog[watchdog.index(":rollback"):watchdog.index("robocopy")]
+        self.assertIn("taskkill /f /im cenya-agent-app.exe", rollback)
+
+    def test_a_missing_webview2_warns_and_never_blocks(self) -> None:
+        detection = pascal_routine("function WebView2Present: Boolean;")
+        # La misma clave que mira la ventana (agent/app/winsys.py).
+        from agent.app import winsys
+
+        self.assertIn(winsys.WEBVIEW2_CLIENT, detection)
+        for routine in ("function InitializeSetup", "function NextButtonClick", "function PrepareToInstall"):
+            with self.subTest(routine=routine):
+                self.assertNotIn("WebView2", pascal_routine(routine))
+        self.assertIn("CustomMessage('WebView2Missing')", pascal_routine("procedure CurPageChanged"))
+        self.assertIn("CustomMessage('WebView2Missing')", pascal_routine("procedure CurStepChanged"))
+
+    def test_the_service_is_started_even_when_the_machine_is_not_enrolled(self) -> None:
+        # Sin enrolar el servicio sirve el canal y espera: la aplicación lo conecta.
+        post = pascal_routine("procedure CurStepChanged")
+        start = post.index("RunService('--wait 60 start')")
+        self.assertNotIn("if Enrolled then", post[post.index("InstallAgentService;"):start])
+        smoke = (PACKAGING / "smoke-test.ps1").read_text(encoding="utf-8-sig")
+        self.assertIn("8b. Sin conexión", smoke)
+        self.assertIn("cenya-agent status contesta por el canal", smoke)
+        self.assertIn("la ventana arranca y carga WebView2", smoke)
+
+    def test_the_build_has_pywebview_before_it_freezes(self) -> None:
+        build = (PACKAGING / "build.ps1").read_text(encoding="utf-8-sig")
+        self.assertLess(build.index("import webview"), build.index("-m PyInstaller"))
+        workflow = (AGENT_DIR.parent / ".github" / "workflows" / "agent-installer.yml").read_text(encoding="utf-8")
+        self.assertIn('"./agent[completo,gui]"', workflow)
 
     def test_the_installer_removes_the_service_and_the_secret_when_uninstalled(self) -> None:
         self.assertIn('Parameters: "remove"', ISS)
@@ -330,6 +385,72 @@ class InstallerSpeaksFiveLanguagesTests(unittest.TestCase):
         for script in ("build.ps1", "smoke-test.ps1"):
             with self.subTest(script=script):
                 self.assertTrue((PACKAGING / script).read_bytes().startswith(b"\xef\xbb\xbf"))
+
+
+class PascalCommentTests(unittest.TestCase):
+    """Un comentario `{ ... }` de Pascal termina en la PRIMERA llave que cierra.
+
+    Con otra llave dentro --una constante de Inno, una expresión regular con
+    un cuantificador--, el comentario acaba ahí y lo que sigue se compila como
+    código: «'BEGIN' expected», y solo se ve al construir el instalador en CI.
+    Pasó con tres comentarios a la vez.
+    """
+
+    def test_no_code_comment_has_a_brace_inside(self) -> None:
+        script = (Path(__file__).resolve().parents[1] / "packaging" / "cenya-agent.iss").read_text(encoding="utf-8")
+        start = script.index("[Code]")
+        code, first_line = script[start:], script[:start].count("\n") + 1
+        nested: list[int] = []
+        position = 0
+        while position < len(code):
+            if code[position] == "'":
+                position = code.index("'", position + 1) + 1
+            elif code.startswith("//", position):
+                end = code.find("\n", position)
+                position = end if end > 0 else len(code)
+            elif code[position] == "{":
+                end = code.index("}", position)
+                if "{" in code[position + 1 : end]:
+                    nested.append(first_line + code[:position].count("\n"))
+                position = end + 1
+            else:
+                position += 1
+        self.assertEqual(nested, [], "comentarios con una llave dentro, en estas líneas del .iss")
+
+
+
+class WatchdogTaskXmlTests(unittest.TestCase):
+    """El XML de la tarea del vigilante tiene que poder leerlo `schtasks /XML`.
+
+    Con `<?xml ... encoding="UTF-8"?>` delante, schtasks fallaba con un código 1
+    y el instalador abortaba la actualización: el analizador de tareas recibe el
+    texto ya en UTF-16 y una declaración UTF-8 le hace fallar («unable to switch
+    the encoding»). Solo se veía en el Windows de CI, al actualizar de verdad.
+    """
+
+    def setUp(self) -> None:
+        script = (Path(__file__).resolve().parents[1] / "packaging" / "cenya-agent.iss").read_text(encoding="utf-8")
+        start = script.index("function CreateWatchdog")
+        self.create = script[start : script.index("end;", script.index("Result := ResultCode;", start))]
+        start = script.index("function XmlEscape")
+        self.escape = script[start : script.index(nl_end := "end;" + "\n", start) + len(nl_end)]
+
+    def test_the_task_xml_carries_no_encoding_declaration(self) -> None:
+        # Solo las cadenas que construyen el XML (entre comillas simples), no los comentarios.
+        built = "".join(re.findall(r"'([^']*)'", self.create))
+        self.assertNotIn("<?xml", built)
+        self.assertIn("<Task version=", self.create)
+
+    def test_the_file_for_schtasks_is_written_without_a_byte_order_mark(self) -> None:
+        # Con la marca de UTF-8 delante, schtasks decía «The task XML is malformed».
+        self.assertNotIn("SaveStringsToUTF8File(XmlFile", self.create)
+        self.assertIn("SaveStringToFile(XmlFile, AnsiString(Xml), False)", self.create)
+
+    def test_the_description_is_escaped_to_plain_ascii(self) -> None:
+        # La descripción alemana lleva «Ü»: sale como referencia numérica.
+        self.assertIn("Ord(Value[I]) > 127", self.escape)
+        self.assertIn("'&#' + IntToStr(Ord(Value[I])) + ';'", self.escape)
+        self.assertIn("XmlEscape(CustomMessage('WatchdogDescription'))", self.create)
 
 
 if __name__ == "__main__":

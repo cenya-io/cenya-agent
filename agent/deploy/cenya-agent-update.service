@@ -1,0 +1,18 @@
+# Aplica una actualización que pidió el agente (la dispara cenya-agent-update.path).
+#
+# Como root, con el código y las claves de la versión instalada (en /opt, de
+# root): copia lo que dejó el agente a una carpeta temporal solo suya, verifica
+# la firma del manifiesto, que la versión sea la pedida y más nueva, y las
+# huellas del archivo y de install.sh; solo entonces ejecuta
+# `install.sh --update`, que instala la versión al lado, cambia el enlace
+# `current`, reinicia el agente y deja el vigilante de la vuelta atrás.
+# Lo que no verifica se cuenta al agente en updates/result.json y no se ejecuta.
+
+[Unit]
+Description=Cenya agent: verify and apply a requested update
+
+[Service]
+Type=oneshot
+ExecStart=/opt/cenya-agent/current/bin/cenya-agent update apply-request /var/lib/cenya-agent
+# pip instala las dependencias de la versión nueva: puede tardar unos minutos.
+TimeoutStartSec=30min

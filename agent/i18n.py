@@ -24,7 +24,7 @@ the ``.po`` stays the only thing to keep right. The result is a standard
 Updating the catalogues after adding or changing a ``_t``/``_tn`` text::
 
     xgettext -L Python --from-code=UTF-8 -k_t -k_tn:1,2 --no-wrap \\
-        -o agent/translations/cenya-agent.pot agent/*.py
+        -o agent/translations/cenya-agent.pot agent/*.py agent/app/*.py
     msgmerge --update --no-wrap --backup=none \\
         agent/translations/<lang>/LC_MESSAGES/cenya-agent.po \\
         agent/translations/cenya-agent.pot

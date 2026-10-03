@@ -1,18 +1,28 @@
 """The tray icon: whether the agent on this machine is working, at a glance.
 
 A small process of its own, started when a user signs in. It never talks to
-the server and never touches the service: it reads the status file the agent
-writes (`agent/status.py`) and asks Windows whether the service is running,
-every few seconds, and says what it sees -- green, orange or grey, with a
-tooltip, a status window on click and a notification when things go wrong.
+the server: it reads the status file the agent writes (`agent/status.py`) and
+asks Windows whether the service is running, every few seconds, and says what
+it sees -- green, orange or grey, with a tooltip and a notification when
+things go wrong.
+
+A left click opens the Cenya Agent window (`agent.app`), which is a process of
+its own: the tray only starts it, and the window itself makes sure there is
+never a second one (`agent.app.main` explains why two processes). The
+right-click menu does the few quick things through the local channel
+(`agent.localclient`), the same one the window uses: run Presence, pause or
+resume, look for updates. Acting needs an elevated administrator and the tray
+runs as whoever signed in, so when the service says ``forbidden`` the tray
+offers to open the window as administrator.
 
 Closing the icon closes the icon, not the agent: they are separate processes
 on purpose, and the service keeps sweeping with nobody signed in.
 
-Everything that decides *what* to say lives in `agent/status.py`, as pure
-functions with tests. This module is only the Win32 plumbing (pywin32, BSD in
-the parts used; no `pystray`, which is LGPL), checked by hand on a Windows
-desktop -- there is no desktop to test it on in CI.
+Everything that decides *what* to say lives in `agent/status.py` and
+`agent.app.view.tray_menu`, as pure functions with tests. This module is only
+the Win32 plumbing (pywin32, BSD in the parts used; no `pystray`, which is
+LGPL), checked by hand on a Windows desktop -- there is no desktop to test it
+on in CI.
 """
 
 from __future__ import annotations
@@ -31,7 +41,9 @@ import win32service
 import win32serviceutil
 import winerror
 
-from agent import __version__, icons, status
+from agent import icons, status
+from agent import localclient as channel
+from agent.app import view, winsys
 from agent.i18n import _t
 
 #: El nombre del servicio (`agent.winservice.SERVICE_NAME`). Repetido y no
@@ -42,7 +54,21 @@ SERVICE_NAME = "CenyaAgent"
 POLL_MS = 5000
 WM_TRAY = win32con.WM_USER + 20
 ICON_ID = 1
-CMD_STATUS, CMD_SETTINGS, CMD_CLOSE = 1001, 1002, 1003
+#: Cada cuánto se pregunta al servicio si los avisos están activados.
+SETTINGS_EVERY_S = 60
+#: El menú no espera más que esto al canal: un menú que tarda no es un menú.
+MENU_STATUS_TIMEOUT_S = 1.0
+#: Los identificadores de `view.tray_menu`, con el número que quiere Win32.
+COMMANDS = {
+    "open": 1001,
+    "status": 1002,
+    "run_presence": 1003,
+    "pause": 1004,
+    "resume": 1005,
+    "portal": 1006,
+    "check_update": 1007,
+    "close": 1008,
+}
 #: Uno por sesión: abrirlo dos veces no debe dejar dos iconos.
 MUTEX_NAME = "Local\\CenyaAgentTray"
 #: Versión del formato de icono que espera `CreateIconFromResource` (Win32).
@@ -70,6 +96,9 @@ class TrayApp:
         self._health = status.describe(None, datetime.now(timezone.utc))
         self._data: dict | None = None
         self._busy = False
+        self._channel = channel.ChannelClient()
+        self._notifications = True
+        self._settings_checked = 0.0
 
         instance = win32api.GetModuleHandle(None)
         # Se reciben aparte porque su número lo da Windows al registrarlo: es
@@ -131,14 +160,20 @@ class TrayApp:
         except pywintypes.error:
             pass  # la bandeja no está (el Explorador arrancando): TaskbarCreated lo repondrá
 
-    def _balloon(self) -> None:
-        details = self._health.details[0] if self._health.details else ""
+    def _balloon(self, headline: str | None = None, text: str | None = None, warning: bool = True) -> None:
+        if headline is None:
+            # El aviso automático respeta el ajuste «Avisos de Windows»; los
+            # que contestan a algo que pidió la persona, no.
+            if not self._notifications_on():
+                return
+            headline = self._health.headline
+            text = self._health.details[0] if self._health.details else ""
         data = (
             *self._notify_data(win32gui.NIF_INFO),
-            details[:255],
+            (text or "")[:255],
             10_000,
-            self._health.headline[:63],
-            win32gui.NIIF_WARNING,
+            headline[:63],
+            win32gui.NIIF_WARNING if warning else win32gui.NIIF_INFO,
         )
         try:
             win32gui.Shell_NotifyIcon(win32gui.NIM_MODIFY, data)
@@ -162,41 +197,99 @@ class TrayApp:
         if self._busy:
             return 0
         if lparam == win32con.WM_LBUTTONUP:
-            self._show_status()
+            self._open_window()
         elif lparam == win32con.WM_RBUTTONUP:
             self._show_menu()
         return 0
 
-    def _show_status(self) -> None:
+    def _open_window(self, section: str = "") -> None:
+        """La ventana: si ya está abierta, ella misma se trae al frente."""
+        args = ["--section", section] if section else []
+        if not winsys.launch_app(args):
+            win32gui.MessageBox(
+                self._hwnd,
+                _t("No se encuentra la aplicación de Cenya Agent junto a este icono."),
+                "Cenya Agent",
+                win32con.MB_OK | win32con.MB_ICONWARNING | win32con.MB_SETFOREGROUND,
+            )
+
+    def _channel_status(self) -> dict | None:
+        try:
+            return self._channel.request("status", timeout=MENU_STATUS_TIMEOUT_S)
+        except channel.ChannelError:
+            return None
+
+    def _notifications_on(self) -> bool:
+        if time.monotonic() - self._settings_checked > SETTINGS_EVERY_S:
+            self._settings_checked = time.monotonic()
+            try:
+                settings = self._channel.request("settings.get", timeout=MENU_STATUS_TIMEOUT_S)
+                self._notifications = settings.get("notifications") is not False
+            except channel.ChannelError:
+                pass  # sin servicio, se avisa: es justo cuando conviene
+        return self._notifications
+
+    def _act(self, op: str, args: dict | None = None) -> dict | None:
+        """Una acción por el canal. Sin permiso, ofrece abrir la ventana como administrador."""
+        try:
+            return self._channel.request(op, args)
+        except channel.ChannelError as exc:
+            if exc.code == channel.FORBIDDEN:
+                answer = win32gui.MessageBox(
+                    self._hwnd,
+                    _t("Esto necesita permisos de administrador. ¿Abrir Cenya Agent como administrador?"),
+                    "Cenya Agent",
+                    win32con.MB_YESNO | win32con.MB_ICONQUESTION | win32con.MB_SETFOREGROUND,
+                )
+                if answer == win32con.IDYES:
+                    winsys.relaunch_elevated_app(["--elevated", "--section", "status"])
+            else:
+                self._balloon(_t("No se ha podido"), view.error_message(exc.code, exc.message))
+            return None
+
+    def _show_menu(self) -> None:
         self._busy = True
         try:
             self._poll()
-            lines = [self._health.headline, "", *self._health.details]
-            footer = _t("Versión del agente: %(version)s") % {"version": (self._data or {}).get("version") or __version__}
-            url = status.settings_url(self._data)
-            if url:
-                footer += "\n" + _t("Servidor: %(url)s") % {"url": url.removesuffix("/settings/agents/")}
-            icon = win32con.MB_ICONWARNING if self._health.tone == status.WARNING else win32con.MB_ICONINFORMATION
-            win32gui.MessageBox(
-                self._hwnd,
-                "\n".join(lines) + "\n\n" + footer,
-                "Cenya Agent",
-                win32con.MB_OK | icon | win32con.MB_SETFOREGROUND,
-            )
+            live = self._channel_status()
+            url = status.settings_url(self._data) or (status.settings_url({"url": live.get("portal")}) if live else None)
+            portal = url.removesuffix("/settings/agents/") if url else None
+            items = view.tray_menu(live, datetime.now(timezone.utc), self._health.headline, portal)
+            command = self._track_menu(items)
         finally:
             self._busy = False
+        if command == COMMANDS["open"]:
+            self._open_window()
+        elif command == COMMANDS["run_presence"]:
+            if self._act("run", {"task": "presence"}) is not None:
+                self._balloon(_t("Presencia en marcha"), _t("El agente está mirando quién responde en la red."), warning=False)
+        elif command == COMMANDS["pause"]:
+            self._act("pause", {"seconds": 3600})
+        elif command == COMMANDS["resume"]:
+            self._act("resume")
+        elif command == COMMANDS["portal"] and portal:
+            webbrowser.open(portal)
+        elif command == COMMANDS["check_update"]:
+            result = self._act("check_update")
+            if result is not None:
+                latest = str(result.get("latest") or "")
+                if result.get("available") and latest:
+                    self._balloon(_t("Hay una versión nueva del agente: %(version)s") % {"version": latest}, "", warning=False)
+                else:
+                    self._balloon(_t("Está al día."), str(result.get("installed") or ""), warning=False)
+        elif command == COMMANDS["close"]:
+            win32gui.DestroyWindow(self._hwnd)
 
-    def _show_menu(self) -> None:
-        url = status.settings_url(self._data)
+    def _track_menu(self, items: list[dict]) -> int:
         menu = win32gui.CreatePopupMenu()
-        win32gui.AppendMenu(menu, win32con.MF_STRING, CMD_STATUS, _t("Ver estado"))
-        win32gui.SetMenuDefaultItem(menu, CMD_STATUS, False)
-        settings_flags = win32con.MF_STRING | (0 if url else win32con.MF_GRAYED)
-        win32gui.AppendMenu(menu, settings_flags, CMD_SETTINGS, _t("Abrir Ajustes → Agentes"))
-        win32gui.AppendMenu(menu, win32con.MF_SEPARATOR, 0, "")
-        # «Cerrar este icono» y no «Salir»: salir sonaría a parar el agente, y
-        # el servicio sigue barriendo aunque nadie mire.
-        win32gui.AppendMenu(menu, win32con.MF_STRING, CMD_CLOSE, _t("Cerrar este icono"))
+        for item in items:
+            if item["id"] == "-":
+                win32gui.AppendMenu(menu, win32con.MF_SEPARATOR, 0, "")
+                continue
+            flags = win32con.MF_STRING | (0 if item.get("enabled") else win32con.MF_GRAYED)
+            win32gui.AppendMenu(menu, flags, COMMANDS[item["id"]], item["label"])
+            if item.get("default"):
+                win32gui.SetMenuDefaultItem(menu, COMMANDS[item["id"]], False)
         x, y = win32gui.GetCursorPos()
         # Sin traer la ventana al frente, el menú no se cierra al pulsar fuera
         # (comportamiento documentado de TrackPopupMenu).
@@ -212,12 +305,7 @@ class TrayApp:
         )
         win32gui.PostMessage(self._hwnd, win32con.WM_NULL, 0, 0)
         win32gui.DestroyMenu(menu)
-        if command == CMD_STATUS:
-            self._show_status()
-        elif command == CMD_SETTINGS and url:
-            webbrowser.open(url)
-        elif command == CMD_CLOSE:
-            win32gui.DestroyWindow(self._hwnd)
+        return int(command or 0)
 
     # --- Ciclo de vida ---------------------------------------------------------
 

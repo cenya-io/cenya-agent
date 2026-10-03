@@ -61,7 +61,26 @@ winrm = ["pywinrm>=0.4,<1", "requests_ntlm>=1.2"]
 # be sealed for this agent only. Optional like the rest: without it there is
 # no key and the agent says `sealed_credentials: false`.
 windows = ["pywin32>=306; sys_platform == 'win32'", "certifi>=2024.2.2", "cryptography>=42"]
+# The desktop application (agent/app, `cenya-agent-app`): pywebview over the
+# WebView2 runtime that Windows 10/11 already carry. Licences checked on the
+# wheels pip resolves on Windows / Python 3.12 (02-10-2026), all permissive:
+#   pywebview 6.2.1      BSD-3-Clause (ships Microsoft's WebView2 SDK DLLs,
+#                        Microsoft.Web.WebView2.Core/WinForms and WebView2Loader,
+#                        under Microsoft's BSD-style WebView2 SDK licence)
+#   pythonnet 3.2.0      MIT
+#   clr_loader 0.3.1     MIT
+#   cffi 2.1.1           MIT-0
+#   pycparser 3.0        BSD-3-Clause
+#   proxy_tools 0.1.0    MIT
+#   bottle 0.13.4        MIT (pywebview's local HTTP server; installed, never
+#                        started: the window loads an HTML string, see agent/app/main.py)
+#   typing_extensions    PSF-2.0
+# No copyleft. The WebView2 runtime itself is a Windows component and is not
+# redistributed by us. pywin32 comes in for the tray, the service control and
+# the one-window lock (see `windows` above).
+gui = ["pywebview>=6,<7; sys_platform == 'win32'", "pywin32>=306; sys_platform == 'win32'"]
 completo = [
+    "pywebview>=6,<7; sys_platform == 'win32'",
     "pysnmp>=7.1,<8",
     "pywinrm>=0.4,<1",
     "requests_ntlm>=1.2",
@@ -82,12 +101,16 @@ cenya-agent-askpass = "agent.askpass:main"
 # El icono de bandeja. `gui-scripts` y no `scripts`: arranca sin ventana de
 # consola detrás. Solo Windows, con [windows].
 cenya-agent-tray = "agent.tray:main"
+# La ventana de Cenya Agent (agent/app). Solo Windows, con [gui].
+cenya-agent-app = "agent.app.main:main"
 
 [tool.setuptools]
-packages = ["agent", "agent.collectors"]
-package-dir = { "agent" = ".", "agent.collectors" = "collectors" }
+packages = ["agent", "agent.collectors", "agent.app"]
+package-dir = { "agent" = ".", "agent.collectors" = "collectors", "agent.app" = "app" }
 
 [tool.setuptools.package-data]
 # Los catálogos del icono de bandeja, tal cual: agent/i18n.py los compila en
 # memoria al arrancar, así que no hay .mo que generar ni que se quede viejo.
 agent = ["translations/*/LC_MESSAGES/cenya-agent.po"]
+# La página de la ventana: se lee de disco y se entrega a WebView2 en una cadena.
+"agent.app" = ["ui/*.html", "ui/*.css", "ui/*.js", "ui/*.txt"]

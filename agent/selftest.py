@@ -36,13 +36,42 @@ RUNTIME_MODULES = (
     "about",
     "control",
     "identity",
+    # El canal local (spec 4): sin él la aplicación de escritorio y los
+    # comandos `status`, `pause`... no tienen con quién hablar.
+    "localapi",
+    "localclient",
+    "localops",
+    "localpipe",
     "logs",
     "outbox",
     "runtime",
     "scheduler",
     "settings",
     "tasks",
+    # La actualización (docs/agente-v2-instalacion.md, 4) y el ajuste de la CA
+    # que usa el instalador con /CA=.
+    "update",
+    "release",
+    "release_keys",
+    "settings_command",
 )
+
+
+def release_keys_report() -> dict[str, object]:
+    """How many valid release keys this build trusts, and their short fingerprints.
+
+    No forma parte de «completa»: un agente sin claves funciona, solo que no se
+    actualiza solo. Lo mira el flujo de publicación (la versión que se publica
+    no puede llevar la clave de prueba de CI) y quien dude de una compilación.
+    """
+    from agent import release
+    from agent.release_keys import PUBLIC_KEYS
+
+    try:
+        keys = release.load_public_keys(PUBLIC_KEYS)
+    except release.ReleaseError as exc:
+        return {"count": 0, "fingerprints": [], "error": exc.code}
+    return {"count": len(keys), "fingerprints": [release.key_fingerprint(key) for key in keys]}
 
 
 def _has(module: str) -> bool:
@@ -70,6 +99,41 @@ def ssh_report() -> dict[str, object]:
     }
 
 
+#: Lo que la ventana necesita a su lado en una instalación congelada: la página
+#: (que se lee de disco) y las DLL de WebView2 que trae pywebview.
+APP_PAGE = ("index.html", "app.css", "app.js", "icons.js", "LUCIDE-LICENSE.txt")
+WEBVIEW_FILES = ("webview/lib/Microsoft.Web.WebView2.Core.dll", "webview/lib/Microsoft.Web.WebView2.WinForms.dll")
+
+
+def app_report() -> dict[str, object]:
+    """The desktop application's pieces: its executable, its page, pywebview's files, the WebView2 runtime.
+
+    Mira ficheros y no importa pywebview: este ejecutable (la consola) no lo
+    lleva dentro --solo el de la ventana--, y cargar un navegador para
+    responder a `selftest` sería absurdo. El runtime de WebView2 es de Windows y
+    no lo lleva el instalador: se informa, pero no cuenta para «completa» (el
+    agente funciona sin él; la ventana lo dice al abrirse).
+    """
+    from agent.app import winsys
+
+    frozen = bool(getattr(sys, "frozen", False))
+    here = Path(sys.executable).resolve().parent if frozen else None
+    package = Path(__file__).resolve().parent
+    page = package / "app" / "ui"
+    data: dict[str, object] = {
+        "page": all((page / name).is_file() for name in APP_PAGE),
+        "modules": {name: _has(f"agent.app.{name}") for name in ("view", "strings", "winsys")},
+        "webview2_runtime": winsys.webview2_version() if sys.platform == "win32" else None,
+    }
+    if here is not None:
+        data["executable"] = (here / "cenya-agent-app.exe").is_file()
+        internal = Path(getattr(sys, "_MEIPASS", here))
+        data["webview_files"] = all((internal / name).is_file() for name in WEBVIEW_FILES)
+    else:
+        data["webview_files"] = _has("webview")
+    return data
+
+
 def report() -> dict[str, object]:
     languages = {}
     for code in ("es", "en", "de", "fr", "pt_BR"):
@@ -84,10 +148,12 @@ def report() -> dict[str, object]:
         "runtime": {name: _has(f"agent.{name}") for name in RUNTIME_MODULES},
         "languages": languages,
         "ssh": ssh_report(),
+        "release_keys": release_keys_report(),
         "state_file": str(store.path()),
     }
     if sys.platform == "win32":
         data["windows_modules"] = {name: _has(name) for name in WINDOWS_MODULES}
+        data["app"] = app_report()
     return data
 
 
@@ -105,6 +171,11 @@ def complete(data: dict[str, object]) -> bool:
             # la contraseña SSH no funcionaría en una máquina con un OpenSSH viejo.
             report_ssh = data["ssh"]
             ok = ok and bool(report_ssh["bundled"]) and bool(report_ssh["password_auth"])  # type: ignore[index]
+            # Y la ventana: su ejecutable, su página y los ficheros de pywebview.
+            # El runtime de WebView2 no: es de Windows, no del instalador.
+            app = data.get("app") or {}
+            ok = ok and bool(app.get("executable")) and bool(app.get("page")) and bool(app.get("webview_files"))  # type: ignore[union-attr]
+            ok = ok and all((app.get("modules") or {}).values())  # type: ignore[union-attr]
     return bool(ok)
 
 
