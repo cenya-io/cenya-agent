@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
-from agent import localops, logs, netbox_export, store
+from agent import __version__, localops, logs, netbox_export, store
 from agent import settings as local_settings
 from agent.client import AgentClient, PushError
 from agent.config import Config
@@ -644,17 +644,17 @@ class CheckUpdateTests(LocalServiceCase):
 
     def test_it_asks_the_server_now_and_answers_with_what_it_brought(self) -> None:
         asked: list[dict] = []
-        answer = {**self.ANSWER, "update": {"version": "0.11.1", "url": "https://x/latest.json"}}
+        answer = {**self.ANSWER, "update": {"version": "9.0.0", "url": "https://x/latest.json"}}
         with mock.patch.object(self.client, "checkin", side_effect=lambda body: asked.append(body) or answer):
             data = self.data("check_update")
         self.assertEqual(len(asked), 1)  # un checkin de verdad, ahora
-        self.assertEqual((data["current"], data["offered"], data["checked"], data["pending"]), ("0.11.0", "0.11.1", True, False))
+        self.assertEqual((data["current"], data["offered"], data["checked"], data["pending"]), (__version__, "9.0.0", True, False))
         self.assertEqual(data["error"], "")
         self.assertIsNotNone(data["checked_at"])
         self.assertEqual(data["last_ok_at"], data["checked_at"])
         self.assertIn("state", data["updater"])
         self.assertTrue(data["auto_update"])
-        self.assertEqual(self.data("status")["update"]["version"], "0.11.1")
+        self.assertEqual(self.data("status")["update"]["version"], "9.0.0")
 
     def test_a_checkin_that_fails_says_so(self) -> None:
         with mock.patch.object(self.client, "checkin", side_effect=PushError("No se pudo hablar con el servidor", status=None)):

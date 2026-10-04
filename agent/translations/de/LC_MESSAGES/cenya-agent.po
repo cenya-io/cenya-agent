@@ -5,7 +5,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: cenya-agent 0.9.1\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-03 21:35+0200\n"
+"POT-Creation-Date: 2026-10-04 09:30+0000\n"
 "PO-Revision-Date: 2026-09-14 17:00+0200\n"
 "Last-Translator: NetInventory\n"
 "Language-Team: German\n"
@@ -51,8 +51,7 @@ msgstr "[Agent] Scan gesendet: %(created)s, %(refreshed)s"
 msgid "Error inesperado: %(error)s"
 msgstr "Unerwarteter Fehler: %(error)s"
 
-#: agent/__main__.py:287 agent/__main__.py:412 agent/__main__.py:419
-#: agent/control.py:712 agent/runtime.py:519
+#: agent/__main__.py:287 agent/__main__.py:412 agent/__main__.py:419 agent/control.py:712 agent/runtime.py:519
 #, python-format
 msgid "[agente] %(error)s"
 msgstr "[Agent] %(error)s"
@@ -862,7 +861,7 @@ msgstr "Ein NetBox-Export läuft bereits."
 msgid "La exportación falló (%(type)s)."
 msgstr "Der Export ist fehlgeschlagen (%(type)s)."
 
-#: agent/localops.py:1054 agent/localops.py:1125 agent/netbox_export.py:299
+#: agent/localops.py:1054 agent/localops.py:1125 agent/netbox_export.py:473
 #, python-format
 msgid "No se pudo escribir %(path)s: %(error)s"
 msgstr "%(path)s konnte nicht geschrieben werden: %(error)s"
@@ -920,89 +919,147 @@ msgstr "[lokaler Kanal] Auf %(path)s lauscht bereits ein anderer Agent."
 msgid "[canal local] Sin pywin32 no hay canal local: la aplicación y los comandos locales no podrán hablar con el servicio."
 msgstr "[lokaler Kanal] Ohne pywin32 gibt es keinen lokalen Kanal: Die Anwendung und die lokalen Befehle können nicht mit dem Dienst sprechen."
 
-#: agent/netbox_export.py:124
+#: agent/netbox_export.py:151
 #, python-format
 msgid "NetBox no respondió en %(seconds)s segundos. ¿Es esa la URL y llega la red hasta allí?"
 msgstr "NetBox hat innerhalb von %(seconds)s Sekunden nicht geantwortet. Ist das die richtige URL, und ist die Verbindung dorthin erreichbar?"
 
-#: agent/netbox_export.py:137
+#: agent/netbox_export.py:164
 msgid "NetBox rechazó el token. Crea uno de solo lectura en tu NetBox (Admin → API tokens) y prueba de nuevo."
 msgstr "NetBox hat das Token abgelehnt. Erstelle in deinem NetBox ein Token nur mit Leserechten (Admin → API tokens) und versuche es erneut."
 
-#: agent/netbox_export.py:142
+#: agent/netbox_export.py:169
 msgid "NetBox respondió con una redirección (¿falta o sobra «https» o una barra al final de la URL?). No se siguen redirecciones con un token."
 msgstr "NetBox hat mit einer Weiterleitung geantwortet (fehlt «https» oder ein Schrägstrich am Ende der URL, oder ist er zu viel?). Mit einem Token werden keine Weiterleitungen verfolgt."
 
-#: agent/netbox_export.py:146
+#: agent/netbox_export.py:173
 #, python-format
 msgid "NetBox respondió %(code)s."
 msgstr "NetBox hat mit %(code)s geantwortet."
 
-#: agent/netbox_export.py:151
+#: agent/netbox_export.py:178
 #, python-format
 msgid "El certificado de ese NetBox no es válido (%(reason)s). Si es un NetBox de tu red con certificado autofirmado o caducado, añade --insecure y vuelve a intentarlo."
 msgstr "Das Zertifikat dieses NetBox ist nicht gültig (%(reason)s). Ist es ein NetBox in deinem Netz mit selbstsigniertem oder abgelaufenem Zertifikat, füge --insecure hinzu und versuche es erneut."
 
-#: agent/netbox_export.py:158
+#: agent/netbox_export.py:185 agent/netbox_export.py:319
 #, python-format
 msgid "No se pudo hablar con NetBox: %(reason)s"
 msgstr "Keine Verbindung zu NetBox möglich: %(reason)s"
 
-#: agent/netbox_export.py:162
+#: agent/netbox_export.py:189
 msgid "La respuesta de NetBox no es JSON. ¿Es esa la URL de NetBox?"
 msgstr "Die Antwort von NetBox ist kein JSON. Ist das die URL des NetBox?"
 
-#: agent/netbox_export.py:181
+#: agent/netbox_export.py:208
 #, python-format
 msgid "La respuesta de %(path)s no tiene la forma esperada."
 msgstr "Die Antwort von %(path)s hat nicht die erwartete Form."
 
-#: agent/netbox_export.py:186
+#: agent/netbox_export.py:213
 #, python-format
 msgid "%(path)s tiene más de %(max)s objetos. Esta importación está pensada para inventarios de pyme; hablemos antes de traer eso."
 msgstr "%(path)s hat mehr als %(max)s Objekte. Dieser Import ist für Inventare kleiner und mittlerer Unternehmen gedacht; lass uns reden, bevor wir das übernehmen."
 
-#: agent/netbox_export.py:227 agent/app/view.py:653
+#: agent/netbox_export.py:316
+#, python-format
+msgid "No se pudo abrir la página de inicio de sesión de NetBox (%(code)s)."
+msgstr "Die Anmeldeseite von NetBox konnte nicht geöffnet werden (%(code)s)."
+
+#: agent/netbox_export.py:322
+msgid "No se encontró el formulario de inicio de sesión de NetBox."
+msgstr "Das Anmeldeformular von NetBox wurde nicht gefunden."
+
+#: agent/netbox_export.py:339 agent/netbox_export.py:340
+msgid "NetBox no aceptó ese usuario y contraseña."
+msgstr "NetBox hat diesen Benutzernamen und dieses Passwort nicht akzeptiert."
+
+#: agent/netbox_export.py:362 agent/app/view.py:653
 msgid "La URL tiene que empezar por http:// o https://."
 msgstr "Die URL muss mit http:// oder https:// beginnen."
 
-#: agent/netbox_export.py:229
+#: agent/netbox_export.py:364
 msgid "La URL no dice a qué servidor conectarse."
 msgstr "Die URL sagt nicht, mit welchem Server verbunden werden soll."
 
-#: agent/netbox_export.py:244
+#: agent/netbox_export.py:382
 #, python-format
-msgid "Uso: %(prog)s URL [--output FICHERO] [--insecure]"
-msgstr "Verwendung: %(prog)s URL [--output DATEI] [--insecure]"
+msgid "Uso: %(prog)s URL [--output FICHERO] [--insecure] [--photos-user USUARIO]"
+msgstr "Aufruf: %(prog)s URL [--output DATEI] [--insecure] [--photos-user BENUTZER]"
 
-#: agent/netbox_export.py:278
+#: agent/netbox_export.py:422
 #, python-format
 msgid "Falta el token de NetBox: pásalo en la variable %(var)s."
 msgstr "Das NetBox-Token fehlt: Übergib es in der Variable %(var)s."
 
-#: agent/netbox_export.py:282
+#: agent/netbox_export.py:426
 msgid "Token de solo lectura de NetBox (no se muestra al escribirlo): "
 msgstr "NetBox-Token nur mit Leserechten (wird beim Tippen nicht angezeigt): "
 
-#: agent/netbox_export.py:284
+#: agent/netbox_export.py:428
 msgid "Sin token no se puede leer NetBox."
 msgstr "Ohne Token lässt sich NetBox nicht lesen."
 
-#: agent/netbox_export.py:288
+#: agent/netbox_export.py:432
 #, python-format
 msgid "Leyendo %(path)s…"
 msgstr "Lese %(path)s…"
 
-#: agent/netbox_export.py:306
+#: agent/netbox_export.py:442
+#, python-format
+msgid "Falta la contraseña de NetBox: pásala en la variable %(var)s."
+msgstr "Das NetBox-Passwort fehlt: Übergeben Sie es in der Variable %(var)s."
+
+#: agent/netbox_export.py:447
+#, python-format
+msgid "Contraseña de %(user)s en NetBox, solo para las fotos (no se muestra ni se guarda): "
+msgstr "NetBox-Passwort von %(user)s, nur für die Fotos (wird weder angezeigt noch gespeichert): "
+
+#: agent/netbox_export.py:480
 #, python-format
 msgid "Exportado %(n)d objeto a %(path)s."
 msgid_plural "Exportados %(n)d objetos a %(path)s."
 msgstr[0] "%(n)d Objekt nach %(path)s exportiert."
 msgstr[1] "%(n)d Objekte nach %(path)s exportiert."
 
-#: agent/netbox_export.py:312
+#: agent/netbox_export.py:488
 msgid "Súbelo en Cenya: Ajustes → Importar → «NetBox, desde un fichero»."
 msgstr "Lade sie in Cenya hoch: Einstellungen → Importieren → «NetBox, aus einer Datei»."
+
+#: agent/netbox_export.py:499
+#, python-format
+msgid "Fotos de los modelos: %(got)d de %(wanted)d."
+msgid_plural "Fotos de los modelos: %(got)d de %(wanted)d."
+msgstr[0] "Modellfotos: %(got)d von %(wanted)d."
+msgstr[1] "Modellfotos: %(got)d von %(wanted)d."
+
+#: agent/netbox_export.py:508
+#, python-format
+msgid "%(n)d foto no se pudo bajar: tu NetBox solo enseña las fotos con la sesión iniciada, y el token solo abre la API. Repite con --photos-user TU_USUARIO."
+msgid_plural "%(n)d fotos no se pudieron bajar: tu NetBox solo enseña las fotos con la sesión iniciada, y el token solo abre la API. Repite con --photos-user TU_USUARIO."
+msgstr[0] "%(n)d Foto konnte nicht heruntergeladen werden: Ihr NetBox zeigt Fotos nur angemeldeten Benutzern, und das Token öffnet nur die API. Wiederholen Sie es mit --photos-user IHR_BENUTZER."
+msgstr[1] "%(n)d Fotos konnten nicht heruntergeladen werden: Ihr NetBox zeigt Fotos nur angemeldeten Benutzern, und das Token öffnet nur die API. Wiederholen Sie es mit --photos-user IHR_BENUTZER."
+
+#: agent/netbox_export.py:519
+#, python-format
+msgid "%(n)d foto no se pudo bajar ni con la sesión iniciada: ¿puede ese usuario ver los modelos?"
+msgid_plural "%(n)d fotos no se pudieron bajar ni con la sesión iniciada: ¿puede ese usuario ver los modelos?"
+msgstr[0] "%(n)d Foto konnte auch angemeldet nicht heruntergeladen werden: Darf dieser Benutzer die Modelle sehen?"
+msgstr[1] "%(n)d Fotos konnten auch angemeldet nicht heruntergeladen werden: Darf dieser Benutzer die Modelle sehen?"
+
+#: agent/netbox_export.py:528
+#, python-format
+msgid "%(n)d foto no se pudo bajar por la red, el tiempo o el tamaño."
+msgid_plural "%(n)d fotos no se pudieron bajar por la red, el tiempo o el tamaño."
+msgstr[0] "%(n)d Foto konnte wegen Netzwerk, Zeitüberschreitung oder Größe nicht heruntergeladen werden."
+msgstr[1] "%(n)d Fotos konnten wegen Netzwerk, Zeitüberschreitung oder Größe nicht heruntergeladen werden."
+
+#: agent/netbox_export.py:537
+#, python-format
+msgid "%(n)d foto se quedó fuera para que el fichero no pase del tamaño que acepta Cenya."
+msgid_plural "%(n)d fotos se quedaron fuera para que el fichero no pase del tamaño que acepta Cenya."
+msgstr[0] "%(n)d Foto wurde weggelassen, damit die Datei die Größe nicht überschreitet, die Cenya annimmt."
+msgstr[1] "%(n)d Fotos wurden weggelassen, damit die Datei die Größe nicht überschreitet, die Cenya annimmt."
 
 #: agent/runtime.py:88
 #, python-format
@@ -1532,8 +1589,7 @@ msgstr "Erlaubt: Der andere Agent erhält die Zugangsdaten."
 msgid "Rechazado: no se ha compartido nada."
 msgstr "Abgelehnt: Es wurde nichts geteilt."
 
-#: agent/app/strings.py:59 agent/app/view.py:141 agent/app/view.py:210
-#: agent/app/view.py:262
+#: agent/app/strings.py:59 agent/app/view.py:141 agent/app/view.py:210 agent/app/view.py:262
 msgid "Hace falta abrir Cenya Agent como administrador para hacer cambios."
 msgstr "Für Änderungen muss Cenya Agent als Administrator geöffnet werden."
 
