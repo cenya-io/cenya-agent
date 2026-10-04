@@ -726,6 +726,37 @@ begin
   end;
 end;
 
+{ Renombra una carpeta recién copiada, con paciencia. Justo después de
+  robocopy, el antivirus (Defender, en un Windows real el 04-10-2026) sigue
+  abriendo los .exe y .dll nuevos para analizarlos, y el primer intento
+  falla: la actualización se daba por imposible (código 1002) y esa versión
+  quedaba vetada para siempre. Se reintenta durante medio minuto y, si no hay
+  manera, el motivo de Windows queda en el registro de la instalación. }
+function MoveFile(lpExistingFileName, lpNewFileName: String): BOOL;
+  external 'MoveFileW@kernel32.dll stdcall';
+
+function RenamePatiently(const Source, Target: String): Boolean;
+var
+  Attempt: Integer;
+begin
+  Result := False;
+  for Attempt := 1 to 60 do
+  begin
+    { MoveFileW importada, no RenameFile: así DLLGetLastError dice el motivo. }
+    if MoveFile(Source, Target) then
+    begin
+      if Attempt > 1 then
+        Log(Format('%s renombrada al intento %d.', [Source, Attempt]));
+      Result := True;
+      Exit;
+    end;
+    if Attempt = 1 then
+      Log(Format('No se pudo renombrar %s (%s); se reintenta.', [Source, SysErrorMessage(DLLGetLastError)]));
+    Sleep(500);
+  end;
+  Log(Format('No se pudo renombrar %s tras 60 intentos: %s', [Source, SysErrorMessage(DLLGetLastError)]));
+end;
+
 { Copia la carpeta del programa a previous\app: primero a app.partial y solo
   entera se renombra. Un instalador matado a mitad nunca deja una copia a
   medias que el vigilante pudiera restaurar. 0 si fue bien.
@@ -759,7 +790,7 @@ begin
     Exit;
   end;
   DelTree(Target, True, True, True);
-  if not RenameFile(Partial, Target) then
+  if not RenamePatiently(Partial, Target) then
   begin
     Result := 1002;
     Exit;

@@ -133,6 +133,22 @@ class PackagingAgreesWithTheCodeTests(unittest.TestCase):
         smoke = (PACKAGING / "smoke-test.ps1").read_text(encoding="utf-8-sig")
         self.assertIn('"CenyaAgent"', smoke)
 
+    def test_the_backup_of_the_old_version_is_renamed_patiently(self) -> None:
+        """04-10-2026, a real Windows: robocopy copied the old version to
+        previous\\app.partial and the rename to previous\\app failed at once
+        (code 1002), most likely the antivirus still scanning the new .exe and
+        .dll. The update was given up and 0.11.1 vetoed for that agent. The
+        rename now retries for half a minute and logs Windows' reason."""
+        backup = ISS[ISS.index("function BackupPrevious"):]
+        backup = backup[: backup.index("\nend;")]
+        self.assertIn("RenamePatiently(Partial, Target)", backup)
+        self.assertNotIn("RenameFile(", backup)
+        helper = ISS[ISS.index("function RenamePatiently"):]
+        helper = helper[: helper.index("\nend;")]
+        self.assertIn("Sleep(", helper)
+        self.assertIn("SysErrorMessage(DLLGetLastError)", helper)
+        self.assertIn("'MoveFileW@kernel32.dll stdcall'", ISS)
+
     def test_the_package_says_the_same_version_as_the_code(self) -> None:
         """pip and the server read the version from pyproject.toml; the agent
         and the release tag from agent/__init__.py. 0.11.1 first left with the

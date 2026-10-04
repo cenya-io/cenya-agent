@@ -218,7 +218,7 @@ class UpdateModeTests(unittest.TestCase):
         self.assertIn("robocopy.exe", backup)
         self.assertIn("app.partial", backup)
         self.assertIn("ResultCode >= 8", backup)
-        self.assertLess(backup.index("Exec("), backup.index("RenameFile(Partial, Target)"))
+        self.assertLess(backup.index("Exec("), backup.index("RenamePatiently(Partial, Target)"))
 
     def test_the_watchdog_task_is_one_shot_as_system_and_survives_a_reboot(self) -> None:
         create = pascal_routine("function CreateWatchdog")
