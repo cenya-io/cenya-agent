@@ -288,6 +288,56 @@ class NetboxSecretTests(unittest.TestCase):
             self.assertTrue(api.netbox_test("https://netbox.local", self.TOKEN, True)["ok"])
 
 
+class NetboxPhotosTests(unittest.TestCase):
+    TOKEN = NetboxSecretTests.TOKEN
+    PASSWORD = "la-contraseña-de-las-fotos"
+
+    wait = NetboxSecretTests.wait
+
+    def test_the_password_travels_once_and_the_summary_tells_the_photos(self) -> None:
+        api, agent, wire, _ = make()
+        api.status()
+        self.assertTrue(api.netbox_start("https://netbox.local", self.TOKEN, False, "send", "", "eduardo", self.PASSWORD)["ok"])
+        result = self.wait(api)
+        self.assertEqual(result["state"], "done")
+        self.assertEqual(sum(self.PASSWORD.encode() in line for line in wire), 1)
+        self.assertNotIn(self.PASSWORD, json.dumps(result))
+        self.assertNotIn(self.PASSWORD, json.dumps(agent._log))
+        self.assertNotIn(self.PASSWORD, repr(vars(api)))
+        self.assertFalse(result["summary"]["photos_missing"])
+        self.assertTrue(result["summary"]["photos"])
+
+    def test_without_a_user_the_summary_warns_about_the_photos(self) -> None:
+        api, *_ = make()
+        api.status()
+        api.netbox_start("https://netbox.local", self.TOKEN, False, "send")
+        summary = self.wait(api)["summary"]
+        self.assertTrue(summary["photos_missing"])
+        self.assertIn("Bajar también las fotos", " ".join(summary["photos"]))
+
+    def test_a_user_without_a_password_is_stopped_in_the_window(self) -> None:
+        api, _, wire, _ = make()
+        result = api.netbox_start("https://netbox.local", self.TOKEN, False, "send", "", "eduardo", "")
+        self.assertEqual(result["error"], "invalid")
+        self.assertFalse(any(self.TOKEN.encode() in line for line in wire))
+
+    def test_testing_also_signs_in_and_out(self) -> None:
+        api, *_ = make()
+        session = object()
+        with mock.patch("agent.netbox_export._get_page", return_value={}), mock.patch(
+            "agent.netbox_export.login_session", return_value=session
+        ) as login, mock.patch("agent.netbox_export.logout") as logout:
+            result = api.netbox_test("https://netbox.local", self.TOKEN, False, "eduardo", self.PASSWORD)
+        self.assertTrue(result["ok"])
+        login.assert_called_once_with("https://netbox.local", "eduardo", self.PASSWORD, verify_tls=True)
+        logout.assert_called_once_with("https://netbox.local", session)
+        failure = __import__("agent.netbox_export").netbox_export.ExportError("NetBox no aceptó ese usuario y contraseña.")
+        with mock.patch("agent.netbox_export._get_page", return_value={}), mock.patch("agent.netbox_export.login_session", side_effect=failure):
+            result = api.netbox_test("https://netbox.local", self.TOKEN, False, "eduardo", self.PASSWORD)
+        self.assertFalse(result["ok"])
+        self.assertNotIn(self.PASSWORD, json.dumps(result))
+
+
 class NotEnrolledTests(unittest.TestCase):
     """Un equipo sin enrolar: el servicio está en marcha y se conecta por el canal (spec 4, 2.7 de la integración)."""
 

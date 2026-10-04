@@ -33,8 +33,10 @@ from __future__ import annotations
 
 import base64
 import getpass
+import http.cookiejar
 import json
 import os
+import re
 import ssl
 import sys
 import urllib.error
@@ -90,10 +92,35 @@ MAX_IMAGES_BYTES = 24 * 1024 * 1024
 
 DEFAULT_FILENAME = "netbox-export.json"
 TOKEN_ENV_VAR = "CENYA_NETBOX_TOKEN"
+PASSWORD_ENV_VAR = "CENYA_NETBOX_PASSWORD"
+#: Answers that mean «this photo is only for a signed-in person»: a NetBox with
+#: LOGIN_REQUIRED hides /media/ (404, or a redirect to the login page) from an
+#: API token, which only opens /api/. Seen on a real NetBox on 04-10-2026: 49
+#: photo addresses and not one photo, with nothing said about it.
+NEEDS_LOGIN_CODES = frozenset({301, 302, 303, 307, 308, 401, 403, 404})
+LOGIN_PAGE_MAX_BYTES = 512 * 1024
 
 
 class ExportError(Exception):
     """Anything that stops the export, phrased for the person running it."""
+
+
+class PhotoStats:
+    """What happened to the elevation photos, for the summary at the end.
+
+    The bundle format does not change -- it is a contract with the server --
+    so this travels beside it rather than inside it.
+    """
+
+    def __init__(self) -> None:
+        self.wanted = 0
+        self.got = 0
+        #: Refused the way a NetBox refuses someone who has not signed in.
+        self.needs_login = 0
+        #: Timeouts, oversized files, a dead network: not a question of login.
+        self.other = 0
+        #: The size budget ran out and the rest were not asked for.
+        self.capped = 0
 
 
 class _NoRedirects(urllib.request.HTTPRedirectHandler):
@@ -126,8 +153,26 @@ def _timeout_message() -> str:
     }
 
 
+def authorization(token: str) -> str:
+    """The ``Authorization`` header for a token as a person pastes it.
+
+    NetBox's own «Copy» button copies the whole header value («Token abc…»),
+    so the word in front is dropped instead of being sent twice -- NetBox then
+    answers 401 and the person is told a good token is wrong. NetBox 4.5 also
+    issues v2 tokens, ``nbt_<key>.<secret>``, which go with ``Bearer``; the v1
+    ones keep ``Token``. Same rule as the server's ``core.netbox.authorization``.
+    """
+    value = token.strip().strip("\"'").strip()
+    for prefix in ("token ", "bearer "):
+        if value.lower().startswith(prefix):
+            value = value[len(prefix):].strip()
+            break
+    scheme = "Bearer" if value.startswith("nbt_") else "Token"
+    return f"{scheme} {value}"
+
+
 def _get_page(client: urllib.request.OpenerDirector, url: str, token: str) -> dict[str, Any]:
-    request = urllib.request.Request(url, headers={"Authorization": f"Token {token}", "Accept": "application/json"})
+    request = urllib.request.Request(url, headers={"Authorization": authorization(token), "Accept": "application/json"})
     try:
         with client.open(request, timeout=TIMEOUT_SECONDS) as response:
             return json.loads(response.read().decode())
@@ -192,18 +237,54 @@ def _fetch_collection(client: urllib.request.OpenerDirector, base_url: str, path
     return results
 
 
-def _fetch_image(client: urllib.request.OpenerDirector, url: str, token: str) -> bytes | None:
-    """A photo's bytes, or nothing. A missing photo never stops the export."""
-    request = urllib.request.Request(url, headers={"Authorization": f"Token {token}"})
+def _fetch_image(
+    client: urllib.request.OpenerDirector, url: str, token: str, stats: PhotoStats | None = None
+) -> bytes | None:
+    """A photo's bytes, or nothing. A missing photo never stops the export,
+    but it is counted, with whether it looks like a question of signing in."""
+    headers = {"Authorization": authorization(token)} if token else {}
+    request = urllib.request.Request(url, headers=headers)
     try:
         with client.open(request, timeout=TIMEOUT_SECONDS) as response:
             raw = response.read(MAX_IMAGE_BYTES + 1)
-    except (urllib.error.URLError, OSError, ValueError):
+    except urllib.error.HTTPError as exc:
+        if stats is not None:
+            if exc.code in NEEDS_LOGIN_CODES:
+                stats.needs_login += 1
+            else:
+                stats.other += 1
         return None
-    return raw if 0 < len(raw) <= MAX_IMAGE_BYTES else None
+    except (urllib.error.URLError, OSError, ValueError):
+        if stats is not None:
+            stats.other += 1
+        return None
+    if 0 < len(raw) <= MAX_IMAGE_BYTES and not _looks_like_a_page(raw):
+        return raw
+    if stats is not None:
+        # An HTML page where a photo was asked for is a login page served with
+        # a 200: the same refusal as a 404, said differently.
+        if _looks_like_a_page(raw):
+            stats.needs_login += 1
+        else:
+            stats.other += 1
+    return None
 
 
-def _attach_images(client: urllib.request.OpenerDirector, base_url: str, rows: list[dict], token: str) -> None:
+def _looks_like_a_page(raw: bytes) -> bool:
+    head = raw[:512].lstrip().lower()
+    return head.startswith((b"<!doctype html", b"<html"))
+
+
+def _attach_images(
+    client: urllib.request.OpenerDirector,
+    base_url: str,
+    rows: list[dict],
+    token: str,
+    stats: PhotoStats | None = None,
+) -> None:
+    """Download each model's photos into the bundle. ``client`` may be a
+    signed-in session (see ``login_session``); then the token is not sent."""
+    stats = stats if stats is not None else PhotoStats()
     host = urllib.parse.urlsplit(base_url).netloc
     spent = 0
     for row in rows:
@@ -211,16 +292,88 @@ def _attach_images(client: urllib.request.OpenerDirector, base_url: str, rows: l
             url = str(row.get(source_field) or "").strip()
             if not url or urllib.parse.urlsplit(url).netloc != host:
                 continue
+            stats.wanted += 1
             if spent >= MAX_IMAGES_BYTES:
-                return
-            raw = _fetch_image(client, url, token)
+                stats.capped += 1
+                continue
+            raw = _fetch_image(client, url, token, stats)
             if raw is None:
                 continue
             spent += len(raw)
+            stats.got += 1
             row[target_field] = base64.b64encode(raw).decode("ascii")
 
 
-def fetch_bundle(base_url: str, token: str, verify_tls: bool = True, progress: Any = None) -> dict[str, list[dict]]:
+def login_session(base_url: str, username: str, password: str, verify_tls: bool = True) -> urllib.request.OpenerDirector:
+    """A NetBox web session, for the photos and nothing else.
+
+    A NetBox that requires a login hides /media/ from API tokens, so the photos
+    are fetched the way a browser would: the login form, its CSRF token, the
+    password once. Nothing is kept: the password is not stored, and the session
+    cookie lives in this opener and dies with the process (``logout`` ends it
+    on the server too).
+    """
+    base_url = base_url.strip().rstrip("/")
+    context = ssl.create_default_context()
+    if not verify_tls:
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+    jar = http.cookiejar.CookieJar()
+    opener = urllib.request.build_opener(
+        urllib.request.ProxyHandler({}),
+        urllib.request.HTTPSHandler(context=context),
+        urllib.request.HTTPCookieProcessor(jar),
+        _NoRedirects(),
+    )
+    login_url = f"{base_url}/login/"
+    try:
+        with opener.open(urllib.request.Request(login_url), timeout=TIMEOUT_SECONDS) as response:
+            page = response.read(LOGIN_PAGE_MAX_BYTES).decode("utf-8", "replace")
+    except urllib.error.HTTPError as exc:
+        raise ExportError(
+            _t("No se pudo abrir la página de inicio de sesión de NetBox (%(code)s).") % {"code": exc.code}
+        ) from exc
+    except (urllib.error.URLError, OSError) as exc:
+        raise ExportError(_t("No se pudo hablar con NetBox: %(reason)s") % {"reason": exc}) from exc
+    match = re.search(r'name="csrfmiddlewaretoken"\s+value="([^"]+)"', page)
+    if not match:
+        raise ExportError(_t("No se encontró el formulario de inicio de sesión de NetBox."))
+    form = urllib.parse.urlencode(
+        {"csrfmiddlewaretoken": match.group(1), "username": username, "password": password, "next": "/"}
+    ).encode()
+    request = urllib.request.Request(
+        login_url,
+        data=form,
+        headers={"Referer": login_url, "Content-Type": "application/x-www-form-urlencoded"},
+    )
+    try:
+        with opener.open(request, timeout=TIMEOUT_SECONDS):
+            # A 200 is the form again: the credentials were not accepted.
+            pass
+    except urllib.error.HTTPError as exc:
+        location = exc.headers.get("Location", "") if exc.headers else ""
+        if exc.code in (302, 303) and "/login" not in location:
+            return opener
+        raise ExportError(_t("NetBox no aceptó ese usuario y contraseña.")) from exc
+    raise ExportError(_t("NetBox no aceptó ese usuario y contraseña."))
+
+
+def logout(base_url: str, session: urllib.request.OpenerDirector) -> None:
+    """End the photo session on the server. Best effort: it expires anyway."""
+    try:
+        session.open(urllib.request.Request(f"{base_url.strip().rstrip('/')}/logout/"), timeout=TIMEOUT_SECONDS)
+    except (urllib.error.URLError, OSError, ValueError):
+        pass
+
+
+def fetch_bundle(
+    base_url: str,
+    token: str,
+    verify_tls: bool = True,
+    progress: Any = None,
+    photo_session: urllib.request.OpenerDirector | None = None,
+    photo_stats: PhotoStats | None = None,
+) -> dict[str, list[dict]]:
     """The whole NetBox as one bundle. ``progress(path)`` is told each collection."""
     base_url = base_url.strip().rstrip("/")
     if not base_url.startswith(("http://", "https://")):
@@ -233,7 +386,10 @@ def fetch_bundle(base_url: str, token: str, verify_tls: bool = True, progress: A
         if progress is not None:
             progress(path)
         bundle[name] = _fetch_collection(client, base_url, path, token)
-    _attach_images(client, base_url, bundle["device_types"], token)
+    if photo_session is not None:
+        _attach_images(photo_session, base_url, bundle["device_types"], "", photo_stats)
+    else:
+        _attach_images(client, base_url, bundle["device_types"], token, photo_stats)
     return bundle
 
 
@@ -241,7 +397,7 @@ def fetch_bundle(base_url: str, token: str, verify_tls: bool = True, progress: A
 
 
 def _usage(prog: str) -> str:
-    return _t("Uso: %(prog)s URL [--output FICHERO] [--insecure]") % {"prog": prog}
+    return _t("Uso: %(prog)s URL [--output FICHERO] [--insecure] [--photos-user USUARIO]") % {"prog": prog}
 
 
 def run(args: list[str], prog: str = "cenya-agent export-netbox", environ: Any = None) -> int:
@@ -249,11 +405,17 @@ def run(args: list[str], prog: str = "cenya-agent export-netbox", environ: Any =
     env = os.environ if environ is None else environ
     verify_tls = True
     output = Path.home() / DEFAULT_FILENAME
+    photos_user = ""
     positional: list[str] = []
     rest = iter(args)
     for arg in rest:
         if arg == "--insecure":
             verify_tls = False
+        elif arg == "--photos-user":
+            photos_user = next(rest, "").strip()
+            if not photos_user:
+                print(_usage(prog), file=sys.stderr)
+                return 2
         elif arg in ("--output", "-o"):
             value = next(rest, "")
             if not value:
@@ -287,11 +449,41 @@ def run(args: list[str], prog: str = "cenya-agent export-netbox", environ: Any =
     def progress(path: str) -> None:
         print(_t("Leyendo %(path)s…") % {"path": path}, file=sys.stderr, flush=True)
 
+    # The photos of a NetBox that requires a login: a web session, opened with
+    # a password that is asked for, used once and never written anywhere.
+    session = None
+    if photos_user:
+        password = (env.get(PASSWORD_ENV_VAR) or "").strip()
+        if not password:
+            if sys.stdin is None or not sys.stdin.isatty():
+                print(
+                    _t("Falta la contraseña de NetBox: pásala en la variable %(var)s.") % {"var": PASSWORD_ENV_VAR},
+                    file=sys.stderr,
+                )
+                return 2
+            password = getpass.getpass(
+                _t("Contraseña de %(user)s en NetBox, solo para las fotos (no se muestra ni se guarda): ")
+                % {"user": photos_user}
+            )
+        try:
+            session = login_session(url, photos_user, password, verify_tls=verify_tls)
+        except ExportError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        finally:
+            password = ""
+
+    stats = PhotoStats()
     try:
-        bundle = fetch_bundle(url, token, verify_tls=verify_tls, progress=progress)
+        bundle = fetch_bundle(
+            url, token, verify_tls=verify_tls, progress=progress, photo_session=session, photo_stats=stats
+        )
     except ExportError as exc:
         print(str(exc), file=sys.stderr)
         return 1
+    finally:
+        if session is not None:
+            logout(url, session)
     try:
         output.write_text(json.dumps(bundle, ensure_ascii=False), encoding="utf-8")
     except OSError as exc:
@@ -309,8 +501,76 @@ def run(args: list[str], prog: str = "cenya-agent export-netbox", environ: Any =
         )
         % {"n": total, "path": output.resolve()}
     )
+    for line in photo_summary(stats, signed_in=session is not None):
+        print(line)
     print(_t("Súbelo en Cenya: Ajustes → Importar → «NetBox, desde un fichero»."))
     return 0
+
+
+def photo_summary(stats: PhotoStats, signed_in: bool, in_app: bool = False) -> list[str]:
+    """What happened to the photos, said always: a silent miss is what made a
+    whole catalogue arrive without a single picture. ``in_app`` words the way
+    out for the agent's window, which has a box to tick instead of a flag."""
+    if not stats.wanted:
+        return []
+    lines = [
+        _tn(
+            "Fotos de los modelos: %(got)d de %(wanted)d.",
+            "Fotos de los modelos: %(got)d de %(wanted)d.",
+            stats.wanted,
+        )
+        % {"got": stats.got, "wanted": stats.wanted}
+    ]
+    if stats.needs_login and not signed_in and in_app:
+        lines.append(
+            _tn(
+                "%(n)d foto no se pudo bajar: tu NetBox solo enseña las fotos con la sesión iniciada, y el token "
+                "solo abre la API. Repite marcando «Bajar también las fotos con un usuario de NetBox».",
+                "%(n)d fotos no se pudieron bajar: tu NetBox solo enseña las fotos con la sesión iniciada, y el "
+                "token solo abre la API. Repite marcando «Bajar también las fotos con un usuario de NetBox».",
+                stats.needs_login,
+            )
+            % {"n": stats.needs_login}
+        )
+    elif stats.needs_login and not signed_in:
+        lines.append(
+            _tn(
+                "%(n)d foto no se pudo bajar: tu NetBox solo enseña las fotos con la sesión iniciada, y el token "
+                "solo abre la API. Repite con --photos-user TU_USUARIO.",
+                "%(n)d fotos no se pudieron bajar: tu NetBox solo enseña las fotos con la sesión iniciada, y el "
+                "token solo abre la API. Repite con --photos-user TU_USUARIO.",
+                stats.needs_login,
+            )
+            % {"n": stats.needs_login}
+        )
+    elif stats.needs_login:
+        lines.append(
+            _tn(
+                "%(n)d foto no se pudo bajar ni con la sesión iniciada: ¿puede ese usuario ver los modelos?",
+                "%(n)d fotos no se pudieron bajar ni con la sesión iniciada: ¿puede ese usuario ver los modelos?",
+                stats.needs_login,
+            )
+            % {"n": stats.needs_login}
+        )
+    if stats.other:
+        lines.append(
+            _tn(
+                "%(n)d foto no se pudo bajar por la red, el tiempo o el tamaño.",
+                "%(n)d fotos no se pudieron bajar por la red, el tiempo o el tamaño.",
+                stats.other,
+            )
+            % {"n": stats.other}
+        )
+    if stats.capped:
+        lines.append(
+            _tn(
+                "%(n)d foto se quedó fuera para que el fichero no pase del tamaño que acepta Cenya.",
+                "%(n)d fotos se quedaron fuera para que el fichero no pase del tamaño que acepta Cenya.",
+                stats.capped,
+            )
+            % {"n": stats.capped}
+        )
+    return lines
 
 
 if __name__ == "__main__":

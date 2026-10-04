@@ -115,6 +115,14 @@ def ui_strings() -> dict[str, str]:
         "nb_insecure": _t("Aceptar un certificado no válido (NetBox con certificado propio o caducado)"),
         "nb_test": _t("Probar"),
         "nb_test_ok": _t("NetBox contesta y acepta el token."),
+        "nb_test_ok_photos": _t("NetBox contesta, acepta el token y deja entrar a ese usuario."),
+        "nb_photos": _t("Bajar también las fotos con un usuario de NetBox"),
+        "nb_photos_help": _t(
+            "Si tu NetBox pide iniciar sesión, el token no basta para las fotos de los modelos. "
+            "La contraseña se usa una vez para entrar, no se guarda, y la sesión se cierra al terminar."
+        ),
+        "nb_photos_user": _t("Usuario"),
+        "nb_photos_password": _t("Contraseña"),
         "nb_step_destination": _t("Al terminar"),
         "nb_send": _t("Enviar a Cenya y revisar"),
         "nb_send_hint": _t("Se sube al portal y se abre la revisión en el navegador. Nada se importa hasta que lo confirmes allí."),
@@ -129,7 +137,7 @@ def ui_strings() -> dict[str, str]:
         "nb_again": _t("Leer otro NetBox"),
         "nb_missing_url": _t("Escribe la dirección de NetBox."),
         "nb_missing_token": _t("Pega el token de NetBox."),
-        "nb_token_cleared": _t("El token se ha borrado de este formulario."),
+        "nb_token_cleared": _t("El token y la contraseña se han borrado de este formulario."),
         # Herramientas.
         "probe_title": _t("Analizar una IP"),
         "probe_body": _t("Prueba SNMP, SSH y WinRM contra una sola dirección y dice qué pasó con cada uno."),

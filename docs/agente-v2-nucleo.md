@@ -650,12 +650,12 @@ un puerto de red.**
 | `test_connection` | actuar | nombre, puerto, certificado y token, paso a paso |
 | `connect` | actuar | `args.connection` (cadena o código + portal): enrola o cambia de portal |
 | `disconnect` | actuar | se despide del servidor (1.7) y borra el enrolado |
-| `netbox.export` | actuar | `args.url`, `args.token`, `args.verify_tls`, `args.send`: lee un NetBox; con `send` lo sube (3.4) y contesta `review_url`, sin él lo guarda en `args.path` |
+| `netbox.export` | actuar | `args.url`, `args.token`, `args.verify_tls`, `args.send`: lee un NetBox; con `send` lo sube (3.4) y contesta `review_url`, sin él lo guarda en `args.path`. Con `args.photos_user` y `args.photos_password` inicia sesión en NetBox solo para las fotos de los modelos (un NetBox con inicio de sesión obligatorio no se las da al token) y la cierra al terminar; la respuesta lleva siempre `photos` (`wanted`, `got`, `lines`) |
 | `support_bundle` | actuar | escribe el paquete de soporte en `args.path`, sin secretos |
 | `check_update` | actuar | un checkin **ahora** y lo que trajo (detalle abajo) |
 | `reseal.decide` | actuar | `args.id`, `args.allow`: permite o rechaza un resellado que espera (4.6) |
 
-Un secreto que llega por este canal (el token de NetBox) se usa y se olvida:
+Un secreto que llega por este canal (el token de NetBox, la contraseña de las fotos) se usa y se olvida:
 no se guarda, no se registra, no vuelve en ninguna respuesta. Las operaciones
 largas (`netbox.export`, `probe`) contestan al terminar; su avance se lee con
 `status`.
