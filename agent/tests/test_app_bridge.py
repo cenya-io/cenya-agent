@@ -150,6 +150,13 @@ class BridgeTests(unittest.TestCase):
         self.assertTrue(first["rows"])
         self.assertEqual(api.log(first["cursor"])["view"]["rows"], [])
 
+    def test_log_refused_to_a_non_admin_says_why(self) -> None:
+        api, *_ = make(admin=False)
+        result = api.log("")
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["error"], channel.FORBIDDEN)
+        self.assertIn("administradores", result["message"])
+
     def test_exclusions_round_trip(self) -> None:
         api, agent, *_ = make()
         result = api.add_exclusion("10.9.9.0/24")
