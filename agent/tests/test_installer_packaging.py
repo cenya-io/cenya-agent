@@ -133,6 +133,15 @@ class PackagingAgreesWithTheCodeTests(unittest.TestCase):
         smoke = (PACKAGING / "smoke-test.ps1").read_text(encoding="utf-8-sig")
         self.assertIn('"CenyaAgent"', smoke)
 
+    def test_the_package_says_the_same_version_as_the_code(self) -> None:
+        """pip and the server read the version from pyproject.toml; the agent
+        and the release tag from agent/__init__.py. 0.11.1 first left with the
+        two apart, and only the server's tests noticed."""
+        from agent import __version__
+
+        pyproject = tomllib.loads((AGENT_DIR / "pyproject.toml").read_text(encoding="utf-8"))
+        self.assertEqual(pyproject["project"]["version"], __version__)
+
     def test_the_spec_builds_exactly_the_executables_the_package_declares(self) -> None:
         pyproject = tomllib.loads((AGENT_DIR / "pyproject.toml").read_text(encoding="utf-8"))
         declared = set(pyproject["project"]["scripts"]) | set(pyproject["project"]["gui-scripts"])
