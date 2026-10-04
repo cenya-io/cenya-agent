@@ -18,6 +18,7 @@ names, so ``lookupMib=False`` everywhere.
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import re
 from typing import Any, Callable
 
@@ -95,7 +96,19 @@ CDP_PORT_OID = "1.3.6.1.4.1.9.9.23.1.2.1.1.7"  # cdpCacheDevicePort
 
 # The forwarding table: which MAC hangs off which bridge port.
 FDB_PORT_OID = "1.3.6.1.2.1.17.7.1.2.2.1.2"  # dot1qTpFdbPort, index = vlan.mac octets
+# The old BRIDGE-MIB table, without VLANs: cheap or old switches only answer
+# this one, and Cisco answers it inside each VLAN context.
+FDB_LEGACY_PORT_OID = "1.3.6.1.2.1.17.4.3.1.2"  # dot1dTpFdbPort, index = mac octets
 BRIDGE_PORT_IFINDEX_OID = "1.3.6.1.2.1.17.1.4.1.2"  # dot1dBasePortIfIndex
+
+# The ARP table: which IP is which MAC. Read from every device that answers,
+# not only from the ones that look like routers -- a switch that routes
+# between VLANs has the table for all of them, one that does not has an
+# almost empty one, and reading it costs one walk.
+ARP_PHYSICAL_OID = "1.3.6.1.2.1.4.35.1.4"  # ipNetToPhysicalPhysAddress, index = ifIndex.type.len.addr
+ARP_MEDIA_OID = "1.3.6.1.2.1.4.22.1.2"  # ipNetToMediaPhysAddress, index = ifIndex.a.b.c.d
+# A core switch can know thousands; past this the rest is noise for one sweep.
+MAX_ARP_ENTRIES = 4096
 # Cisco hides each VLAN's FDB behind community@vlan; the VLAN list lives here.
 CISCO_ENTERPRISE_PREFIX = "1.3.6.1.4.1.9"
 CISCO_VTP_VLAN_OID = "1.3.6.1.4.1.9.9.46.1.3.1.1.2"  # vtpVlanState, index = VLAN id
@@ -212,6 +225,48 @@ def fdb_mac_from_suffix(suffix: str) -> str:
         return ""
 
 
+def fdb_vlan_from_suffix(suffix: str) -> str:
+    """The VLAN inside a dot1qTpFdbPort index (its first part, the filtering
+    database id -- the VLAN on every switch that does not share databases)."""
+    parts = suffix.split(".")
+    return parts[0] if len(parts) == 7 and parts[0].isdigit() else ""
+
+
+def legacy_fdb_mac_from_suffix(suffix: str) -> str:
+    """The MAC inside a dot1dTpFdbPort index: ``m1.m2.m3.m4.m5.m6``."""
+    parts = suffix.split(".")
+    if len(parts) != 6:
+        return ""
+    try:
+        return ":".join(f"{int(part):02x}" for part in parts)
+    except ValueError:
+        return ""
+
+
+def arp_ip_from_media_suffix(suffix: str) -> str:
+    """The IPv4 inside an ipNetToMediaTable index: ``ifIndex.a.b.c.d``."""
+    parts = suffix.split(".")
+    return _ip_from_octets(parts[1:]) if len(parts) == 5 else ""
+
+
+def arp_ip_from_physical_suffix(suffix: str) -> str:
+    """The IP inside an ipNetToPhysicalTable index:
+    ``ifIndex.addressType.length.octets`` -- type 1 is IPv4, 2 is IPv6."""
+    parts = suffix.split(".")
+    if len(parts) < 3 or parts[1] not in ("1", "2") or not parts[2].isdigit():
+        return ""
+    octets = parts[3:]
+    return _ip_from_octets(octets) if len(octets) == int(parts[2]) else ""
+
+
+def _ip_from_octets(parts: list[str]) -> str:
+    try:
+        raw = bytes(int(part) for part in parts)
+    except ValueError:
+        return ""
+    return str(ipaddress.ip_address(raw)) if len(raw) in (4, 16) else ""
+
+
 def lldp_local_port_from_suffix(suffix: str) -> str:
     """The local port number inside an lldpRemEntry index:
     ``timeMark.localPortNum.remIndex``."""
@@ -270,39 +325,78 @@ async def _query_fdb(engine, host: str, auth: Auth, object_id: str) -> list[dict
     """MAC -> bridge port. Cisco slices the table per VLAN: behind
     ``community@vlan`` in v2c, behind the ``vlan-N`` context in v3; everyone
     else answers on the plain auth."""
-    # (auth to use, context name) pairs; the plain read always runs first.
-    slices: list[tuple[Auth, str]] = [(auth, "")]
+    # (auth to use, context name, VLAN of the slice) -- the plain read always
+    # runs first, and its VLAN comes from each entry's own index.
+    slices: list[tuple[Auth, str, str]] = [(auth, "", "")]
     if object_id.startswith(CISCO_ENTERPRISE_PREFIX):
         try:
             vlans = await _walk(engine, host, auth, CISCO_VTP_VLAN_OID)
             if isinstance(auth, str):
                 slices += [
-                    (f"{auth}@{vlan}", "") for vlan in list(vlans)[:MAX_CISCO_VLANS]
+                    (f"{auth}@{vlan}", "", str(vlan)) for vlan in list(vlans)[:MAX_CISCO_VLANS]
                 ]
             else:
                 slices += [
-                    (auth, f"vlan-{vlan}") for vlan in list(vlans)[:MAX_CISCO_VLANS]
+                    (auth, f"vlan-{vlan}", str(vlan)) for vlan in list(vlans)[:MAX_CISCO_VLANS]
                 ]
         except Exception:  # noqa: BLE001 - without the VLAN list, the plain read still runs
             pass
-    fdb: dict[str, str] = {}
-    for candidate, context_name in slices:
+    # Keyed by (VLAN, MAC), not by MAC alone: the same MAC in two VLANs is two
+    # facts, and keying by MAC made the last VLAN read overwrite the first.
+    fdb: dict[tuple[str, str], str] = {}
+    for candidate, context_name, slice_vlan in slices:
         try:
             column = await _walk(engine, host, candidate, FDB_PORT_OID, context_name)
         except Exception:  # noqa: BLE001 - that VLAN slice may just not exist
-            continue
+            column = {}
         for suffix, bridge_port in column.items():
             mac = fdb_mac_from_suffix(suffix)
             if mac:
-                fdb[mac] = _text(bridge_port)
+                fdb[(fdb_vlan_from_suffix(suffix) or slice_vlan, mac)] = _text(bridge_port)
+        if column:
+            continue
+        # No Q-BRIDGE answer: the old table, which has no VLAN of its own.
+        try:
+            legacy = await _walk(engine, host, candidate, FDB_LEGACY_PORT_OID, context_name)
+        except Exception:  # noqa: BLE001
+            continue
+        for suffix, bridge_port in legacy.items():
+            mac = legacy_fdb_mac_from_suffix(suffix)
+            if mac:
+                fdb.setdefault((slice_vlan, mac), _text(bridge_port))
     try:
         bridge_to_ifindex = await _walk(engine, host, auth, BRIDGE_PORT_IFINDEX_OID)
     except Exception:  # noqa: BLE001
         bridge_to_ifindex = {}
     return [
-        {"mac": mac, "ifindex": _text(bridge_to_ifindex.get(bridge_port, ""))}
-        for mac, bridge_port in fdb.items()
+        {"mac": mac, "ifindex": _text(bridge_to_ifindex.get(bridge_port, "")), "vlan": vlan}
+        for (vlan, mac), bridge_port in fdb.items()
     ]
+
+
+async def _query_arp(engine, host: str, auth: Auth) -> list[dict[str, str]]:
+    """The device's ARP table: ``[{ip, mac}]``. The modern table first (it
+    also has IPv6), the old one when the modern one is empty."""
+    entries: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for oid, read_ip in (
+        (ARP_PHYSICAL_OID, arp_ip_from_physical_suffix),
+        (ARP_MEDIA_OID, arp_ip_from_media_suffix),
+    ):
+        try:
+            column = await _walk(engine, host, auth, oid)
+        except Exception:  # noqa: BLE001 - the table may not exist
+            continue
+        for suffix, value in column.items():
+            ip, mac = read_ip(suffix), _mac(value)
+            if ip and mac and (ip, mac) not in seen:
+                seen.add((ip, mac))
+                entries.append({"ip": ip, "mac": mac})
+                if len(entries) >= MAX_ARP_ENTRIES:
+                    return entries
+        if entries:
+            return entries
+    return entries
 
 
 async def _query_host(host: str, auths: list[Auth]) -> dict[str, Any] | None:
@@ -379,6 +473,10 @@ async def _inventory(engine, host: str, auth: Auth, system: dict[str, str]) -> d
         fdb = await _query_fdb(engine, host, auth, system.get("object_id", ""))
     except Exception:  # noqa: BLE001
         fdb = []
+    try:
+        arp = await _query_arp(engine, host, auth)
+    except Exception:  # noqa: BLE001
+        arp = []
     # El SAI, si lo es. Oportunista como los vecinos: un switch no contesta
     # a la UPS-MIB y eso no es un fallo, es que no es un SAI.
     try:
@@ -394,6 +492,7 @@ async def _inventory(engine, host: str, auth: Auth, system: dict[str, str]) -> d
         "addresses": {ip: _text(ifindex) for ip, ifindex in ip_to_ifindex.items()},
         "neighbors": neighbors,
         "fdb": fdb,
+        "arp": arp,
         "ups": _ups_reading(ups),
     }
 

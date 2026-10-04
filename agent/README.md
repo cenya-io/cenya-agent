@@ -457,7 +457,12 @@ barrido deja los hosts vivos y los demás solo llaman a esas puertas.
   lee la caché ARP para las MAC y resuelve nombres por DNS inverso.
 - **snmp** (L2): a cada host vivo le pregunta quién es (sysDescr/sysName), sus
   interfaces reales con MAC y estado, y sus direcciones IP. También sus vecinos
-  LLDP/CDP, que son **cables que se dibujan solos**. Habla v2c y v3: los
+  LLDP/CDP, que son **cables que se dibujan solos**. De los switches lee además
+  la tabla MAC (qué equipo entra por cada boca, con su VLAN; la de BRIDGE-MIB
+  si la de VLAN no contesta) y de todos los equipos su tabla ARP (qué IP tiene
+  cada MAC). Con eso el servidor sabe qué hay detrás de cada boca aunque no haya
+  LLDP y aunque el equipo esté en otra VLAN; de cada boca viajan como mucho 64
+  MAC y el recuento. Habla v2c y v3: los
   usuarios SNMPv3 (credencial `snmpv3` en Ajustes, con sus protocolos de
   autenticación y cifrado) se prueban antes que las comunidades, porque un
   equipo configurado con v3 suele tener v2c apagado.
