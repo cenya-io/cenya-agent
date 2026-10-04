@@ -15,6 +15,14 @@ from agent.collectors import register, tasking
 from agent.collectors.base import Finding
 from agent.notes import collector_note
 
+#: Cuántas MAC de cada boca viajan en ``fdb_ports`` como mucho; el recuento
+#: real va aparte. Acordado con el servidor (`core/port_placement.py`).
+MAX_MACS_PER_PORT = 64
+
+#: Una MAC con tantas IP o más en las tablas ARP es un equipo que enruta (proxy
+#: ARP, VPN): se conoce, pero sin IP. El mismo umbral que el servidor.
+ROUTER_MIN_IPS = 5
+
 
 def _has_sealed_communities(ctx: dict) -> bool:
     """Si el servidor manda comunidades como credenciales `snmp` (spec 3.2), legibles o no."""
@@ -211,6 +219,15 @@ def _inventory_findings(hosts: list[dict], answers: dict[str, dict]) -> list[Fin
         device_macs[ip] = device_mac
         if device_mac:
             known.setdefault(device_mac, {"ip": ip, "hostname": data["name"]})
+    # And every MAC in the ARP table of any device that answered: that is how
+    # a camera in another VLAN, which the sweep of this subnet never sees,
+    # gets its IP and its link. What the sweep saw itself wins (it is the
+    # freshest), and a MAC answering for many IPs is a router doing proxy ARP:
+    # it is still known, but with none of them.
+    for mac, ips in _arp_ips(answers).items():
+        if mac not in known:
+            only = sorted(ips)[0] if len(ips) < ROUTER_MIN_IPS else ""
+            known[mac] = {"ip": only, "hostname": ""}
 
     for ip, data in answers.items():
         interfaces = [iface for iface in data["interfaces"] if iface["name"]]
@@ -245,11 +262,42 @@ def _inventory_findings(hosts: list[dict], answers: dict[str, dict]) -> list[Fin
                     # hallazgo y no en uno aparte: un SAI es un equipo más,
                     # y la huella tiene que seguir siendo una sola fila.
                     **({"ups": data["ups"]} if data.get("ups") else {}),
+                    # Sus tablas, para que el servidor deduzca quién está
+                    # detrás de qué boca (formato 2 del hallazgo; las dos
+                    # opcionales, y solo si traen algo).
+                    **({"arp": data["arp"]} if data.get("arp") else {}),
+                    **({"fdb_ports": ports} if (ports := _port_tables(data)) else {}),
                 },
             )
         )
         findings.extend(_links_for(ip, data, device_mac, known))
     return findings
+
+
+def _arp_ips(answers: dict[str, dict]) -> dict[str, set[str]]:
+    """MAC -> every IP the ARP tables of all the answering devices give it."""
+    found: dict[str, set[str]] = {}
+    for data in answers.values():
+        for entry in data.get("arp") or []:
+            if entry.get("mac") and entry.get("ip"):
+                found.setdefault(entry["mac"], set()).add(entry["ip"])
+    return found
+
+
+def _port_tables(data: dict) -> list[dict]:
+    """The forwarding table grouped by port: how many MACs each one sees and,
+    at most `MAX_MACS_PER_PORT`, which. The server counts with it which port
+    is closest to each device; the links only carry the known ones."""
+    names = {iface["index"]: iface["name"] for iface in data["interfaces"]}
+    ports: dict[str, list[str]] = {}
+    for entry in data.get("fdb") or []:
+        port = names.get(entry["ifindex"], "")
+        if port and entry["mac"] not in ports.setdefault(port, []):
+            ports[port].append(entry["mac"])
+    return [
+        {"port": port, "count": len(macs), "macs": macs[:MAX_MACS_PER_PORT]}
+        for port, macs in ports.items()
+    ]
 
 
 def _links_for(
@@ -273,6 +321,7 @@ def _links_for(
         local = {**local_base, "port": neighbor["local_port"]}
         links.append(_link(neighbor["protocol"], local, remote))
 
+    proposed: set[tuple[str, str]] = set()
     for entry in data.get("fdb") or []:
         mac = entry["mac"]
         if mac == device_mac or mac not in known:
@@ -281,6 +330,10 @@ def _links_for(
         if not port:
             # "Somewhere on this switch" cannot be cabled to a port; skip it.
             continue
+        if (port, mac) in proposed:
+            # The same MAC on the same port in a second VLAN is the same cable.
+            continue
+        proposed.add((port, mac))
         host = known[mac]
         local = {**local_base, "port": port}
         remote = {
@@ -289,13 +342,19 @@ def _links_for(
             "device_ip": host["ip"],
             "port": "",
         }
-        links.append(_link("fdb", local, remote))
+        # The VLAN goes in the payload and never in the identity: the link's
+        # fingerprint must not change because this version reads VLANs.
+        vlan = str(entry.get("vlan") or "")
+        links.append(_link("fdb", local, remote, vlan=int(vlan) if vlan.isdigit() else None))
     return links
 
 
-def _link(protocol: str, local: dict, remote: dict) -> Finding:
+def _link(protocol: str, local: dict, remote: dict, *, vlan: int | None = None) -> Finding:
+    payload: dict = {"protocol": protocol, "local": local, "remote": remote}
+    if vlan is not None:
+        payload["vlan"] = vlan
     return Finding(
         kind="link",
         identity={"local": local, "remote": remote},
-        payload={"protocol": protocol, "local": local, "remote": remote},
+        payload=payload,
     )
