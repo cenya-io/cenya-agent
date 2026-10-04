@@ -196,4 +196,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           version="${GITHUB_REF_NAME#agent-v}"
-          gh release create "$GITHUB_REF_NAME" release/* --title "Cenya Agent $version" --generate-notes
+          # Notes without people: GitHub's generated notes add "by @user" to each
+          # line and a "New Contributors" section, and from those mentions it
+          # builds the "Contributors" block of the Release page.
+          gh api "repos/${GITHUB_REPOSITORY}/releases/generate-notes" -f tag_name="$GITHUB_REF_NAME" --jq .body             | sed -E -e '/^## New Contributors/,/^$/d' -e 's/ by @[^ ]+ in https:[^ ]+$//' -e 's/@[A-Za-z0-9-]+//g' > notes.md
+          gh release create "$GITHUB_REF_NAME" release/* --title "Cenya Agent $version" --notes-file notes.md
