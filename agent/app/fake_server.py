@@ -608,6 +608,7 @@ class FakeAgent:
 
     def op_netbox_export(self, args: dict) -> dict:
         token = args.pop("token", None)  # se usa y se olvida
+        signed_in = bool(args.pop("photos_password", None)) and bool(args.get("photos_user"))
         url = args.get("url")
         if not isinstance(url, str) or not url.strip():
             raise OpError(INVALID, "Falta la URL de NetBox.")
@@ -636,14 +637,22 @@ class FakeAgent:
             summary[path.split("/", 1)[1].replace("-", "_")] = count
         with self._lock:
             self.local["netbox_export"].update(state="done", done=total, finished_at=_iso(self._clock()))
+        # Las fotos, como un NetBox que solo las enseña con la sesión iniciada.
+        from agent import netbox_export
+
+        stats = netbox_export.PhotoStats()
+        stats.wanted = 12
+        stats.got = 12 if signed_in else 0
+        stats.needs_login = 0 if signed_in else 12
+        photos = {"wanted": stats.wanted, "got": stats.got, "lines": netbox_export.photo_summary(stats, signed_in, in_app=True)}
         if send:
             import_id = str(uuid.uuid4())
             from agent.localops import review_url
 
-            return {"import": import_id, "summary": summary, "review_url": review_url(self.portal, {"import": import_id})}
+            return {"import": import_id, "summary": summary, "photos": photos, "review_url": review_url(self.portal, {"import": import_id})}
         target = Path(str(args.get("path") or self.workdir / "netbox-export.json"))
         target.write_text(json.dumps({"fake": True, "summary": summary}), encoding="utf-8")
-        return {"path": str(target), "summary": summary, "objects": sum(summary.values())}
+        return {"path": str(target), "summary": summary, "photos": photos, "objects": sum(summary.values())}
 
     def op_support_bundle(self, args: dict) -> dict:
         target = Path(str(args.get("path") or self.workdir / "cenya-soporte.zip"))

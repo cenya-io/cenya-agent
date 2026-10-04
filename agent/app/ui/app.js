@@ -25,6 +25,8 @@ const S = {
   nbUrl: "",
   nbMode: "send",
   nbInsecure: false,
+  nbPhotos: false,
+  nbPhotosUser: "",
   mountId: 0,
 };
 
@@ -851,12 +853,26 @@ function showForm(host, id) {
   const insecure = el("input", { type: "checkbox" });
   insecure.checked = S.nbInsecure;
   insecure.addEventListener("change", () => (S.nbInsecure = insecure.checked));
+  // Fotos de los modelos: un NetBox con inicio de sesión no se las da al token.
+  const photos = el("input", { type: "checkbox", "data-fkey": "nb-photos" });
+  photos.checked = S.nbPhotos;
+  const photosUser = input({ value: S.nbPhotosUser, fkey: "nb-photos-user" });
+  photosUser.addEventListener("input", () => (S.nbPhotosUser = photosUser.value));
+  const photosPassword = input({ type: "password", fkey: "nb-photos-password" });
+  const photoFields = el("div", { class: "form-grid" }, field(T.nb_photos_user, photosUser), field(T.nb_photos_password, photosPassword));
+  photoFields.hidden = !photos.checked;
+  photos.addEventListener("change", () => {
+    S.nbPhotos = photos.checked;
+    photoFields.hidden = !photos.checked;
+    if (!photos.checked) photosPassword.value = "";
+  });
+  const photoArgs = () => (photos.checked ? [photosUser.value, photosPassword.value] : ["", ""]);
   const testResult = el("div", { class: "grow" });
   const test = btn(T.nb_test, {
     icon: "plug",
     onClick: async () => {
       testResult.replaceChildren();
-      const r = await call("netbox_test", url.value, token.value, insecure.checked);
+      const r = await call("netbox_test", url.value, token.value, insecure.checked, ...photoArgs());
       testResult.replaceChildren(resultBox(r.ok ? "success" : "danger", r.ok ? r.message : r.message || T.error_title));
     },
   });
@@ -868,6 +884,8 @@ function showForm(host, id) {
       { class: "stack" },
       el("div", { class: "form-grid" }, field(T.nb_url, url), field(T.nb_token, token, T.nb_token_help)),
       el("label", { class: "check" }, insecure, el("span", { text: T.nb_insecure })),
+      el("div", { class: "stack" }, el("label", { class: "check" }, photos, el("span", { text: T.nb_photos })), el("div", { class: "field-hint", text: T.nb_photos_help })),
+      photoFields,
       el("div", { class: "form-actions" }, test, testResult)
     ),
   });
@@ -899,13 +917,14 @@ function showForm(host, id) {
         if (!chosen.ok || !chosen.path) return;
         path = chosen.path;
       }
-      const r = await call("netbox_start", url.value, token.value, insecure.checked, S.nbMode, path);
+      const r = await call("netbox_start", url.value, token.value, insecure.checked, S.nbMode, path, ...photoArgs());
       if (!r.ok) {
         if (r.error === "forbidden") refreshShell();
         error.replaceChildren(resultBox("danger", r.message));
         return;
       }
-      token.value = ""; // usado: fuera del formulario
+      token.value = ""; // usados: fuera del formulario
+      photosPassword.value = "";
       showProgress(host, id, { state: "running", mode: S.nbMode, progress: { rows: [], percent: null } });
     },
   });
@@ -952,6 +971,7 @@ function showProgress(host, id, first) {
           "div",
           { class: "panel-body stack" },
           resultBox("success", sm.message),
+          sm.photos && sm.photos.length ? resultBox(sm.photos_missing ? "warning" : "info", sm.photos.join(" "), "image") : null,
           el("ul", { class: "checklist" }, sm.rows.map((row) => el("li", {}, ico("check", "tone-success"), el("span", { class: "mono", text: row.name }), el("span", { class: "count", text: num(row.count) })))),
           el("div", { class: "form-actions" }, ending, btn(T.nb_again, { variant: "ghost", icon: "rotate-cw", onClick: reset }))
         ),

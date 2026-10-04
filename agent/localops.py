@@ -973,28 +973,37 @@ class LocalService:
         # El token sale de `args` ahora mismo: a partir de aquí solo vive en
         # esta variable, que no se registra, no se devuelve y muere al salir.
         token = args.pop("token", None)
+        # La contraseña de las fotos, igual que el token: solo en esta variable.
+        password = args.pop("photos_password", None)
         try:
-            return self._netbox_export(token, args)
+            return self._netbox_export(token, password, args)
         except OpError as exc:
-            # Última red: ningún mensaje de error sale con el token dentro,
-            # lo traiga quien lo traiga (un servidor que lo repite, una URL).
-            if isinstance(token, str) and token.strip():
-                exc.message = redact(exc.message, [token, token.strip()])
+            # Última red: ningún mensaje de error sale con el token ni la
+            # contraseña dentro, los traiga quien los traiga.
+            secrets = [value for value in (token, password) if isinstance(value, str) and value.strip()]
+            if secrets:
+                exc.message = redact(exc.message, secrets + [value.strip() for value in secrets])
             raise
         finally:
-            token = None
+            token = password = None
 
-    def _netbox_export(self, token: Any, args: dict[str, Any]) -> dict[str, Any]:
+    def _netbox_export(self, token: Any, password: Any, args: dict[str, Any]) -> dict[str, Any]:
         url = args.get("url")
         verify_tls = args.get("verify_tls", True)
         send = args.get("send", False)
         target = args.get("path")
+        photos_user = args.get("photos_user") or ""
         if not isinstance(url, str) or not url.strip():
             raise OpError(INVALID, _t("Falta la URL de NetBox."))
         if not isinstance(token, str) or not token.strip() or len(token) > 1000:
             raise OpError(INVALID, _t("Falta el token de NetBox."))
         if not isinstance(verify_tls, bool) or not isinstance(send, bool):
             raise OpError(INVALID, _t("«verify_tls» y «send» tienen que ser verdadero o falso."))
+        if not isinstance(photos_user, str) or len(photos_user) > 150:
+            raise OpError(INVALID, _t("Ese usuario de NetBox no es válido."))
+        photos_user = photos_user.strip()
+        if photos_user and (not isinstance(password, str) or not password or len(password) > 1000):
+            raise OpError(INVALID, _t("Falta la contraseña de NetBox para las fotos."))
         upload = None
         output: Path | None = None
         if send:
@@ -1021,8 +1030,17 @@ class LocalService:
                 self._job("netbox_export", step=path, done=done[0], total=total, finished=list(finished))
                 done[0] += 1
 
+            session = None
+            stats = netbox_export.PhotoStats()
             try:
-                bundle = netbox_export.fetch_bundle(url.strip(), token.strip(), verify_tls=verify_tls, progress=progress)
+                if photos_user:
+                    # Una sesión web solo para las fotos: NetBox con inicio de
+                    # sesión obligatorio no se las enseña a un token.
+                    session = netbox_export.login_session(url.strip(), photos_user, password, verify_tls=verify_tls)
+                password = None
+                bundle = netbox_export.fetch_bundle(
+                    url.strip(), token.strip(), verify_tls=verify_tls, progress=progress, photo_session=session, photo_stats=stats
+                )
             except netbox_export.ExportError as exc:
                 self._job("netbox_export", state="failed", finished_at=self._clock().isoformat())
                 raise OpError(FAILED, str(exc)) from None
@@ -1030,8 +1048,15 @@ class LocalService:
                 self._job("netbox_export", state="failed", finished_at=self._clock().isoformat())
                 raise OpError(FAILED, _t("La exportación falló (%(type)s).") % {"type": type(exc).__name__}) from None
             finally:
-                token = None  # noqa: F841 - olvidado en cuanto deja de hacer falta
+                token = password = None  # noqa: F841 - olvidados en cuanto dejan de hacer falta
+                if session is not None:
+                    netbox_export.logout(url.strip(), session)
             summary = {name: len(rows) for name, rows in bundle.items()}
+            photos = {
+                "wanted": stats.wanted,
+                "got": stats.got,
+                "lines": netbox_export.photo_summary(stats, signed_in=session is not None, in_app=True),
+            }
             if upload is not None:
                 try:
                     answer = upload(bundle, order_id=None)
@@ -1044,6 +1069,7 @@ class LocalService:
                 return {
                     "import": answer.get("import"),
                     "summary": summary,
+                    "photos": photos,
                     "review_url": review_url(config.url if config is not None else "", answer),
                 }
             assert output is not None
@@ -1053,7 +1079,7 @@ class LocalService:
                 self._job("netbox_export", state="failed", finished_at=self._clock().isoformat())
                 raise OpError(FAILED, _t("No se pudo escribir %(path)s: %(error)s") % {"path": output, "error": exc.strerror or exc}) from None
             self._job("netbox_export", state="done", done=total, finished_at=self._clock().isoformat())
-            return {"path": str(output), "summary": summary, "objects": sum(summary.values())}
+            return {"path": str(output), "summary": summary, "photos": photos, "objects": sum(summary.values())}
         finally:
             self._export_lock.release()
 
@@ -1072,8 +1098,9 @@ class LocalService:
         for name in ("AGENT_TOKEN", "CONNECTION"):
             if value := setting(env, name):
                 found.append(value)
-        if value := (env.get(netbox_export.TOKEN_ENV_VAR) or "").strip():
-            found.append(value)
+        for name in (netbox_export.TOKEN_ENV_VAR, netbox_export.PASSWORD_ENV_VAR):
+            if value := (env.get(name) or "").strip():
+                found.append(value)
         # La clave privada del agente, línea a línea: si alguna vez acabó en un
         # registro sin sus marcas PEM, tampoco sale.
         try:

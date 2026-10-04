@@ -5,7 +5,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: cenya-agent 0.9.1\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-04 09:30+0000\n"
+"POT-Creation-Date: 2026-10-04 09:51+0000\n"
 "PO-Revision-Date: 2026-09-14 17:00+0200\n"
 "Last-Translator: NetInventory\n"
 "Language-Team: English\n"
@@ -51,7 +51,8 @@ msgstr "[agent] Sweep sent: %(created)s, %(refreshed)s"
 msgid "Error inesperado: %(error)s"
 msgstr "Unexpected error: %(error)s"
 
-#: agent/__main__.py:287 agent/__main__.py:412 agent/__main__.py:419 agent/control.py:712 agent/runtime.py:519
+#: agent/__main__.py:287 agent/__main__.py:412 agent/__main__.py:419
+#: agent/control.py:712 agent/runtime.py:519
 #, python-format
 msgid "[agente] %(error)s"
 msgstr "[agent] %(error)s"
@@ -840,57 +841,65 @@ msgstr "The server has been told: this agent is now deregistered."
 msgid "Este agente no estaba conectado a ningún servidor."
 msgstr "This agent was not connected to any server."
 
-#: agent/localops.py:993
+#: agent/localops.py:997
 msgid "Falta la URL de NetBox."
 msgstr "The NetBox URL is missing."
 
-#: agent/localops.py:995
+#: agent/localops.py:999
 msgid "Falta el token de NetBox."
 msgstr "The NetBox token is missing."
 
-#: agent/localops.py:997
+#: agent/localops.py:1001
 msgid "«verify_tls» y «send» tienen que ser verdadero o falso."
 msgstr "“verify_tls” and “send” must be true or false."
 
+#: agent/localops.py:1003
+msgid "Ese usuario de NetBox no es válido."
+msgstr "That NetBox username is not valid."
+
 #: agent/localops.py:1006
+msgid "Falta la contraseña de NetBox para las fotos."
+msgstr "The NetBox password for the photos is missing."
+
+#: agent/localops.py:1015
 msgid "Ya hay una exportación de NetBox en marcha."
 msgstr "A NetBox export is already running."
 
-#: agent/localops.py:1031
+#: agent/localops.py:1049
 #, python-format
 msgid "La exportación falló (%(type)s)."
 msgstr "The export failed (%(type)s)."
 
-#: agent/localops.py:1054 agent/localops.py:1125 agent/netbox_export.py:473
+#: agent/localops.py:1080 agent/localops.py:1152 agent/netbox_export.py:491
 #, python-format
 msgid "No se pudo escribir %(path)s: %(error)s"
 msgstr "Couldn't write %(path)s: %(error)s"
 
-#: agent/localops.py:1133
+#: agent/localops.py:1160
 msgid "Hacen falta «id» (el de la petición) y «allow» (true o false)."
 msgstr "“id” (the request's) and “allow” (true or false) are required."
 
-#: agent/localops.py:1136
+#: agent/localops.py:1163
 msgid "Esa petición ya no está pendiente (se contestó o caducó)."
 msgstr "That request is no longer pending (it was answered or it expired)."
 
-#: agent/localops.py:1138
+#: agent/localops.py:1165
 msgid "[agente] Resellado permitido en este equipo para el agente que lo pidió."
 msgstr "[agent] Resealing allowed on this machine for the agent that asked for it."
 
-#: agent/localops.py:1140
+#: agent/localops.py:1167
 msgid "[agente] Resellado rechazado en este equipo."
 msgstr "[agent] Resealing refused on this machine."
 
-#: agent/localops.py:1220
+#: agent/localops.py:1247
 msgid "Falta «path»: la ruta completa donde dejar el fichero."
 msgstr "“path” is missing: the full path where the file should go."
 
-#: agent/localops.py:1223
+#: agent/localops.py:1250
 msgid "«path» tiene que ser una ruta completa (absoluta)."
 msgstr "“path” must be a full (absolute) path."
 
-#: agent/localops.py:1227
+#: agent/localops.py:1254
 #, python-format
 msgid "No existe la carpeta %(path)s."
 msgstr "The folder %(path)s does not exist."
@@ -924,137 +933,144 @@ msgstr "[local channel] Without pywin32 there is no local channel: the applicati
 msgid "NetBox no respondió en %(seconds)s segundos. ¿Es esa la URL y llega la red hasta allí?"
 msgstr "NetBox didn't respond within %(seconds)s seconds. Is that the right URL, and does the network reach it?"
 
-#: agent/netbox_export.py:164
+#: agent/netbox_export.py:182
 msgid "NetBox rechazó el token. Crea uno de solo lectura en tu NetBox (Admin → API tokens) y prueba de nuevo."
 msgstr "NetBox rejected the token. Create a read-only one in your NetBox (Admin → API tokens) and try again."
 
-#: agent/netbox_export.py:169
+#: agent/netbox_export.py:187
 msgid "NetBox respondió con una redirección (¿falta o sobra «https» o una barra al final de la URL?). No se siguen redirecciones con un token."
 msgstr "NetBox answered with a redirect (is «https» or a trailing slash missing from, or extra in, the URL?). Redirects are not followed with a token."
 
-#: agent/netbox_export.py:173
+#: agent/netbox_export.py:191
 #, python-format
 msgid "NetBox respondió %(code)s."
 msgstr "NetBox answered %(code)s."
 
-#: agent/netbox_export.py:178
+#: agent/netbox_export.py:196
 #, python-format
 msgid "El certificado de ese NetBox no es válido (%(reason)s). Si es un NetBox de tu red con certificado autofirmado o caducado, añade --insecure y vuelve a intentarlo."
 msgstr "That NetBox's certificate isn't valid (%(reason)s). If it's a NetBox on your network with a self-signed or expired certificate, add --insecure and try again."
 
-#: agent/netbox_export.py:185 agent/netbox_export.py:319
+#: agent/netbox_export.py:203 agent/netbox_export.py:337
 #, python-format
 msgid "No se pudo hablar con NetBox: %(reason)s"
 msgstr "Couldn't talk to NetBox: %(reason)s"
 
-#: agent/netbox_export.py:189
+#: agent/netbox_export.py:207
 msgid "La respuesta de NetBox no es JSON. ¿Es esa la URL de NetBox?"
 msgstr "NetBox's response isn't JSON. Is that the NetBox URL?"
 
-#: agent/netbox_export.py:208
+#: agent/netbox_export.py:226
 #, python-format
 msgid "La respuesta de %(path)s no tiene la forma esperada."
 msgstr "The response from %(path)s doesn't have the expected shape."
 
-#: agent/netbox_export.py:213
+#: agent/netbox_export.py:231
 #, python-format
 msgid "%(path)s tiene más de %(max)s objetos. Esta importación está pensada para inventarios de pyme; hablemos antes de traer eso."
 msgstr "%(path)s has more than %(max)s objects. This import is meant for small-business inventories; let's talk before bringing that in."
 
-#: agent/netbox_export.py:316
+#: agent/netbox_export.py:334
 #, python-format
 msgid "No se pudo abrir la página de inicio de sesión de NetBox (%(code)s)."
 msgstr "Could not open the NetBox sign-in page (%(code)s)."
 
-#: agent/netbox_export.py:322
+#: agent/netbox_export.py:340
 msgid "No se encontró el formulario de inicio de sesión de NetBox."
 msgstr "The NetBox sign-in form was not found."
 
-#: agent/netbox_export.py:339 agent/netbox_export.py:340
+#: agent/netbox_export.py:357 agent/netbox_export.py:358
 msgid "NetBox no aceptó ese usuario y contraseña."
 msgstr "NetBox did not accept that username and password."
 
-#: agent/netbox_export.py:362 agent/app/view.py:653
+#: agent/netbox_export.py:380 agent/app/view.py:653
 msgid "La URL tiene que empezar por http:// o https://."
 msgstr "The URL must start with http:// or https://."
 
-#: agent/netbox_export.py:364
+#: agent/netbox_export.py:382
 msgid "La URL no dice a qué servidor conectarse."
 msgstr "The URL doesn't say which server to connect to."
 
-#: agent/netbox_export.py:382
+#: agent/netbox_export.py:400
 #, python-format
 msgid "Uso: %(prog)s URL [--output FICHERO] [--insecure] [--photos-user USUARIO]"
 msgstr "Usage: %(prog)s URL [--output FILE] [--insecure] [--photos-user USER]"
 
-#: agent/netbox_export.py:422
+#: agent/netbox_export.py:440
 #, python-format
 msgid "Falta el token de NetBox: pásalo en la variable %(var)s."
 msgstr "The NetBox token is missing: pass it in the %(var)s variable."
 
-#: agent/netbox_export.py:426
+#: agent/netbox_export.py:444
 msgid "Token de solo lectura de NetBox (no se muestra al escribirlo): "
 msgstr "NetBox read-only token (not shown as you type): "
 
-#: agent/netbox_export.py:428
+#: agent/netbox_export.py:446
 msgid "Sin token no se puede leer NetBox."
 msgstr "Without a token NetBox can't be read."
 
-#: agent/netbox_export.py:432
+#: agent/netbox_export.py:450
 #, python-format
 msgid "Leyendo %(path)s…"
 msgstr "Reading %(path)s…"
 
-#: agent/netbox_export.py:442
+#: agent/netbox_export.py:460
 #, python-format
 msgid "Falta la contraseña de NetBox: pásala en la variable %(var)s."
 msgstr "The NetBox password is missing: pass it in the %(var)s variable."
 
-#: agent/netbox_export.py:447
+#: agent/netbox_export.py:465
 #, python-format
 msgid "Contraseña de %(user)s en NetBox, solo para las fotos (no se muestra ni se guarda): "
 msgstr "NetBox password for %(user)s, only for the photos (not shown or stored): "
 
-#: agent/netbox_export.py:480
+#: agent/netbox_export.py:498
 #, python-format
 msgid "Exportado %(n)d objeto a %(path)s."
 msgid_plural "Exportados %(n)d objetos a %(path)s."
 msgstr[0] "Exported %(n)d object to %(path)s."
 msgstr[1] "Exported %(n)d objects to %(path)s."
 
-#: agent/netbox_export.py:488
+#: agent/netbox_export.py:506
 msgid "Súbelo en Cenya: Ajustes → Importar → «NetBox, desde un fichero»."
 msgstr "Upload it in Cenya: Settings → Import → «NetBox, from a file»."
 
-#: agent/netbox_export.py:499
+#: agent/netbox_export.py:518
 #, python-format
 msgid "Fotos de los modelos: %(got)d de %(wanted)d."
 msgid_plural "Fotos de los modelos: %(got)d de %(wanted)d."
 msgstr[0] "Model photos: %(got)d of %(wanted)d."
 msgstr[1] "Model photos: %(got)d of %(wanted)d."
 
-#: agent/netbox_export.py:508
+#: agent/netbox_export.py:527
+#, python-format
+msgid "%(n)d foto no se pudo bajar: tu NetBox solo enseña las fotos con la sesión iniciada, y el token solo abre la API. Repite marcando «Bajar también las fotos con un usuario de NetBox»."
+msgid_plural "%(n)d fotos no se pudieron bajar: tu NetBox solo enseña las fotos con la sesión iniciada, y el token solo abre la API. Repite marcando «Bajar también las fotos con un usuario de NetBox»."
+msgstr[0] "%(n)d photo could not be downloaded: your NetBox only shows photos to a signed-in user, and the token only opens the API. Try again ticking «Also download the photos with a NetBox user»."
+msgstr[1] "%(n)d photos could not be downloaded: your NetBox only shows photos to a signed-in user, and the token only opens the API. Try again ticking «Also download the photos with a NetBox user»."
+
+#: agent/netbox_export.py:538
 #, python-format
 msgid "%(n)d foto no se pudo bajar: tu NetBox solo enseña las fotos con la sesión iniciada, y el token solo abre la API. Repite con --photos-user TU_USUARIO."
 msgid_plural "%(n)d fotos no se pudieron bajar: tu NetBox solo enseña las fotos con la sesión iniciada, y el token solo abre la API. Repite con --photos-user TU_USUARIO."
 msgstr[0] "%(n)d photo could not be downloaded: your NetBox only shows photos to a signed-in user, and the token only opens the API. Run again with --photos-user YOUR_USER."
 msgstr[1] "%(n)d photos could not be downloaded: your NetBox only shows photos to a signed-in user, and the token only opens the API. Run again with --photos-user YOUR_USER."
 
-#: agent/netbox_export.py:519
+#: agent/netbox_export.py:549
 #, python-format
 msgid "%(n)d foto no se pudo bajar ni con la sesión iniciada: ¿puede ese usuario ver los modelos?"
 msgid_plural "%(n)d fotos no se pudieron bajar ni con la sesión iniciada: ¿puede ese usuario ver los modelos?"
 msgstr[0] "%(n)d photo could not be downloaded even when signed in: can that user see the models?"
 msgstr[1] "%(n)d photos could not be downloaded even when signed in: can that user see the models?"
 
-#: agent/netbox_export.py:528
+#: agent/netbox_export.py:558
 #, python-format
 msgid "%(n)d foto no se pudo bajar por la red, el tiempo o el tamaño."
 msgid_plural "%(n)d fotos no se pudieron bajar por la red, el tiempo o el tamaño."
 msgstr[0] "%(n)d photo could not be downloaded because of the network, a timeout or its size."
 msgstr[1] "%(n)d photos could not be downloaded because of the network, a timeout or their size."
 
-#: agent/netbox_export.py:537
+#: agent/netbox_export.py:567
 #, python-format
 msgid "%(n)d foto se quedó fuera para que el fichero no pase del tamaño que acepta Cenya."
 msgid_plural "%(n)d fotos se quedaron fuera para que el fichero no pase del tamaño que acepta Cenya."
@@ -1148,7 +1164,7 @@ msgstr "The service is stopped and there is no data from its last run."
 msgid "Servicio no instalado"
 msgstr "Service not installed"
 
-#: agent/status.py:341 agent/app/bridge.py:723
+#: agent/status.py:341 agent/app/bridge.py:733
 msgid "El servicio del agente no está instalado en este equipo."
 msgstr "The agent service is not installed on this computer."
 
@@ -1194,7 +1210,7 @@ msgstr "Current step: %(step)s"
 msgid "Arrancando"
 msgstr "Starting"
 
-#: agent/status.py:384 agent/app/view.py:938
+#: agent/status.py:384 agent/app/view.py:947
 msgid "En marcha"
 msgstr "Running"
 
@@ -1269,7 +1285,7 @@ msgstr "The agent is checking who answers on the network."
 msgid "Hay una versión nueva del agente: %(version)s"
 msgstr "A new version of the agent is available: %(version)s"
 
-#: agent/tray.py:279 agent/app/view.py:917
+#: agent/tray.py:279 agent/app/view.py:926
 msgid "Está al día."
 msgstr "It is up to date."
 
@@ -1410,32 +1426,32 @@ msgstr "Agent status in %(path)s (written by the service, read by the tray icon)
 msgid "El registro solo lo ven los administradores: abre Cenya Agent como administrador para verlo."
 msgstr "Only administrators can see the log: open Cenya Agent as an administrator to see it."
 
-#: agent/app/bridge.py:702
+#: agent/app/bridge.py:712
 msgid "Eso no es una dirección IP."
 msgstr "That is not an IP address."
 
-#: agent/app/bridge.py:708
+#: agent/app/bridge.py:718
 msgid "La dirección del proxy tiene que empezar por http:// o https://."
 msgstr "The proxy address must start with http:// or https://."
 
-#: agent/app/bridge.py:714 agent/app/view.py:703
+#: agent/app/bridge.py:724 agent/app/view.py:712
 #, python-format
 msgid "Guardado en %(path)s"
 msgstr "Saved to %(path)s"
 
-#: agent/app/bridge.py:721
+#: agent/app/bridge.py:731
 msgid "Windows no ha dejado hacerlo: hace falta un administrador."
 msgstr "Windows did not allow it: an administrator is needed."
 
-#: agent/app/bridge.py:725
+#: agent/app/bridge.py:735
 msgid "El servicio no se ha detenido a tiempo. Vuelve a intentarlo en un momento."
 msgstr "The service did not stop in time. Try again in a moment."
 
-#: agent/app/bridge.py:727 agent/app/view.py:260 agent/app/view.py:947
+#: agent/app/bridge.py:737 agent/app/view.py:260 agent/app/view.py:956
 msgid "Con el canal de desarrollo, el servicio de Windows no se toca desde aquí."
 msgstr "With the development channel, the Windows service is not touched from here."
 
-#: agent/app/bridge.py:728
+#: agent/app/bridge.py:738
 #, python-format
 msgid "Windows no ha podido hacerlo: %(detail)s"
 msgstr "Windows could not do it: %(detail)s"
@@ -1589,7 +1605,8 @@ msgstr "Allowed: the other agent will receive the credentials."
 msgid "Rechazado: no se ha compartido nada."
 msgstr "Refused: nothing has been shared."
 
-#: agent/app/strings.py:59 agent/app/view.py:141 agent/app/view.py:210 agent/app/view.py:262
+#: agent/app/strings.py:59 agent/app/view.py:141 agent/app/view.py:210
+#: agent/app/view.py:262
 msgid "Hace falta abrir Cenya Agent como administrador para hacer cambios."
 msgstr "Cenya Agent must be opened as administrator to make changes."
 
@@ -1673,7 +1690,7 @@ msgstr "Queued: it will start as soon as the current task ends."
 msgid "Pausar"
 msgstr "Pause"
 
-#: agent/app/strings.py:87 agent/app/view.py:986
+#: agent/app/strings.py:87 agent/app/view.py:995
 msgid "Reanudar"
 msgstr "Resume"
 
@@ -1765,7 +1782,7 @@ msgstr "How to create one? In NetBox, your user → API Tokens → Add, without 
 msgid "Aceptar un certificado no válido (NetBox con certificado propio o caducado)"
 msgstr "Accept an invalid certificate (NetBox with a self-signed or expired certificate)"
 
-#: agent/app/strings.py:116 agent/app/strings.py:140
+#: agent/app/strings.py:116 agent/app/strings.py:148
 msgid "Probar"
 msgstr "Test"
 
@@ -1774,356 +1791,376 @@ msgid "NetBox contesta y acepta el token."
 msgstr "NetBox answers and accepts the token."
 
 #: agent/app/strings.py:118
+msgid "NetBox contesta, acepta el token y deja entrar a ese usuario."
+msgstr "NetBox answers, accepts the token and lets that user sign in."
+
+#: agent/app/strings.py:119
+msgid "Bajar también las fotos con un usuario de NetBox"
+msgstr "Also download the photos with a NetBox user"
+
+#: agent/app/strings.py:121
+msgid "Si tu NetBox pide iniciar sesión, el token no basta para las fotos de los modelos. La contraseña se usa una vez para entrar, no se guarda, y la sesión se cierra al terminar."
+msgstr "If your NetBox requires signing in, the token is not enough for the model photos. The password is used once to sign in, is not stored, and the session is closed at the end."
+
+#: agent/app/strings.py:124
+msgid "Usuario"
+msgstr "Username"
+
+#: agent/app/strings.py:125
+msgid "Contraseña"
+msgstr "Password"
+
+#: agent/app/strings.py:126
 msgid "Al terminar"
 msgstr "When it finishes"
 
-#: agent/app/strings.py:119
+#: agent/app/strings.py:127
 msgid "Enviar a Cenya y revisar"
 msgstr "Send to Cenya and review"
 
-#: agent/app/strings.py:120
+#: agent/app/strings.py:128
 msgid "Se sube al portal y se abre la revisión en el navegador. Nada se importa hasta que lo confirmes allí."
 msgstr "It is uploaded to the portal and the review opens in the browser. Nothing is imported until you confirm it there."
 
-#: agent/app/strings.py:121
+#: agent/app/strings.py:129
 msgid "Guardar como fichero"
 msgstr "Save as a file"
 
-#: agent/app/strings.py:122
+#: agent/app/strings.py:130
 msgid "Para subirlo después en Ajustes → Importar → «NetBox, desde un fichero»."
 msgstr "To upload it later in Settings → Import → “NetBox, from a file”."
 
-#: agent/app/strings.py:123
+#: agent/app/strings.py:131
 msgid "Leer NetBox"
 msgstr "Read NetBox"
 
-#: agent/app/strings.py:124
+#: agent/app/strings.py:132
 msgid "Leyendo NetBox…"
 msgstr "Reading NetBox…"
 
-#: agent/app/strings.py:125
+#: agent/app/strings.py:133
 msgid "Avance"
 msgstr "Progress"
 
-#: agent/app/strings.py:126
+#: agent/app/strings.py:134
 msgid "Lectura terminada"
 msgstr "Read finished"
 
-#: agent/app/strings.py:127
+#: agent/app/strings.py:135
 msgid "Abrir la revisión"
 msgstr "Open the review"
 
-#: agent/app/strings.py:128
+#: agent/app/strings.py:136
 msgid "Mostrar en la carpeta"
 msgstr "Show in folder"
 
-#: agent/app/strings.py:129
+#: agent/app/strings.py:137
 msgid "Leer otro NetBox"
 msgstr "Read another NetBox"
 
-#: agent/app/strings.py:130 agent/app/view.py:651
+#: agent/app/strings.py:138 agent/app/view.py:651
 msgid "Escribe la dirección de NetBox."
 msgstr "Type the NetBox address."
 
-#: agent/app/strings.py:131 agent/app/view.py:655
+#: agent/app/strings.py:139 agent/app/view.py:655
 msgid "Pega el token de NetBox."
 msgstr "Paste the NetBox token."
 
-#: agent/app/strings.py:132
-msgid "El token se ha borrado de este formulario."
-msgstr "The token has been cleared from this form."
+#: agent/app/strings.py:140
+msgid "El token y la contraseña se han borrado de este formulario."
+msgstr "The token and the password have been cleared from this form."
 
-#: agent/app/strings.py:134
+#: agent/app/strings.py:142
 msgid "Analizar una IP"
 msgstr "Analyse an IP"
 
-#: agent/app/strings.py:135
+#: agent/app/strings.py:143
 msgid "Prueba SNMP, SSH y WinRM contra una sola dirección y dice qué pasó con cada uno."
 msgstr "Tries SNMP, SSH and WinRM against a single address and says what happened with each."
 
-#: agent/app/strings.py:136
+#: agent/app/strings.py:144
 msgid "192.168.1.20"
 msgstr "192.168.1.20"
 
-#: agent/app/strings.py:137
+#: agent/app/strings.py:145
 msgid "Analizar"
 msgstr "Analyse"
 
-#: agent/app/strings.py:138
+#: agent/app/strings.py:146
 msgid "Probar la conexión con el portal"
 msgstr "Test the connection to the portal"
 
-#: agent/app/strings.py:139
+#: agent/app/strings.py:147
 msgid "Nombre, puerto, certificado y token, paso a paso."
 msgstr "Name, port, certificate and token, step by step."
 
-#: agent/app/strings.py:141
+#: agent/app/strings.py:149
 msgid "Autocomprobación"
 msgstr "Self-test"
 
-#: agent/app/strings.py:142
+#: agent/app/strings.py:150
 msgid "Qué puede hacer esta instalación: colectores, librerías e idiomas."
 msgstr "What this installation can do: collectors, libraries and languages."
 
-#: agent/app/strings.py:143
+#: agent/app/strings.py:151
 msgid "Comprobar"
 msgstr "Check"
 
-#: agent/app/strings.py:144
+#: agent/app/strings.py:152
 msgid "Paquete de soporte"
 msgstr "Support bundle"
 
-#: agent/app/strings.py:146
+#: agent/app/strings.py:154
 msgid "Un fichero con el registro, los ajustes locales y el estado, sin contraseñas ni tokens, para enviarlo a soporte."
 msgstr "A file with the log, the local settings and the status, without passwords or tokens, to send to support."
 
-#: agent/app/strings.py:148
+#: agent/app/strings.py:156
 msgid "Guardar el paquete…"
 msgstr "Save the bundle…"
 
-#: agent/app/strings.py:149
+#: agent/app/strings.py:157
 msgid "Trabajando…"
 msgstr "Working…"
 
-#: agent/app/strings.py:151
+#: agent/app/strings.py:159
 msgid "Portal"
 msgstr "Portal"
 
-#: agent/app/strings.py:152
+#: agent/app/strings.py:160
 msgid "Este equipo aparece como"
 msgstr "This computer appears as"
 
-#: agent/app/strings.py:153
+#: agent/app/strings.py:161
 msgid "Abrir en el navegador"
 msgstr "Open in the browser"
 
-#: agent/app/strings.py:154
+#: agent/app/strings.py:162
 msgid "Conectar o cambiar de portal"
 msgstr "Connect or change portal"
 
-#: agent/app/strings.py:155
+#: agent/app/strings.py:163
 msgid "Pega una cadena de conexión o un código del portal."
 msgstr "Paste a connection string or a code from the portal."
 
-#: agent/app/strings.py:156
+#: agent/app/strings.py:164
 msgid "¿Cambiar de portal?"
 msgstr "Change portal?"
 
-#: agent/app/strings.py:157
+#: agent/app/strings.py:165
 #, python-format
 msgid "Este equipo dejará de informar a %(portal)s y pasará a informar al portal nuevo."
 msgstr "This computer will stop reporting to %(portal)s and will report to the new portal."
 
-#: agent/app/strings.py:158
+#: agent/app/strings.py:166
 msgid "Cambiar de portal"
 msgstr "Change portal"
 
-#: agent/app/strings.py:159
+#: agent/app/strings.py:167
 msgid "Certificado de la empresa"
 msgstr "Company certificate"
 
-#: agent/app/strings.py:161
+#: agent/app/strings.py:169
 msgid "Si la salida a internet pasa por una inspección TLS con una autoridad propia, indica aquí su certificado (.pem, .crt o .cer)."
 msgstr "If internet access goes through TLS inspection with your own authority, choose its certificate here (.pem, .crt or .cer)."
 
-#: agent/app/strings.py:163
+#: agent/app/strings.py:171
 msgid "Elegir fichero…"
 msgstr "Choose file…"
 
-#: agent/app/strings.py:164 agent/app/strings.py:187
+#: agent/app/strings.py:172 agent/app/strings.py:195
 msgid "Quitar"
 msgstr "Remove"
 
-#: agent/app/strings.py:165
+#: agent/app/strings.py:173
 msgid "Ninguno: se usan los certificados de Windows."
 msgstr "None: Windows' certificates are used."
 
-#: agent/app/strings.py:166
+#: agent/app/strings.py:174
 msgid "Proxy"
 msgstr "Proxy"
 
-#: agent/app/strings.py:167
+#: agent/app/strings.py:175
 msgid "El del sistema"
 msgstr "The system's"
 
-#: agent/app/strings.py:168
+#: agent/app/strings.py:176
 msgid "Manual"
 msgstr "Manual"
 
-#: agent/app/strings.py:169
+#: agent/app/strings.py:177
 msgid "Ninguno"
 msgstr "None"
 
-#: agent/app/strings.py:170
+#: agent/app/strings.py:178
 msgid "http://proxy.midominio.local:8080"
 msgstr "http://proxy.mydomain.local:8080"
 
-#: agent/app/strings.py:171
+#: agent/app/strings.py:179
 msgid "Si lleva usuario y contraseña, no se vuelven a mostrar."
 msgstr "If it has a user and password, they are not shown again."
 
-#: agent/app/strings.py:172
+#: agent/app/strings.py:180
 msgid "Desconectar este equipo"
 msgstr "Disconnect this computer"
 
-#: agent/app/strings.py:174
+#: agent/app/strings.py:182
 msgid "Avisa al portal, borra el enrolamiento y deja de barrer. Para volver hará falta una cadena de conexión nueva."
 msgstr "Tells the portal, deletes the enrolment and stops sweeping. Coming back will need a new connection string."
 
-#: agent/app/strings.py:176
+#: agent/app/strings.py:184
 msgid "Desconectar…"
 msgstr "Disconnect…"
 
-#: agent/app/strings.py:177
+#: agent/app/strings.py:185
 msgid "¿Desconectar este equipo?"
 msgstr "Disconnect this computer?"
 
-#: agent/app/strings.py:178
+#: agent/app/strings.py:186
 #, python-format
 msgid "El agente dejará de informar a %(portal)s. Lo ya inventariado se queda en el portal."
 msgstr "The agent will stop reporting to %(portal)s. What is already inventoried stays in the portal."
 
-#: agent/app/strings.py:179
+#: agent/app/strings.py:187
 msgid "Desconectar"
 msgstr "Disconnect"
 
-#: agent/app/strings.py:181
+#: agent/app/strings.py:189
 msgid "Redes y direcciones que nunca se barren"
 msgstr "Networks and addresses that are never swept"
 
-#: agent/app/strings.py:182
+#: agent/app/strings.py:190
 msgid "El agente no hace ping ni entra en ellas, tampoco si se pide desde el portal."
 msgstr "The agent neither pings nor logs into them, not even when asked from the portal."
 
-#: agent/app/strings.py:183
+#: agent/app/strings.py:191
 msgid "10.0.5.0/24 o 10.0.5.7"
 msgstr "10.0.5.0/24 or 10.0.5.7"
 
-#: agent/app/strings.py:184
+#: agent/app/strings.py:192
 msgid "Añadir"
 msgstr "Add"
 
-#: agent/app/strings.py:185
+#: agent/app/strings.py:193
 msgid "Ninguna: se barre todo lo que diga el portal."
 msgstr "None: everything the portal says is swept."
 
-#: agent/app/strings.py:186
+#: agent/app/strings.py:194
 msgid "Redes de este equipo"
 msgstr "This computer's networks"
 
-#: agent/app/strings.py:188 agent/app/view.py:834
+#: agent/app/strings.py:196 agent/app/view.py:843
 msgid "Red"
 msgstr "Network"
 
-#: agent/app/strings.py:189 agent/app/view.py:835
+#: agent/app/strings.py:197 agent/app/view.py:844
 msgid "Dirección"
 msgstr "Address"
 
-#: agent/app/strings.py:190
+#: agent/app/strings.py:198
 msgid "Suavidad máxima"
 msgstr "Gentleness cap"
 
-#: agent/app/strings.py:191
+#: agent/app/strings.py:199
 msgid "Cuántas conexiones a la vez puede abrir el agente. Puede bajar lo que diga el portal, nunca subirlo."
 msgstr "How many connections the agent may open at once. It can lower what the portal says, never raise it."
 
-#: agent/app/strings.py:192
+#: agent/app/strings.py:200
 msgid "Actualizaciones"
 msgstr "Updates"
 
-#: agent/app/strings.py:193
+#: agent/app/strings.py:201
 msgid "Automáticas"
 msgstr "Automatic"
 
-#: agent/app/strings.py:194
+#: agent/app/strings.py:202
 msgid "Solo avisar"
 msgstr "Notify only"
 
-#: agent/app/strings.py:195
+#: agent/app/strings.py:203
 msgid "Buscar ahora"
 msgstr "Check now"
 
-#: agent/app/strings.py:196
+#: agent/app/strings.py:204
 msgid "Instalada"
 msgstr "Installed"
 
-#: agent/app/strings.py:197
+#: agent/app/strings.py:205
 msgid "Vigente"
 msgstr "Current"
 
-#: agent/app/strings.py:198
+#: agent/app/strings.py:206
 msgid "Servicio"
 msgstr "Service"
 
-#: agent/app/strings.py:199
+#: agent/app/strings.py:207
 msgid "Iniciar"
 msgstr "Start"
 
-#: agent/app/strings.py:200
+#: agent/app/strings.py:208
 msgid "Detener"
 msgstr "Stop"
 
-#: agent/app/strings.py:201
+#: agent/app/strings.py:209
 msgid "Reiniciar"
 msgstr "Restart"
 
-#: agent/app/strings.py:202
+#: agent/app/strings.py:210
 msgid "Arrancar con Windows"
 msgstr "Start with Windows"
 
-#: agent/app/strings.py:203
+#: agent/app/strings.py:211
 msgid "Icono de bandeja al iniciar sesión"
 msgstr "Tray icon at sign-in"
 
-#: agent/app/strings.py:204
+#: agent/app/strings.py:212
 msgid "Para todas las personas que usan este equipo."
 msgstr "For everyone who uses this computer."
 
-#: agent/app/strings.py:205
+#: agent/app/strings.py:213
 msgid "Avisos de Windows"
 msgstr "Windows notifications"
 
-#: agent/app/strings.py:206
+#: agent/app/strings.py:214
 msgid "Un aviso cuando el agente deja de poder trabajar."
 msgstr "A notification when the agent can no longer work."
 
-#: agent/app/strings.py:207
+#: agent/app/strings.py:215
 msgid "Idioma"
 msgstr "Language"
 
-#: agent/app/strings.py:209
+#: agent/app/strings.py:217
 msgid "Versión"
 msgstr "Version"
 
-#: agent/app/strings.py:210
+#: agent/app/strings.py:218
 msgid "Licencia"
 msgstr "Licence"
 
-#: agent/app/strings.py:211
+#: agent/app/strings.py:219
 msgid "Apache 2.0, código abierto"
 msgstr "Apache 2.0, open source"
 
-#: agent/app/strings.py:212
+#: agent/app/strings.py:220
 msgid "Código fuente"
 msgstr "Source code"
 
-#: agent/app/strings.py:213
+#: agent/app/strings.py:221
 msgid "Qué hace el agente con tus datos"
 msgstr "What the agent does with your data"
 
-#: agent/app/strings.py:215
+#: agent/app/strings.py:223
 msgid "El agente descubre la red de tu empresa y la propone en Cenya. Solo habla con el portal por HTTPS saliente: no abre puertos."
 msgstr "The agent discovers your company's network and proposes it in Cenya. It only talks to the portal over outgoing HTTPS: it opens no ports."
 
-#: agent/app/strings.py:217
+#: agent/app/strings.py:225
 msgid "Equipo"
 msgstr "Computer"
 
-#: agent/app/strings.py:218
+#: agent/app/strings.py:226
 msgid "Sistema"
 msgstr "System"
 
-#: agent/app/strings.py:219
+#: agent/app/strings.py:227
 msgid "Iconos: Lucide (licencia ISC)."
 msgstr "Icons: Lucide (ISC licence)."
 
@@ -2380,198 +2417,202 @@ msgstr[1] "%(n)d warnings: details in Activity."
 msgid "La siguiente es %(task)s: %(when)s."
 msgstr "Next is %(task)s: %(when)s."
 
-#: agent/app/view.py:691
+#: agent/app/view.py:657
+msgid "Escribe la contraseña de ese usuario de NetBox."
+msgstr "Type the password of that NetBox user."
+
+#: agent/app/view.py:693
 #, python-format
 msgid "%(n)d objeto leído"
 msgid_plural "%(n)d objetos leídos"
 msgstr[0] "%(n)d object read"
 msgstr[1] "%(n)d objects read"
 
-#: agent/app/view.py:700
+#: agent/app/view.py:709
 msgid "Enviado al portal. La revisión se abre en el navegador: nada se importa hasta que lo confirmes allí."
 msgstr "Sent to the portal. The review opens in the browser: nothing is imported until you confirm it there."
 
-#: agent/app/view.py:739
+#: agent/app/view.py:748
 msgid "Nombre del portal"
 msgstr "Portal name"
 
-#: agent/app/view.py:740
+#: agent/app/view.py:749
 msgid "Puerto"
 msgstr "Port"
 
-#: agent/app/view.py:741
+#: agent/app/view.py:750
 msgid "Certificado"
 msgstr "Certificate"
 
-#: agent/app/view.py:742
+#: agent/app/view.py:751
 msgid "Token del agente"
 msgstr "Agent token"
 
-#: agent/app/view.py:755 agent/app/view.py:760
+#: agent/app/view.py:764 agent/app/view.py:769
 msgid "No se llegó a comprobar."
 msgstr "Not checked."
 
-#: agent/app/view.py:765
+#: agent/app/view.py:774
 msgid "Todo en orden: el agente llega al portal y el portal lo acepta."
 msgstr "All good: the agent reaches the portal and the portal accepts it."
 
-#: agent/app/view.py:765
+#: agent/app/view.py:774
 msgid "Algo falla: el primer paso en rojo dice qué."
 msgstr "Something is wrong: the first step in red says what."
 
-#: agent/app/view.py:780
+#: agent/app/view.py:789
 #, python-format
 msgid "Falta: %(names)s"
 msgstr "Missing: %(names)s"
 
-#: agent/app/view.py:785
+#: agent/app/view.py:794
 msgid "Colectores"
 msgstr "Collectors"
 
-#: agent/app/view.py:786
+#: agent/app/view.py:795
 msgid "Librerías opcionales"
 msgstr "Optional libraries"
 
-#: agent/app/view.py:787
+#: agent/app/view.py:796
 msgid "Idiomas"
 msgstr "Languages"
 
-#: agent/app/view.py:788
+#: agent/app/view.py:797
 msgid "Librerías de Windows"
 msgstr "Windows libraries"
 
-#: agent/app/view.py:795
+#: agent/app/view.py:804
 msgid "No encontrado"
 msgstr "Not found"
 
-#: agent/app/view.py:800
+#: agent/app/view.py:809
 msgid "Instalación completa"
 msgstr "Complete installation"
 
-#: agent/app/view.py:800
+#: agent/app/view.py:809
 msgid "Falta algo en esta instalación"
 msgstr "Something is missing from this installation"
 
-#: agent/app/view.py:813 agent/app/view.py:824
+#: agent/app/view.py:822 agent/app/view.py:833
 msgid "Escribe una red (10.0.5.0/24) o una dirección (10.0.5.7)."
 msgstr "Type a network (10.0.5.0/24) or an address (10.0.5.7)."
 
-#: agent/app/view.py:826
+#: agent/app/view.py:835
 msgid "Ya está en la lista."
 msgstr "It is already on the list."
 
-#: agent/app/view.py:863
+#: agent/app/view.py:872
 msgid "Suave"
 msgstr "Gentle"
 
-#: agent/app/view.py:863
+#: agent/app/view.py:872
 msgid "Normal"
 msgstr "Normal"
 
-#: agent/app/view.py:863
+#: agent/app/view.py:872
 msgid "Rápida"
 msgstr "Fast"
 
-#: agent/app/view.py:863
+#: agent/app/view.py:872
 msgid "Sin tope"
 msgstr "No cap"
 
-#: agent/app/view.py:872
+#: agent/app/view.py:881
 #, python-format
 msgid "Ahora trabaja en modo %(level)s."
 msgstr "It is currently working in %(level)s mode."
 
-#: agent/app/view.py:881
+#: agent/app/view.py:890
 #, python-format
 msgid "Descargando la versión %(version)s…"
 msgstr "Downloading version %(version)s…"
 
-#: agent/app/view.py:882
+#: agent/app/view.py:891
 #, python-format
 msgid "La versión %(version)s está verificada: se instala en cuanto termine la tarea en curso."
 msgstr "Version %(version)s is verified: it will be installed as soon as the current task ends."
 
-#: agent/app/view.py:883
+#: agent/app/view.py:892
 #, python-format
 msgid "Instalando la versión %(version)s…"
 msgstr "Installing version %(version)s…"
 
-#: agent/app/view.py:884
+#: agent/app/view.py:893
 #, python-format
 msgid "La actualización a %(version)s no se pudo completar; se sigue con la versión instalada."
 msgstr "The update to %(version)s could not be completed; the installed version keeps running."
 
-#: agent/app/view.py:907
+#: agent/app/view.py:916
 msgid "El portal tarda en contestar; el resultado aparecerá aquí en cuanto llegue."
 msgstr "The portal is slow to answer; the result will appear here as soon as it arrives."
 
-#: agent/app/view.py:909
+#: agent/app/view.py:918
 #, python-format
 msgid "No se pudo preguntar al portal: %(error)s"
 msgstr "The portal could not be asked: %(error)s"
 
-#: agent/app/view.py:911
+#: agent/app/view.py:920
 #, python-format
 msgid "Hay una versión nueva: %(version)s"
 msgstr "New version available: %(version)s"
 
-#: agent/app/view.py:913
+#: agent/app/view.py:922
 msgid "Se instalará sola, sin cortar ninguna tarea."
 msgstr "It will install itself without interrupting any task."
 
-#: agent/app/view.py:915
+#: agent/app/view.py:924
 msgid "Las actualizaciones automáticas están desactivadas en este equipo."
 msgstr "Automatic updates are turned off on this machine."
 
-#: agent/app/view.py:931
+#: agent/app/view.py:940
 #, python-format
 msgid "Comprobado %(ago)s"
 msgstr "Checked %(ago)s"
 
-#: agent/app/view.py:939
+#: agent/app/view.py:948
 msgid "Detenido"
 msgstr "Stopped"
 
-#: agent/app/view.py:940
+#: agent/app/view.py:949
 msgid "Arrancando…"
 msgstr "Starting…"
 
-#: agent/app/view.py:941
+#: agent/app/view.py:950
 msgid "Deteniéndose…"
 msgstr "Stopping…"
 
-#: agent/app/view.py:942
+#: agent/app/view.py:951
 msgid "No instalado"
 msgstr "Not installed"
 
-#: agent/app/view.py:944
+#: agent/app/view.py:953
 msgid "Desconocido"
 msgstr "Unknown"
 
-#: agent/app/view.py:962
+#: agent/app/view.py:971
 msgid "El de Windows"
 msgstr "Windows' language"
 
-#: agent/app/view.py:981
+#: agent/app/view.py:990
 msgid "Abrir"
 msgstr "Open"
 
-#: agent/app/view.py:985
+#: agent/app/view.py:994
 msgid "Ejecutar Presencia ahora"
 msgstr "Run Presence now"
 
-#: agent/app/view.py:986
+#: agent/app/view.py:995
 msgid "Pausar una hora"
 msgstr "Pause for an hour"
 
-#: agent/app/view.py:988
+#: agent/app/view.py:997
 msgid "Abrir Cenya en el navegador"
 msgstr "Open Cenya in the browser"
 
-#: agent/app/view.py:989
+#: agent/app/view.py:998
 msgid "Buscar actualizaciones"
 msgstr "Check for updates"
 
-#: agent/app/view.py:991
+#: agent/app/view.py:1000
 msgid "Cerrar este icono"
 msgstr "Close this icon"

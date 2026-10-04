@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import agent.tests  # noqa: F401 - idioma y carpeta de estado de prueba
 
+import http.server
 import json
 import os
 import tempfile
@@ -505,7 +506,7 @@ class NetboxExportTests(LocalServiceCase):
     def test_without_send_the_bundle_is_written_to_path_and_progress_is_visible(self) -> None:
         seen: list[dict] = []
 
-        def fetch(url: str, token: str, verify_tls: bool = True, progress: Any = None) -> dict:
+        def fetch(url: str, token: str, verify_tls: bool = True, progress: Any = None, **_: Any) -> dict:
             self.assertEqual(token, self.NB_TOKEN)
             for path in ("/api/dcim/sites/", "/api/dcim/devices/"):
                 progress(path)
@@ -533,7 +534,12 @@ class NetboxExportTests(LocalServiceCase):
             answer = self.export(send=True)
         self.assertEqual(
             answer["data"],
-            {"import": "imp-1", "summary": {"sites": 0}, "review_url": "https://portal.example/settings/import/pending/imp-1/"},
+            {
+                "import": "imp-1",
+                "summary": {"sites": 0},
+                "photos": {"wanted": 0, "got": 0, "lines": []},
+                "review_url": "https://portal.example/settings/import/pending/imp-1/",
+            },
         )
         self.assertEqual(uploads, [({"sites": []}, None)])
 
@@ -588,6 +594,55 @@ class NetboxExportTests(LocalServiceCase):
             self.assertEqual(self.export(path=str(self.state))["error"], "busy")
             release.set()
             first.join(5)
+
+
+class NetboxPhotosTests(LocalServiceCase):
+    """The window's «Bajar también las fotos con un usuario de NetBox», end to
+    end: the service against a real HTTP server that only shows photos to a
+    signed-in session (``test_netbox_export_photos.StrictNetBox``)."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        from agent.tests import test_netbox_export_photos as strict
+
+        self.strict = strict
+        strict.StrictNetBox.log = []
+        self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), strict.StrictNetBox)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.addCleanup(self.server.server_close)
+        self.addCleanup(self.server.shutdown)
+        self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
+        self.target = self.state / "nb.json"
+
+    def export(self, **args: Any) -> dict[str, Any]:
+        return self.call("netbox.export", {"url": self.url, "token": self.strict.TOKEN, "path": str(self.target), **args})
+
+    def test_without_a_user_the_answer_says_why_the_photos_are_missing(self) -> None:
+        photos = self.export()["data"]["photos"]
+        self.assertEqual((photos["wanted"], photos["got"]), (2, 0))
+        self.assertIn("Bajar también las fotos con un usuario de NetBox", " ".join(photos["lines"]))
+        self.assertNotIn("--photos-user", " ".join(photos["lines"]))
+
+    def test_with_a_user_every_photo_arrives_and_the_password_is_nowhere(self) -> None:
+        password = self.strict.PASSWORD
+        answer = self.export(photos_user=self.strict.USER, photos_password=password)
+        self.assertTrue(answer["ok"], answer)
+        self.assertEqual((answer["data"]["photos"]["wanted"], answer["data"]["photos"]["got"]), (2, 2))
+        self.assertIn("GET /logout/", self.strict.StrictNetBox.log)
+        for place in (encode(answer).decode("utf-8"), self.log_text(), json.dumps(self.data("status")), self.target.read_text(encoding="utf-8")):
+            self.assertNotIn(password, place)
+
+    def test_a_wrong_password_fails_without_repeating_it(self) -> None:
+        answer = self.export(photos_user=self.strict.USER, photos_password="no-es-esta")
+        self.assertEqual(answer["error"], "failed")
+        self.assertNotIn("no-es-esta", encode(answer).decode("utf-8"))
+        self.assertFalse(self.target.exists())
+        self.assertEqual(self.service.jobs()["netbox_export"]["state"], "failed")
+
+    def test_a_user_without_a_password_is_refused_before_reading(self) -> None:
+        self.assertEqual(self.export(photos_user=self.strict.USER)["error"], "invalid")
+        self.assertEqual(self.export(photos_user=["x"], photos_password="y")["error"], "invalid")
+        self.assertEqual(self.strict.StrictNetBox.log, [])
 
 
 class SupportBundleTests(LocalServiceCase):

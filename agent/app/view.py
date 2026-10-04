@@ -644,7 +644,7 @@ def log_filters() -> dict[str, list[dict[str, str]]]:
 # --- Importar de NetBox ---------------------------------------------------------------
 
 
-def netbox_form_error(url: str, token: str) -> str:
+def netbox_form_error(url: str, token: str, photos_user: str = "", photos_password: str = "") -> str:
     """Lo que falta en el formulario antes de mandar nada, o vacío."""
     url = url.strip()
     if not url:
@@ -653,6 +653,8 @@ def netbox_form_error(url: str, token: str) -> str:
         return _t("La URL tiene que empezar por http:// o https://.")
     if not token.strip():
         return _t("Pega el token de NetBox.")
+    if photos_user.strip() and not photos_password:
+        return _t("Escribe la contraseña de ese usuario de NetBox.")
     return ""
 
 
@@ -692,7 +694,14 @@ def netbox_summary(data: dict[str, Any], mode: str) -> dict[str, Any]:
         "review_url": "",
         "path": "",
         "message": "",
+        "photos": [],
+        "photos_missing": False,
     }
+    # Qué pasó con las fotos de los modelos, dicho siempre (lo redacta el servicio).
+    photos = data.get("photos") if isinstance(data.get("photos"), dict) else {}
+    view["photos"] = [str(line) for line in photos.get("lines") or [] if isinstance(line, str) and line]
+    wanted, got = _as_int(photos.get("wanted")), _as_int(photos.get("got"))
+    view["photos_missing"] = bool(wanted and got is not None and got < wanted)
     if mode == "send":
         # Dónde se revisa lo dice el servicio (spec 4, `review_url`), que ya
         # comprobó que es del mismo portal; aquí solo se mira que se pueda abrir.

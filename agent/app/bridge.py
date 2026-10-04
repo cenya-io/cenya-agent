@@ -11,8 +11,8 @@ What it decides is delegated to `agent.app.view`; what it does goes through
 the channel client (`agent.localclient`) or, for the few things that are Windows'
 own, `agent.app.winsys`.
 
-**Secrets.** The NetBox token arrives as an argument, goes into one request
-and is dropped: it is not kept on this object, not logged, not echoed back.
+**Secrets.** The NetBox token (and the password for the photos, when there is
+one) arrives as an argument, goes into one request and is dropped: it is not kept on this object, not logged, not echoed back.
 """
 
 from __future__ import annotations
@@ -319,13 +319,14 @@ class Api:
 
     # --- Importar de NetBox -------------------------------------------------------
 
-    def netbox_test(self, url: str, token: str, insecure: bool) -> dict[str, Any]:
+    def netbox_test(self, url: str, token: str, insecure: bool, photos_user: str = "", photos_password: str = "") -> dict[str, Any]:
         """Prueba la dirección y el token desde esta máquina, sin el servicio.
 
         Solo lee una página (`/api/dcim/sites/?limit=1`). El token no sale de
-        esta función más que en esa cabecera.
+        esta función más que en esa cabecera. Con usuario para las fotos,
+        además inicia sesión y la cierra en el acto.
         """
-        problem = view.netbox_form_error(url, token)
+        problem = view.netbox_form_error(url, token, photos_user, photos_password)
         if problem:
             return _fail("invalid", problem)
         from agent import netbox_export
@@ -333,23 +334,29 @@ class Api:
         base = url.strip().rstrip("/")
         try:
             netbox_export._get_page(netbox_export._client(not insecure), base + NETBOX_PROBE_PATH, token.strip())
+            if photos_user.strip():
+                session = netbox_export.login_session(base, photos_user.strip(), photos_password, verify_tls=not insecure)
+                netbox_export.logout(base, session)
         except netbox_export.ExportError as exc:
             return _fail("netbox", str(exc))
         except Exception as exc:  # noqa: BLE001 - lo que sea, dicho sin el token
             return _fail("netbox", type(exc).__name__)
         finally:
-            token = ""  # noqa: F841 - que no quede en este marco más de lo justo
-        return _ok(message=strings.ui_strings()["nb_test_ok"])
+            token = photos_password = ""  # noqa: F841 - que no queden en este marco más de lo justo
+        key = "nb_test_ok_photos" if photos_user.strip() else "nb_test_ok"
+        return _ok(message=strings.ui_strings()[key])
 
     def netbox_choose_file(self) -> dict[str, Any]:
         path = self._dialogs.save("netbox-export.json", ("JSON (*.json)",))
         return _ok(path=path or "")
 
-    def netbox_start(self, url: str, token: str, insecure: bool, mode: str, path: str = "") -> dict[str, Any]:
+    def netbox_start(
+        self, url: str, token: str, insecure: bool, mode: str, path: str = "", photos_user: str = "", photos_password: str = ""
+    ) -> dict[str, Any]:
         refused = self._refuse_if_readonly()
         if refused:
             return refused
-        problem = view.netbox_form_error(url, token)
+        problem = view.netbox_form_error(url, token, photos_user, photos_password)
         if problem:
             return _fail("invalid", problem)
         if mode == "save" and not path:
@@ -361,7 +368,10 @@ class Api:
         args: dict[str, Any] = {"url": url.strip(), "token": token.strip(), "verify_tls": not insecure, "send": mode == "send"}
         if mode == "save":
             args["path"] = path
-        token = ""
+        if photos_user.strip():
+            args["photos_user"] = photos_user.strip()
+            args["photos_password"] = photos_password
+        token = photos_password = ""
         threading.Thread(target=self._netbox_run, args=(args,), name="netbox-export", daemon=True).start()
         return _ok()
 
@@ -377,7 +387,7 @@ class Api:
             if summary["review_url"]:
                 self._open(summary["review_url"])
         finally:
-            args.clear()  # el token, fuera
+            args.clear()  # el token y la contraseña, fuera
         with self._lock:
             self._netbox.update(result)
 

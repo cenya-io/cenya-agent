@@ -178,3 +178,33 @@ class SummaryTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TokenHeaderTests(unittest.TestCase):
+    """A token as a person pastes it: NetBox's «Copy» brings the word in front,
+    and NetBox 4.5's v2 tokens (``nbt_…``) go with ``Bearer``. The same rule
+    as the server's ``core.netbox.authorization``."""
+
+    def test_v1_and_v2_tokens(self) -> None:
+        cases = {
+            "abc123": "Token abc123",
+            "  abc123\n": "Token abc123",
+            "Token abc123": "Token abc123",
+            "token abc123": "Token abc123",
+            '"abc123"': "Token abc123",
+            "nbt_key.secret": "Bearer nbt_key.secret",
+            "Bearer nbt_key.secret": "Bearer nbt_key.secret",
+            "Token nbt_key.secret": "Bearer nbt_key.secret",
+        }
+        for pasted, header in cases.items():
+            with self.subTest(pasted=pasted):
+                self.assertEqual(netbox_export.authorization(pasted), header)
+
+    def test_a_pasted_prefix_still_reads_the_api(self) -> None:
+        StrictNetBox.log = []
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), StrictNetBox)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        bundle = netbox_export.fetch_bundle(f"http://127.0.0.1:{server.server_address[1]}", f"Token {TOKEN}")
+        self.assertEqual(len(bundle["device_types"]), 2)

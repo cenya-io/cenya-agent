@@ -153,8 +153,26 @@ def _timeout_message() -> str:
     }
 
 
+def authorization(token: str) -> str:
+    """The ``Authorization`` header for a token as a person pastes it.
+
+    NetBox's own «Copy» button copies the whole header value («Token abc…»),
+    so the word in front is dropped instead of being sent twice -- NetBox then
+    answers 401 and the person is told a good token is wrong. NetBox 4.5 also
+    issues v2 tokens, ``nbt_<key>.<secret>``, which go with ``Bearer``; the v1
+    ones keep ``Token``. Same rule as the server's ``core.netbox.authorization``.
+    """
+    value = token.strip().strip("\"'").strip()
+    for prefix in ("token ", "bearer "):
+        if value.lower().startswith(prefix):
+            value = value[len(prefix):].strip()
+            break
+    scheme = "Bearer" if value.startswith("nbt_") else "Token"
+    return f"{scheme} {value}"
+
+
 def _get_page(client: urllib.request.OpenerDirector, url: str, token: str) -> dict[str, Any]:
-    request = urllib.request.Request(url, headers={"Authorization": f"Token {token}", "Accept": "application/json"})
+    request = urllib.request.Request(url, headers={"Authorization": authorization(token), "Accept": "application/json"})
     try:
         with client.open(request, timeout=TIMEOUT_SECONDS) as response:
             return json.loads(response.read().decode())
@@ -224,7 +242,7 @@ def _fetch_image(
 ) -> bytes | None:
     """A photo's bytes, or nothing. A missing photo never stops the export,
     but it is counted, with whether it looks like a question of signing in."""
-    headers = {"Authorization": f"Token {token}"} if token else {}
+    headers = {"Authorization": authorization(token)} if token else {}
     request = urllib.request.Request(url, headers=headers)
     try:
         with client.open(request, timeout=TIMEOUT_SECONDS) as response:
@@ -489,9 +507,10 @@ def run(args: list[str], prog: str = "cenya-agent export-netbox", environ: Any =
     return 0
 
 
-def photo_summary(stats: PhotoStats, signed_in: bool) -> list[str]:
+def photo_summary(stats: PhotoStats, signed_in: bool, in_app: bool = False) -> list[str]:
     """What happened to the photos, said always: a silent miss is what made a
-    whole catalogue arrive without a single picture."""
+    whole catalogue arrive without a single picture. ``in_app`` words the way
+    out for the agent's window, which has a box to tick instead of a flag."""
     if not stats.wanted:
         return []
     lines = [
@@ -502,7 +521,18 @@ def photo_summary(stats: PhotoStats, signed_in: bool) -> list[str]:
         )
         % {"got": stats.got, "wanted": stats.wanted}
     ]
-    if stats.needs_login and not signed_in:
+    if stats.needs_login and not signed_in and in_app:
+        lines.append(
+            _tn(
+                "%(n)d foto no se pudo bajar: tu NetBox solo enseña las fotos con la sesión iniciada, y el token "
+                "solo abre la API. Repite marcando «Bajar también las fotos con un usuario de NetBox».",
+                "%(n)d fotos no se pudieron bajar: tu NetBox solo enseña las fotos con la sesión iniciada, y el "
+                "token solo abre la API. Repite marcando «Bajar también las fotos con un usuario de NetBox».",
+                stats.needs_login,
+            )
+            % {"n": stats.needs_login}
+        )
+    elif stats.needs_login and not signed_in:
         lines.append(
             _tn(
                 "%(n)d foto no se pudo bajar: tu NetBox solo enseña las fotos con la sesión iniciada, y el token "
