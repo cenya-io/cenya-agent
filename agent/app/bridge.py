@@ -26,6 +26,7 @@ from typing import Any
 from agent import __version__, i18n
 from agent import localclient as channel
 from agent.app import strings, view, winsys
+from agent.i18n import _t
 
 REPO_URL = "https://github.com/cenya-io/cenya-agent"
 #: «Qué hace el agente con tus datos» (CLAUDE.md, regla 7): pendiente de
@@ -707,26 +708,18 @@ def _page_language() -> str:
 
 
 def _invalid_ip() -> str:
-    from agent.i18n import _t
-
     return _t("Eso no es una dirección IP.")
 
 
 def _invalid_proxy() -> str:
-    from agent.i18n import _t
-
     return _t("La dirección del proxy tiene que empezar por http:// o https://.")
 
 
 def _saved_in(path: str) -> str:
-    from agent.i18n import _t
-
     return _t("Guardado en %(path)s") % {"path": path}
 
 
 def _service_error(exc: winsys.ServiceControlError) -> str:
-    from agent.i18n import _t
-
     if exc.code == "forbidden":
         return _t("Windows no ha dejado hacerlo: hace falta un administrador.")
     if exc.code == "not_installed":
