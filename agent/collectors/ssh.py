@@ -435,9 +435,41 @@ CAPTURE_COMMANDS: dict[str, str] = {
     "gaia": "show configuration",
 }
 
+#: La orden que vuelca la configuración **guardada** --la que el equipo carga al
+#: reiniciar-- en las familias que la distinguen de la que está en marcha. Con
+#: las dos, el servidor compara y avisa de lo que un reinicio perdería (el
+#: puerto que alguien abrió y no guardó con `write memory`). Quien no está aquí
+#: no la tiene, y es deliberado: MikroTik, Fortinet y Gaia guardan al aplicar,
+#: así que no hay segundo texto; y la «candidata» de Junos es un borrador, no
+#: lo que carga al arrancar. Para ellos el hallazgo va sin la clave.
+SAVED_CONFIG_COMMANDS: dict[str, str] = {
+    "cisco": "show startup-config",
+    "aruba": "show startup-config",
+    "dell": "show startup-configuration",
+    "huawei": "display saved-configuration",
+    "comware": "display saved-configuration",
+}
+
 #: Techo por copia. El mismo número que `core.discovery.MAX_CONFIG_BYTES`: el
-#: agente no puede importarlo --no tiene Django-- así que se repite aquí.
+#: agente no puede importarlo --no tiene Django-- así que se repite aquí. Se
+#: aplica por separado a la que está en marcha y a la guardada.
 MAX_CONFIG_BYTES = 256 * 1024
+
+#: Lo que una CLI de red imprime cuando la orden no existe o no está permitida
+#: (IOS y Comware «% Invalid/Unrecognized…», Huawei «Error: Unrecognized
+#: command», Aruba «Invalid input»). Para `ssh` eso es «entré y me contestó»:
+#: salida no vacía. Mandarla como configuración guardada haría al servidor
+#: comparar un mensaje de error con una configuración y avisar de cambios sin
+#: guardar que no existen.
+_CLI_REJECTION_RE = re.compile(
+    r"^\s*(?:%\s*(?:Invalid|Ambiguous|Incomplete|Unrecognized|Unknown|Error)"
+    r"|Error:\s*Unrecognized|Invalid input|Unknown command|Line has invalid autocommand)",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+#: Una respuesta de rechazo son una o dos líneas. Una configuración de verdad
+#: son decenas, y así una que cite «Error:» en un banner no se confunde.
+_REJECTION_MAX_LINES = 5
 
 
 # --- El colector ----------------------------------------------------------------
@@ -510,6 +542,63 @@ def fetch_config(
         # sería peor que no guardarla: parecería completa.
         return ""
     return output
+
+
+def rejected_by_cli(output: str) -> bool:
+    """Si esa salida es la CLI diciendo «esa orden no existe aquí», no una copia."""
+    lines = [line for line in output.splitlines() if line.strip()]
+    return 0 < len(lines) <= _REJECTION_MAX_LINES and _CLI_REJECTION_RE.search(output) is not None
+
+
+def fetch_configs(
+    host: str,
+    credential: creds.Credential,
+    family: str,
+    logins: tasking.Logins | None = None,
+    errors: list | None = None,
+) -> dict[str, str]:
+    """Las copias de ese equipo para el hallazgo `config`: ``config`` y, en las
+    familias que la distinguen, ``saved_config``.
+
+    Vacío si la que está en marcha no sale: sin ella no hay copia. La guardada
+    es un extra encima: si la orden falla, vuelve vacía, pasa del tope o la CLI
+    la rechaza, el hallazgo va **sin la clave** --nunca con una cadena vacía:
+    para el servidor «sin clave» es «no lo sé» y una vacía sería «no hay nada
+    guardado»--, se anota y se sigue. Nada de aquí tumba el colector.
+
+    Es una **segunda conexión** con la misma credencial: `ssh.run` es un proceso
+    `ssh` por orden, sin sesión que mantener, y en un IOS no se pueden encadenar
+    dos órdenes en un canal exec. Reutilizar la conexión sería reescribir el
+    transporte (ControlMaster) para ahorrar un inicio de sesión que ya entró.
+    """
+    command = CAPTURE_COMMANDS.get(family, "")
+    if not command:
+        return {}
+    running = fetch_config(host, credential, command, logins)
+    if not running.strip():
+        return {}
+    copies = {"config": running}
+    saved_command = SAVED_CONFIG_COMMANDS.get(family, "")
+    if not saved_command:
+        return copies
+    try:
+        saved = fetch_config(host, credential, saved_command, logins)
+    except Exception:  # noqa: BLE001 - la guardada es un extra; nunca se lleva por delante la copia
+        saved = ""
+    if saved.strip() and not rejected_by_cli(saved):
+        copies["saved_config"] = saved
+    elif errors is not None:
+        errors.append(
+            collector_note(
+                "ssh",
+                "saved_config_unavailable",
+                f"{host}: no entregó la configuración guardada («{saved_command}»); la copia va sin ella",
+                ip=host,
+                family=family,
+                command=saved_command,
+            )
+        )
+    return copies
 
 
 def _capture_enabled(ctx: dict) -> bool:
@@ -677,19 +766,20 @@ class SshCollector:
             # Linux no es un archivo, y no se finge que lo sea. El hallazgo
             # «config» no pasa por la bandeja: el servidor lo adjunta directo
             # al equipo ya inventariado, y solo cuando el contenido cambió.
-            command = CAPTURE_COMMANDS.get(data.get("family", ""), "")
-            if not capture or credential is None or not command:
+            # Donde la familia distingue la guardada, va también (`saved_config`).
+            family = data.get("family", "")
+            if not capture or credential is None or family not in CAPTURE_COMMANDS:
                 continue
-            content = fetch_config(ip, credential, command, tasking.Logins(ctx, self.name, "ssh", ip, sweep_mac))
-            if not content.strip():
+            copies = fetch_configs(ip, credential, family, tasking.Logins(ctx, self.name, "ssh", ip, sweep_mac), errors)
+            if not copies:
                 continue
             findings.append(
                 Finding(
                     kind="config",
                     identity=identity,
                     payload={
-                        "config": content,
-                        "family": data.get("family", ""),
+                        **copies,
+                        "family": family,
                         "hostname": data.get("hostname", ""),
                         "ip": ip,
                         "mac": sweep_mac or own_mac,
@@ -710,10 +800,11 @@ class SshCollector:
         mem = tasking.memory(ctx)
         if mem is None or not _capture_enabled(ctx):
             return []
+        errors = ctx.setdefault("errors", [])
         jobs: list[tuple[str, str, dict, creds.Credential, str]] = []
         for ip, mac, entry in tasking.alive_from_memory(ctx, mem.config_hosts()):
-            command = CAPTURE_COMMANDS.get(str(entry.get("family") or ""), "")
-            if not command:
+            family = str(entry.get("family") or "")
+            if family not in CAPTURE_COMMANDS:
                 continue
             ident = mem.remembered(tasking.host_key(ctx, ip, mac), "ssh")
             credential = next(
@@ -722,16 +813,16 @@ class SshCollector:
             )
             if credential is None:
                 continue
-            jobs.append((ip, mac, entry, credential, command))
+            jobs.append((ip, mac, entry, credential, family))
         if not jobs:
             return []
 
         progress = tasking.Progress(ctx, self.name, len(jobs))
 
-        def fetch(job: tuple[str, str, dict, creds.Credential, str]) -> str:
-            ip, mac, _entry, credential, command = job
+        def fetch(job: tuple[str, str, dict, creds.Credential, str]) -> dict[str, str]:
+            ip, mac, _entry, credential, family = job
             try:
-                return fetch_config(ip, credential, command, tasking.Logins(ctx, self.name, "ssh", ip, mac))
+                return fetch_configs(ip, credential, family, tasking.Logins(ctx, self.name, "ssh", ip, mac), errors)
             finally:
                 progress.tick()
 
@@ -739,8 +830,8 @@ class SshCollector:
             contents = list(pool.map(fetch, jobs))
 
         findings: list[Finding] = []
-        for (ip, mac, entry, _credential, _command), content in zip(jobs, contents):
-            if not content.strip():
+        for (ip, mac, entry, _credential, family), copies in zip(jobs, contents):
+            if not copies:
                 continue
             # La misma identidad con la que el inventario presentó al equipo:
             # el servidor cuelga la copia de esa fila.
@@ -751,8 +842,8 @@ class SshCollector:
                     kind="config",
                     identity=identity,
                     payload={
-                        "config": content,
-                        "family": str(entry.get("family") or ""),
+                        **copies,
+                        "family": family,
                         # Esta tarea no interroga, así que no sabe el nombre;
                         # el servidor engancha la copia por la identidad.
                         "hostname": "",
