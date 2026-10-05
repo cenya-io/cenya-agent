@@ -345,7 +345,10 @@ Con `task`:
   identidad, interfaces y vecinos, y si el equipo contesta a la UPS-MIB lo
   apunta en la memoria.
 - `configs`: `ssh` trabaja solo sobre `memory.config_hosts()`, y solo pide la
-  copia (con la credencial recordada).
+  copia (con la credencial recordada): la configuración en marcha (`config`)
+  y, en las familias que la distinguen (Cisco, Aruba, Dell, Huawei, Comware),
+  también la guardada (`saved_config`, `SAVED_CONFIG_COMMANDS`). Si la
+  guardada no sale, el hallazgo va sin la clave y la copia sale igual.
 - `ups`: `snmp` trabaja solo sobre `memory.ups_hosts()` y pide solo la UPS-MIB;
   el hallazgo lleva la misma identidad que el del inventario (la MAC guardada
   en la memoria) para refrescar la misma fila, no abrir otra.

@@ -473,8 +473,13 @@ barrido deja los hosts vivos y los demás solo llaman a esas puertas.
   MikroTik, Aruba, Juniper, Dell, Huawei, HPE/Comware, Fortinet y CheckPoint
   Gaia; ESXi se identifica pero no se captura) y la empuja aparte: el servidor la
   convierte en copia de configuración del equipo, solo si ya existe en el
-  inventario y solo si cambió respecto a la última. Se apaga desde
-  Ajustes → Agentes o con `CENYA_CAPTURE_CONFIGS=0`.
+  inventario y solo si cambió respecto a la última. En las familias que
+  distinguen la configuración **en marcha** de la **guardada** (la que carga
+  al reiniciar: Cisco, Aruba, Dell, Huawei y HPE/Comware) pide también la
+  guardada y la manda al lado (`saved_config`), para que el servidor avise de
+  los cambios que un reinicio perdería; si esa segunda orden falla, la copia
+  sale igual, sin ella. Se apaga desde Ajustes → Agentes o con
+  `CENYA_CAPTURE_CONFIGS=0`: un solo interruptor para las dos.
 - **winrm** (L4): lo mismo para Windows, por PowerShell remoto: nombre,
   dominio, fabricante, modelo, serie e interfaces.
 - **hypervisors** (L5): pregunta a los hipervisores que estén configurados:
@@ -492,6 +497,34 @@ enriqueciendo, no tres.
 Un colector que no puede correr --le falta su librería, le falta el binario, no
 hay credenciales-- lo dice en el resultado del barrido y devuelve cero
 hallazgos. **El barrido sale parcial, nunca roto.**
+
+### Qué órdenes ejecuta en los equipos por SSH
+
+Todas son de **solo lectura**: el agente nunca cambia nada en un equipo. La
+identificación se prueba en este orden hasta que una contesta; las dos
+columnas de configuración solo se piden a la familia que respondió, con la
+misma credencial, y cada orden es una conexión `ssh` (el transporte es un
+proceso por orden; no hay sesión que reutilizar). Donde la celda está vacía,
+esa familia no tiene esa configuración y no se le pide nada.
+
+| Familia | Identificación | Configuración en marcha | Configuración guardada |
+|---|---|---|---|
+| Linux | `uname -sr`, `cat /etc/os-release`, `hostname`, `ip -o link`, `ip -o -4 addr`, `cat /sys/class/dmi/id/{sys_vendor,product_name,product_serial}` | | |
+| Cisco IOS | `show version` | `show running-config` | `show startup-config` |
+| Aruba (AOS-S, AOS-CX, ProCurve) | `show version` | `show running-config` | `show startup-config` |
+| Dell Networking | `show version` | `show running-configuration` | `show startup-configuration` |
+| Juniper JunOS | `show version` | `show configuration \| display set` | *(la candidata es un borrador, no se pide)* |
+| Huawei VRP | `display version` | `display current-configuration` | `display saved-configuration` |
+| HPE / H3C Comware | `display version` | `display current-configuration` | `display saved-configuration` |
+| MikroTik RouterOS | `/system resource print`, `/system identity print`, `/system routerboard print` | `/export` | *(guarda al aplicar)* |
+| Fortinet FortiOS | `get system status` | `show full-configuration` | *(guarda al aplicar)* |
+| Check Point Gaia | `show version all` | `show configuration` | *(guarda al aplicar)* |
+| VMware ESXi | `vmware -v` | *(no se captura: no es un volcado de texto)* | |
+
+La lista vive en `agent/collectors/ssh.py` (`FAMILIES`, `CAPTURE_COMMANDS`
+y `SAVED_CONFIG_COMMANDS`); los tests fijan qué familias capturan y cuáles
+tienen configuración guardada, así que un cambio allí obliga a tocar esta
+tabla a la vez.
 
 ## A demanda
 
