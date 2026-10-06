@@ -363,3 +363,41 @@ class FinishTests(unittest.TestCase):
 
     def test_one_unit_is_never_a_list(self) -> None:
         self.assertEqual(stacks.finish([{"unit": 1, "serial": "A", "model": "", "role": ""}]), [])
+
+
+#: entPhysicalTable of a Catalyst 9300 stack of two, as walked: the "stack"
+#: entity (class 11) holds one chassis (class 3) per switch at its number;
+#: modules, ports and power supplies (9, 10, 6) are not units.
+ENTITY_TWO_CHASSIS = {
+    "classes": {"1": "11", "1000": "3", "1001": "9", "1010": "10", "2000": "3", "2001": "9", "1015": "6"},
+    "positions": {"1": "-1", "1000": "1", "1001": "0", "2000": "2", "2001": "0"},
+    "serials": {"1000": "FOC2231X0AA", "1001": "", "2000": "FOC2231X0BB"},
+    "models": {"1000": "C9300-48P", "2000": "C9300-24T", "1001": ""},
+}
+
+ENTITY_ONE_CHASSIS = {
+    "classes": {"1": "3", "2": "9", "3": "10"},
+    "positions": {"1": "-1"},
+    "serials": {"1": "FOC2001X0AB"},
+    "models": {"1": "WS-C2960X-48FPD-L"},
+}
+
+
+class EntityMibTests(unittest.TestCase):
+    def test_two_chassis_are_a_stack_numbered_by_position(self) -> None:
+        self.assertEqual(
+            stacks.entity_members(**ENTITY_TWO_CHASSIS),
+            [
+                {"unit": 1, "serial": "FOC2231X0AA", "model": "C9300-48P", "role": ""},
+                {"unit": 2, "serial": "FOC2231X0BB", "model": "C9300-24T", "role": ""},
+            ],
+        )
+
+    def test_one_chassis_is_not_a_stack(self) -> None:
+        self.assertEqual(stacks.entity_members(**ENTITY_ONE_CHASSIS), [])
+
+    def test_without_usable_positions_the_chassis_are_numbered_in_order(self) -> None:
+        members = stacks.entity_members(
+            {"20": "3", "3": "3"}, {"20": "0", "3": "0"}, {"3": "A", "20": "B"}, {}
+        )
+        self.assertEqual([(m["unit"], m["serial"]) for m in members], [(1, "A"), (2, "B")])

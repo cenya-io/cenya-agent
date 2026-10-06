@@ -288,3 +288,56 @@ def add_manuinfo(members: list[Member], output: str) -> list[Member]:
         member["serial"] = member["serial"] or serial
         member["model"] = member["model"] or model
     return members
+
+
+# --- SNMP: ENTITY-MIB entPhysicalTable --------------------------------------
+
+#: entPhysicalClass value for a chassis: one per physical unit in a stack.
+ENTITY_CLASS_CHASSIS = "3"
+
+
+def entity_members(
+    classes: dict[str, str], positions: dict[str, str], serials: dict[str, str], models: dict[str, str]
+) -> list[Member]:
+    """The units of a stack from ENTITY-MIB columns, each ``{entPhysicalIndex:
+    text}``: every row of class chassis is a unit.
+
+    The unit number is entPhysicalParentRelPos (a Catalyst stack puts each
+    switch at its stack number under the "stack" entity) when every chassis
+    has a distinct positive one; otherwise the chassis are numbered 1, 2...
+    in index order. ENTITY-MIB does not say who is master, so ``role`` is "".
+    """
+    chassis = sorted(
+        (index for index, value in classes.items() if str(value).strip() == ENTITY_CLASS_CHASSIS),
+        key=_index_key,
+    )
+    if len(chassis) < 2:
+        return []
+    numbers = [_positive(positions.get(index, "")) for index in chassis]
+    if any(number is None for number in numbers) or len(set(numbers)) != len(numbers):
+        numbers = list(range(1, len(chassis) + 1))
+    members = [
+        {
+            "unit": number,
+            "serial": str(serials.get(index, "")).strip(),
+            "model": str(models.get(index, "")).strip(),
+            "role": "",
+        }
+        for index, number in zip(chassis, numbers)
+    ]
+    return finish(members)
+
+
+def _index_key(index: str) -> tuple[int, ...]:
+    try:
+        return tuple(int(part) for part in index.split("."))
+    except ValueError:
+        return (0,)
+
+
+def _positive(value: Any) -> int | None:
+    try:
+        number = int(str(value).strip())
+    except ValueError:
+        return None
+    return number if number > 0 else None

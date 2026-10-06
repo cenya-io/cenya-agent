@@ -245,6 +245,9 @@ def _inventory_findings(hosts: list[dict], answers: dict[str, dict]) -> list[Fin
                     # hallazgo y no en uno aparte: un SAI es un equipo más,
                     # y la huella tiene que seguir siendo una sola fila.
                     **({"ups": data["ups"]} if data.get("ups") else {}),
+                    # Only for a stack (two or more chassis in ENTITY-MIB);
+                    # never an empty list.
+                    **({"members": data["members"]} if data.get("members") else {}),
                 },
             )
         )

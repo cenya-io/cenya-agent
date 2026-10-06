@@ -22,6 +22,7 @@ import re
 from typing import Any, Callable
 
 from agent import credentials as creds
+from agent import stacks
 
 try:
     from pysnmp.hlapi.asyncio import (
@@ -97,6 +98,12 @@ CDP_PORT_OID = "1.3.6.1.4.1.9.9.23.1.2.1.1.7"  # cdpCacheDevicePort
 FDB_PORT_OID = "1.3.6.1.2.1.17.7.1.2.2.1.2"  # dot1qTpFdbPort, index = vlan.mac octets
 BRIDGE_PORT_IFINDEX_OID = "1.3.6.1.2.1.17.1.4.1.2"  # dot1dBasePortIfIndex
 # Cisco hides each VLAN's FDB behind community@vlan; the VLAN list lives here.
+# ENTITY-MIB entPhysicalTable: the units of a stack, one chassis row each.
+ENTITY_CLASS_OID = "1.3.6.1.2.1.47.1.1.1.1.5"  # entPhysicalClass, 3 = chassis
+ENTITY_POSITION_OID = "1.3.6.1.2.1.47.1.1.1.1.6"  # entPhysicalParentRelPos
+ENTITY_SERIAL_OID = "1.3.6.1.2.1.47.1.1.1.1.11"  # entPhysicalSerialNum
+ENTITY_MODEL_OID = "1.3.6.1.2.1.47.1.1.1.1.13"  # entPhysicalModelName
+
 CISCO_ENTERPRISE_PREFIX = "1.3.6.1.4.1.9"
 CISCO_VTP_VLAN_OID = "1.3.6.1.4.1.9.9.46.1.3.1.1.2"  # vtpVlanState, index = VLAN id
 MAX_CISCO_VLANS = 32
@@ -266,6 +273,24 @@ async def _query_neighbors(engine, host: str, auth: Auth) -> list[dict[str, str]
     return neighbors
 
 
+async def _query_members(engine, host: str, auth: Auth) -> list[dict[str, Any]]:
+    """The units of a stack from ENTITY-MIB, or [] for a single unit.
+
+    The class column goes first and alone: on a lone switch -- the usual
+    case -- one chassis row means the other three columns are never asked.
+    """
+    classes = {index: _text(value) for index, value in (await _walk(engine, host, auth, ENTITY_CLASS_OID)).items()}
+    if sum(1 for value in classes.values() if value == stacks.ENTITY_CLASS_CHASSIS) < 2:
+        return []
+    columns: dict[str, dict[str, str]] = {}
+    for name, oid in (("position", ENTITY_POSITION_OID), ("serial", ENTITY_SERIAL_OID), ("model", ENTITY_MODEL_OID)):
+        try:
+            columns[name] = {index: _text(value) for index, value in (await _walk(engine, host, auth, oid)).items()}
+        except Exception:  # noqa: BLE001 - a missing column leaves that field empty
+            columns[name] = {}
+    return stacks.entity_members(classes, columns["position"], columns["serial"], columns["model"])
+
+
 async def _query_fdb(engine, host: str, auth: Auth, object_id: str) -> list[dict[str, str]]:
     """MAC -> bridge port. Cisco slices the table per VLAN: behind
     ``community@vlan`` in v2c, behind the ``vlan-N`` context in v3; everyone
@@ -385,6 +410,12 @@ async def _inventory(engine, host: str, auth: Auth, system: dict[str, str]) -> d
         ups = await _get(engine, host, auth, UPS_OIDS) or {}
     except Exception:  # noqa: BLE001
         ups = {}
+    # The units of a stack, opportunistic too: a device without ENTITY-MIB
+    # is simply one without `members`.
+    try:
+        members = await _query_members(engine, host, auth)
+    except Exception:  # noqa: BLE001
+        members = []
     return {
         "name": system.get("name", ""),
         "description": system.get("description", ""),
@@ -395,6 +426,7 @@ async def _inventory(engine, host: str, auth: Auth, system: dict[str, str]) -> d
         "neighbors": neighbors,
         "fdb": fdb,
         "ups": _ups_reading(ups),
+        "members": members,
     }
 
 
