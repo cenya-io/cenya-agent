@@ -507,22 +507,27 @@ misma credencial, y cada orden es una conexión `ssh` (el transporte es un
 proceso por orden; no hay sesión que reutilizar). Donde la celda está vacía,
 esa familia no tiene esa configuración y no se le pide nada.
 
-| Familia | Identificación | Configuración en marcha | Configuración guardada |
-|---|---|---|---|
-| Linux | `uname -sr`, `cat /etc/os-release`, `hostname`, `ip -o link`, `ip -o -4 addr`, `cat /sys/class/dmi/id/{sys_vendor,product_name,product_serial}` | | |
-| Cisco IOS | `show version` | `show running-config` | `show startup-config` |
-| Aruba (AOS-S, AOS-CX, ProCurve) | `show version` | `show running-config` | `show startup-config` |
-| Dell Networking | `show version` | `show running-configuration` | `show startup-configuration` |
-| Juniper JunOS | `show version` | `show configuration \| display set` | *(la candidata es un borrador, no se pide)* |
-| Huawei VRP | `display version` | `display current-configuration` | `display saved-configuration` |
-| HPE / H3C Comware | `display version` | `display current-configuration` | `display saved-configuration` |
-| MikroTik RouterOS | `/system resource print`, `/system identity print`, `/system routerboard print` | `/export` | *(guarda al aplicar)* |
-| Fortinet FortiOS | `get system status` | `show full-configuration` | *(guarda al aplicar)* |
-| Check Point Gaia | `show version all` | `show configuration` | *(guarda al aplicar)* |
-| VMware ESXi | `vmware -v` | *(no se captura: no es un volcado de texto)* | |
+La columna «Unidades del stack» es la orden que lista las cajas de un stack
+(cada una con su número, modelo y serie, y quién manda), en las familias que
+no lo cuentan ya al identificarse. Se pide con la misma credencial, en el
+inventario, y solo si la identificación no las trajo.
 
-La lista vive en `agent/collectors/ssh.py` (`FAMILIES`, `CAPTURE_COMMANDS`
-y `SAVED_CONFIG_COMMANDS`); los tests fijan qué familias capturan y cuáles
+| Familia | Identificación | Unidades del stack | Configuración en marcha | Configuración guardada |
+|---|---|---|---|---|
+| Linux | `uname -sr`, `cat /etc/os-release`, `hostname`, `ip -o link`, `ip -o -4 addr`, `cat /sys/class/dmi/id/{sys_vendor,product_name,product_serial}` | | | |
+| Cisco IOS | `show version` | *(las trae `show version`)* | `show running-config` | `show startup-config` |
+| Aruba (AOS-S, AOS-CX, ProCurve) | `show version` | `show stacking` | `show running-config` | `show startup-config` |
+| Dell Networking | `show version` | `show switch` *(solo si `show version` describe una sola unidad)* | `show running-configuration` | `show startup-configuration` |
+| Juniper JunOS | `show version` | `show virtual-chassis` | `show configuration \| display set` | *(la candidata es un borrador, no se pide)* |
+| Huawei VRP | `display version` | | `display current-configuration` | `display saved-configuration` |
+| HPE / H3C Comware | `display version` | `display irf`, y `display device manuinfo` si hay dos o más miembros | `display current-configuration` | `display saved-configuration` |
+| MikroTik RouterOS | `/system resource print`, `/system identity print`, `/system routerboard print` | | `/export` | *(guarda al aplicar)* |
+| Fortinet FortiOS | `get system status` | | `show full-configuration` | *(guarda al aplicar)* |
+| Check Point Gaia | `show version all` | | `show configuration` | *(guarda al aplicar)* |
+| VMware ESXi | `vmware -v` | | *(no se captura: no es un volcado de texto)* | |
+
+La lista vive en `agent/collectors/ssh.py` (`FAMILIES`, `STACK_COMMANDS`,
+`CAPTURE_COMMANDS` y `SAVED_CONFIG_COMMANDS`); los tests fijan qué familias capturan y cuáles
 tienen configuración guardada, así que un cambio allí obliga a tocar esta
 tabla a la vez.
 

@@ -343,7 +343,13 @@ Con `task`:
 
 - `inventory`: `ssh` interroga pero **no** copia configuraciones; `snmp` pide
   identidad, interfaces y vecinos, y si el equipo contesta a la UPS-MIB lo
-  apunta en la memoria.
+  apunta en la memoria. Un stack (varias cajas con una sola IP de gestión)
+  lleva en su hallazgo `host` la clave opcional `members`: una entrada
+  `{"unit": int, "serial": str, "model": str, "role": "master" | "standby" | "member" | ""}`
+  por unidad física, **solo con dos o más** (con una sola, la clave no va;
+  nunca una lista vacía). La sacan `ssh` (`STACK_COMMANDS` y `show version`,
+  analizadores en `agent/stacks.py`) y `snmp` (ENTITY-MIB, filas de clase
+  chasis); la serie principal del hallazgo es la del máster.
 - `configs`: `ssh` trabaja solo sobre `memory.config_hosts()`, y solo pide la
   copia (con la credencial recordada): la configuración en marcha (`config`)
   y, en las familias que la distinguen (Cisco, Aruba, Dell, Huawei, Comware),
