@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from agent import credentials as creds
-from agent import net, ssh
+from agent import net, ssh, stacks
 from agent.collectors import register, tasking
 from agent.collectors.base import Finding
 from agent.notes import collector_note
@@ -161,8 +161,9 @@ def _first_line(lines: list[str] | None) -> str:
 
 
 _CISCO_HOSTNAME_RE = re.compile(r"^(\S+)\s+uptime is", re.MULTILINE)
-_CISCO_SERIAL_RE = re.compile(r"[Ss]ystem serial number\s*:\s*(\S+)")
-_CISCO_MODEL_RE = re.compile(r"[Mm]odel [Nn]umber\s*:\s*(\S+)")
+# IOS writes "System serial number", IOS-XE "System Serial Number": either case.
+_CISCO_SERIAL_RE = re.compile(r"system serial number\s*:\s*(\S+)", re.IGNORECASE)
+_CISCO_MODEL_RE = re.compile(r"model number\s*:\s*(\S+)", re.IGNORECASE)
 _CISCO_BANNER_RE = re.compile(r"^(Cisco IOS.*|.*Software.*Version.*)$", re.MULTILINE)
 
 
@@ -180,7 +181,11 @@ def parse_cisco(output: str) -> dict[str, Any]:
     serial = _CISCO_SERIAL_RE.search(output)
     model = _CISCO_MODEL_RE.search(output)
     description = (banner.group(1).strip() if banner else "Cisco IOS")
+    # A stack lists every unit in this same output; the first serial above is
+    # the active unit's, which stays the main one.
+    members = stacks.cisco_members(output)
     return {
+        **({"members": members} if members else {}),
         "family": "cisco",
         "hostname": hostname.group(1) if hostname else "",
         "description": description,
@@ -278,15 +283,20 @@ def parse_dell(output: str) -> dict[str, Any]:
     if "Dell" not in output:
         return {}
     banner = next((line.strip() for line in output.splitlines() if "Dell" in line), "Dell Networking")
+    # N-series (OS6) prints "Serial Number....." per unit; the first section is
+    # the management unit. OS10 has neither and keeps both empty.
+    serial, model = stacks.dell_identity(output)
+    members = stacks.dell_members_from_version(output)
     return {
+        **({"members": members} if members else {}),
         "family": "dell",
         "hostname": "",
         "description": banner,
         "os": banner,
         "interfaces": [],
         "manufacturer": "Dell",
-        "model": "",
-        "serial": "",
+        "model": model,
+        "serial": serial,
     }
 
 
@@ -470,6 +480,78 @@ _CLI_REJECTION_RE = re.compile(
 #: Una respuesta de rechazo son una o dos líneas. Una configuración de verdad
 #: son decenas, y así una que cite «Error:» en un banner no se confunde.
 _REJECTION_MAX_LINES = 5
+
+
+#: The extra order that lists the units of a stack, for the families whose
+#: detection output does not. Cisco needs none: its `show version` already
+#: lists every unit with its serial. Dell asks only when its `show version`
+#: described a single unit (some OS6 releases print just the management one).
+#: Comware adds `display device manuinfo` for the serials, and only when
+#: `display irf` showed two or more members: a lone switch costs one order.
+STACK_COMMANDS: dict[str, str] = {
+    "dell": "show switch",
+    "aruba": "show stacking",
+    "junos": "show virtual-chassis",
+    "comware": "display irf",
+}
+COMWARE_MANUINFO_COMMAND = "display device manuinfo"
+
+
+def _ask(host: str, credential: creds.Credential, command: str, logins: tasking.Logins | None) -> str:
+    """The output of one more order with the credential that got in, or ""
+    when it did not connect, was skipped or the CLI rejected the order."""
+    answer = _login(logins, host, credential, command)
+    if answer is tasking.SKIPPED or not answer.connected:
+        return ""
+    output = answer.output or ""
+    return "" if rejected_by_cli(output) else output
+
+
+def stack_members(
+    host: str, credential: creds.Credential, data: dict[str, Any], logins: tasking.Logins | None = None
+) -> dict[str, Any]:
+    """``data`` with ``members`` when the device is a stack of two or more.
+
+    One more connection with **the credential that already got in** (never
+    another one: that would be failed logins for nothing), only for the
+    families in ``STACK_COMMANDS`` and only when detection did not already
+    bring the members. When the main serial or model is missing, the master's
+    fills it. Nothing here raises: a stack we cannot read is a host without
+    ``members``, and the server deduces the units from the port names.
+    """
+    family = str(data.get("family") or "")
+    command = STACK_COMMANDS.get(family)
+    if not command or data.get("members"):
+        return data
+    try:
+        output = _ask(host, credential, command, logins)
+        if not output:
+            return data
+        serial = str(data.get("serial") or "")
+        if family == "dell":
+            members = stacks.dell_members_from_switch(output, serial)
+        elif family == "aruba":
+            members = stacks.aruba_members(output)
+        elif family == "junos":
+            members = stacks.junos_members(output)
+            # A standalone EX answers too, with one row: its serial is worth
+            # keeping, since JunOS `show version` has none.
+            serial = serial or stacks.junos_master_serial(output)
+        else:
+            members = stacks.irf_members(output)
+            if members:
+                manuinfo = _ask(host, credential, COMWARE_MANUINFO_COMMAND, logins)
+                if manuinfo:
+                    stacks.add_manuinfo(members, manuinfo)
+    except Exception:  # noqa: BLE001 - the units are an extra; never lose the host for them
+        return data
+    master = next((m for m in members if m["role"] == stacks.MASTER), None)
+    enriched = {**data, "serial": serial or (master["serial"] if master else "")}
+    if not enriched.get("model") and master is not None:
+        enriched["model"] = master["model"]
+    if members:
+        enriched["members"] = members
+    return enriched
 
 
 # --- El colector ----------------------------------------------------------------
@@ -709,6 +791,10 @@ class SshCollector:
                 # entera: no se apunta como fallida.
                 full = full and not logins.skipped
                 tasking.settle(ctx, ip, by_ip[ip], "ssh", credential, attempted=True, full=full)
+                if data and credential is not None:
+                    # A stack answers as one host: ask for its units, with the
+                    # same credential, after the login rounds are settled.
+                    data = stack_members(ip, credential, data, logins)
                 return data, credential
             finally:
                 progress.tick()
@@ -757,6 +843,9 @@ class SshCollector:
                         "interfaces": data.get("interfaces") or [],
                         "family": data.get("family", ""),
                         "seen_by": "ssh",
+                        # Only for a stack of two or more units; never an
+                        # empty list (for the server, no key is "a single unit").
+                        **({"members": data["members"]} if data.get("members") else {}),
                     },
                 )
             )

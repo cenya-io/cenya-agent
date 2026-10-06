@@ -15,6 +15,7 @@ from typing import Any
 from unittest import mock
 
 from agent import ssh
+from agent.tests import test_stacks
 from agent.credentials import Credential
 from agent.collectors import ssh as ssh_collector
 from agent.collectors.ssh import (
@@ -1218,3 +1219,144 @@ class NewFamilyCaptureTests(unittest.TestCase):
         )
         for command in CAPTURE_COMMANDS.values():
             self.assertTrue(command.strip())
+
+
+# --- Stacks: the units behind one management address ------------------------------
+
+
+class StackMembersTests(unittest.TestCase):
+    """`members` in the host finding: one entry per physical unit, only for two
+    or more, with the master's serial as the main one. The vendor captures
+    live in `test_stacks`; here, which orders go out and what reaches the payload."""
+
+    ROOT = Credential(kind="ssh", username="admin", key_file="/x/id_ed25519")
+
+    def _members(self, data: dict, answers: dict[str, ssh.Answer]) -> tuple[dict, list[str]]:
+        from agent.collectors.ssh import stack_members
+
+        fake = _FakeSsh(answers)
+        with mock.patch("agent.collectors.ssh.ssh.run", fake):
+            result = stack_members("192.168.1.2", self.ROOT, data)
+        return result, [command for _, command in fake.calls]
+
+    def test_a_dell_whose_version_shows_one_unit_asks_show_switch(self) -> None:
+        from agent.collectors.ssh import parse_dell
+
+        data = parse_dell("Dell Networking N2048P\n" + test_stacks.DELL_VERSION_MANAGEMENT_ONLY)
+        self.assertNotIn("members", data)
+
+        result, calls = self._members(data, {"show switch": ssh.Answer(connected=True, output=test_stacks.DELL_SHOW_SWITCH)})
+
+        self.assertEqual(calls, ["show switch"])
+        self.assertEqual([m["unit"] for m in result["members"]], [1, 2])
+        self.assertEqual(result["serial"], "CN0D4T5D2829832K0042A00")
+
+    def test_a_dell_whose_version_lists_the_units_asks_nothing_more(self) -> None:
+        from agent.collectors.ssh import parse_dell
+
+        data = parse_dell("Dell Networking N3048P\n" + test_stacks.DELL_VERSION_STACK_OF_TWO)
+
+        result, calls = self._members(data, {})
+
+        self.assertEqual(calls, [])
+        self.assertEqual(len(result["members"]), 2)
+        self.assertEqual(result["serial"], "CN0K9F1P2829831A0012A00")
+
+    def test_an_aruba_stack_of_four(self) -> None:
+        result, calls = self._members(
+            {"family": "aruba", "serial": "", "model": ""},
+            {"show stacking": ssh.Answer(connected=True, output=test_stacks.ARUBA_STACK_OF_FOUR)},
+        )
+
+        self.assertEqual(calls, ["show stacking"])
+        self.assertEqual(len(result["members"]), 4)
+        self.assertEqual(result["model"], "HP JL075A 3810M-16SFP+-2-slot Switch")
+
+    def test_a_juniper_virtual_chassis_of_two_gives_the_master_serial(self) -> None:
+        result, calls = self._members(
+            {"family": "junos", "serial": "", "model": "ex4300-48p"},
+            {"show virtual-chassis": ssh.Answer(connected=True, output=test_stacks.JUNOS_VC_OF_TWO)},
+        )
+
+        self.assertEqual(calls, ["show virtual-chassis"])
+        self.assertEqual([m["unit"] for m in result["members"]], [0, 1])
+        self.assertEqual(result["serial"], "PE3714100218")
+
+    def test_a_standalone_juniper_keeps_its_serial_and_has_no_members(self) -> None:
+        result, _ = self._members(
+            {"family": "junos", "serial": "", "model": "ex2300-24p"},
+            {"show virtual-chassis": ssh.Answer(connected=True, output=test_stacks.JUNOS_VC_ALONE)},
+        )
+
+        self.assertNotIn("members", result)
+        self.assertEqual(result["serial"], "NV0217290101")
+
+    def test_a_comware_irf_asks_manuinfo_only_when_there_is_a_fabric(self) -> None:
+        manuinfo = ssh.Answer(connected=True, output=test_stacks.MANUINFO_OF_THREE)
+        result, calls = self._members(
+            {"family": "comware", "serial": "", "model": ""},
+            {"display irf": ssh.Answer(connected=True, output=test_stacks.IRF_OF_THREE), "manuinfo": manuinfo},
+        )
+
+        self.assertEqual(calls, ["display irf", "display device manuinfo"])
+        self.assertEqual([m["serial"] for m in result["members"]], ["CN64GPV0AA", "CN64GPV0BB", "CN64GPV0CC"])
+        self.assertEqual(result["serial"], "CN64GPV0AA")
+
+        alone, calls = self._members(
+            {"family": "comware", "serial": "", "model": ""},
+            {"display irf": ssh.Answer(connected=True, output=test_stacks.IRF_ALONE), "manuinfo": manuinfo},
+        )
+        self.assertEqual(calls, ["display irf"])
+        self.assertNotIn("members", alone)
+
+    def test_families_without_a_stack_order_ask_nothing(self) -> None:
+        for family in ("cisco", "huawei", "mikrotik", "fortinet", "linux"):
+            result, calls = self._members({"family": family, "serial": "S"}, {})
+            self.assertEqual(calls, [], family)
+            self.assertNotIn("members", result)
+
+    def test_a_rejected_or_broken_order_leaves_the_host_as_it_was(self) -> None:
+        data = {"family": "aruba", "serial": "SG1", "model": ""}
+        rejected, _ = self._members(data, {"show stacking": ssh.Answer(connected=True, output="Invalid input: stacking\n")})
+        self.assertEqual(rejected["serial"], "SG1")
+        self.assertNotIn("members", rejected)
+
+        from agent.collectors.ssh import stack_members
+
+        with mock.patch("agent.collectors.ssh.ssh.run", side_effect=RuntimeError("boom")):
+            self.assertEqual(stack_members("192.168.1.2", self.ROOT, data), data)
+
+
+class StackPayloadTests(unittest.TestCase):
+    """The whole collector: `members` reaches the host finding only for a stack."""
+
+    def _host_payload(self, show_version: str) -> dict:
+        ctx: dict[str, Any] = {
+            "config": {"credentials": [{"kind": "ssh", "username": "admin", "key_file": "/k"}]},
+            "env": None,
+            "hosts": [{"ip": "192.168.1.2", "mac": "70:d3:79:aa:10:00"}],
+            "task": "inventory",
+        }
+        fake = _FakeSsh(
+            {"show version": ssh.Answer(connected=True, output=show_version)},
+            default=ssh.Answer(connected=True, output=IOS_RECHAZA_EL_COMANDO_DE_LINUX),
+        )
+        with mock.patch("agent.collectors.ssh.ssh.AVAILABLE", True), \
+             mock.patch("agent.collectors.ssh.ssh.PASSWORD_AUTH_AVAILABLE", True), \
+             mock.patch("agent.collectors.ssh.net.hosts_listening", return_value=["192.168.1.2"]), \
+             mock.patch("agent.collectors.ssh.ssh.run", fake):
+            findings = SshCollector().collect(ctx)
+        return next(f for f in findings if f.kind == "host").payload
+
+    def test_a_cisco_stack_of_three_sends_its_members(self) -> None:
+        payload = self._host_payload(test_stacks.CISCO_STACK_OF_THREE)
+
+        self.assertEqual([m["unit"] for m in payload["members"]], [1, 2, 3])
+        self.assertEqual(payload["members"][0]["role"], "master")
+        self.assertEqual(payload["serial"], "JAE24350ABC")
+
+    def test_a_single_cisco_sends_no_members_key(self) -> None:
+        payload = self._host_payload(test_stacks.CISCO_SINGLE)
+
+        self.assertNotIn("members", payload)
+        self.assertEqual(payload["serial"], "FOC2001X0AB")
