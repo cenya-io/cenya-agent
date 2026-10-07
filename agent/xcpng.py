@@ -29,7 +29,8 @@ import urllib.error
 import urllib.request
 from typing import Any
 
-from agent.hypervisor import MAX_DETAILED_VMS, TIMEOUT_SECONDS, HypervisorError
+from agent import tlspin
+from agent.hypervisor import MAX_DETAILED_VMS, TIMEOUT_SECONDS, HypervisorError, untrusted
 
 XCPNG_PORT = 443
 
@@ -57,12 +58,15 @@ class XcpNgClient:
     cambiar su bucle.
     """
 
-    def __init__(self, host: str, username: str, secret: str, *, port: int = 0, ca_file: str = "") -> None:
+    def __init__(
+        self, host: str, username: str, secret: str, *, port: int = 0, ca_file: str = "", tls_pin: str = ""
+    ) -> None:
         self.url = f"https://{host}:{port or XCPNG_PORT}/jsonrpc"
         self.username = username
         self.secret = secret
         self.session = ""
         self._ca_file = ca_file
+        self._tls_pin = tls_pin
         self._request_id = 0
         #: Perezoso a propósito: `ssl.create_default_context` carga el almacén
         #: de certificados del sistema, y en Windows eso cuesta más de un
@@ -80,9 +84,7 @@ class XcpNgClient:
         if self._opener is None:
             self._opener = urllib.request.build_opener(
                 _NoRedirects,
-                urllib.request.HTTPSHandler(
-                    context=ssl.create_default_context(cafile=self._ca_file or None)
-                ),
+                tlspin.https_handler(self._ca_file, self._tls_pin),
             )
         self._request_id += 1
         payload = json.dumps(
@@ -101,6 +103,8 @@ class XcpNgClient:
             raise HypervisorError(f"{exc.code} en {method}", status=exc.code) from exc
         except urllib.error.URLError as exc:
             # Al conectar o al mandar: la credencial no llegó a evaluarse.
+            if tlspin.is_untrusted(exc):
+                raise untrusted(self.url, exc) from exc
             raise HypervisorError(str(getattr(exc, "reason", exc)), unreachable=True) from exc
         except (TimeoutError, ssl.SSLError) as exc:
             raise HypervisorError(str(getattr(exc, "reason", exc))) from exc

@@ -7,10 +7,11 @@ hablar con el servidor. Meter el SDK de VMware serían decenas de megas y una
 cadena de dependencias entera para hacer cuatro peticiones GET.
 
 **La verificación de TLS no se desactiva.** El vCenter de una pyme casi siempre
-lleva un certificado autofirmado, y la salida correcta es la misma que ya usa
-`agent.client` con el servidor: dar la CA que lo firma. Sin verificación,
-cualquiera en medio de la red se queda con la contraseña del vCenter, que es la
-llave de todas las máquinas virtuales de la empresa.
+lleva un certificado autofirmado, y hay dos salidas correctas: dar la CA que lo
+firma, o confiar en ese certificado concreto desde la web (`agent.tlspin`, su
+huella viaja con la credencial). Sin verificación, cualquiera en medio de la
+red se queda con la contraseña del vCenter, que es la llave de todas las
+máquinas virtuales de la empresa.
 """
 
 from __future__ import annotations
@@ -22,6 +23,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from typing import Any
+
+from agent import tlspin
 
 TIMEOUT_SECONDS = 20
 VMWARE_PORT = 443
@@ -51,12 +54,21 @@ class HypervisorError(Exception):
     """
 
     def __init__(
-        self, message: str, *, status: int | None = None, unreachable: bool = False, logged_in: bool = False
+        self,
+        message: str,
+        *,
+        status: int | None = None,
+        unreachable: bool = False,
+        logged_in: bool = False,
+        certificate: dict[str, str] | None = None,
     ) -> None:
         super().__init__(message)
         self.status = status
         self.unreachable = unreachable
         self.logged_in = logged_in
+        #: Cuando no se fió del certificado: el que presentó (`tlspin.describe`),
+        #: para que la web pueda ofrecer confiar en él.
+        self.certificate = certificate
 
 
 def login_outcome(error: "HypervisorError | None") -> str:
@@ -66,9 +78,11 @@ def login_outcome(error: "HypervisorError | None") -> str:
     return "unreachable" if error.unreachable else "auth_failed"
 
 
-def _context(ca_file: str) -> ssl.SSLContext:
-    """El contexto TLS: el de siempre, o uno que confía además en esa CA."""
-    return ssl.create_default_context(cafile=ca_file or None)
+def untrusted(url: str, exc: BaseException) -> HypervisorError:
+    """El error de un certificado del que no se fía, con el certificado dentro."""
+    return HypervisorError(
+        str(getattr(exc, "reason", exc)), unreachable=True, certificate=tlspin.describe(url)
+    )
 
 
 class RestClient:
@@ -79,11 +93,9 @@ class RestClient:
     el identificador de sesión del vCenter.
     """
 
-    def __init__(self, base_url: str, *, ca_file: str = "") -> None:
+    def __init__(self, base_url: str, *, ca_file: str = "", tls_pin: str = "") -> None:
         self.base_url = base_url.rstrip("/")
-        self._opener = urllib.request.build_opener(
-            _NoRedirects, urllib.request.HTTPSHandler(context=_context(ca_file))
-        )
+        self._opener = urllib.request.build_opener(_NoRedirects, tlspin.https_handler(ca_file, tls_pin))
 
     def request(
         self,
@@ -108,6 +120,8 @@ class RestClient:
         except urllib.error.URLError as exc:
             # Al conectar o al mandar (TLS incluido): la credencial no llegó a
             # evaluarse.
+            if tlspin.is_untrusted(exc):
+                raise untrusted(self.base_url, exc) from exc
             raise HypervisorError(str(getattr(exc, "reason", exc)), unreachable=True) from exc
         except (TimeoutError, ssl.SSLError) as exc:
             # Esperando la respuesta, con la petición ya enviada: cuenta.
@@ -153,8 +167,10 @@ def _values(answer: Any) -> list[dict[str, Any]]:
 class VMwareClient:
     """Lo justo del vCenter: sus hosts y sus máquinas virtuales."""
 
-    def __init__(self, host: str, username: str, secret: str, *, port: int = 0, ca_file: str = "") -> None:
-        self.rest = RestClient(f"https://{host}:{port or VMWARE_PORT}", ca_file=ca_file)
+    def __init__(
+        self, host: str, username: str, secret: str, *, port: int = 0, ca_file: str = "", tls_pin: str = ""
+    ) -> None:
+        self.rest = RestClient(f"https://{host}:{port or VMWARE_PORT}", ca_file=ca_file, tls_pin=tls_pin)
         self.username = username
         self.secret = secret
         self.prefix = ""
@@ -326,8 +342,10 @@ class ProxmoxClient:
     se puede limitar a solo lectura y caduca cuando se quiera.
     """
 
-    def __init__(self, host: str, username: str, secret: str, *, port: int = 0, ca_file: str = "") -> None:
-        self.rest = RestClient(f"https://{host}:{port or PROXMOX_PORT}", ca_file=ca_file)
+    def __init__(
+        self, host: str, username: str, secret: str, *, port: int = 0, ca_file: str = "", tls_pin: str = ""
+    ) -> None:
+        self.rest = RestClient(f"https://{host}:{port or PROXMOX_PORT}", ca_file=ca_file, tls_pin=tls_pin)
         self.username = username
         self.secret = secret
         self.headers: dict[str, str] = {}

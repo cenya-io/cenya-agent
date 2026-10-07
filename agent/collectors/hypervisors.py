@@ -121,11 +121,23 @@ class HypervisorCollector:
             # el barrido: se anota y se sigue con el siguiente. El detalle va
             # tal cual: lo escribe el hipervisor, o es un error de red.
             detail = creds.scrub(str(exc), credential)
-            errors.append(
-                collector_note(
-                    "hypervisors", "failed", f"{credential.host}: {detail}", host=credential.host, detail=detail
+            if exc.certificate:
+                # Lo arregla una persona en la web: «Probar» la credencial
+                # enseña ese certificado y deja confiar en él.
+                errors.append(
+                    collector_note(
+                        "hypervisors",
+                        "tls_untrusted",
+                        f"{credential.host}: el certificado no es de confianza en este equipo",
+                        host=credential.host,
+                    )
                 )
-            )
+            else:
+                errors.append(
+                    collector_note(
+                        "hypervisors", "failed", f"{credential.host}: {detail}", host=credential.host, detail=detail
+                    )
+                )
             self._remember(ctx, key, credential, ok=False)
             return []
         self._remember(ctx, key, credential, ok=True)
@@ -176,7 +188,7 @@ class HypervisorCollector:
             credential.username,
             credential.secret,
             port=credential.port,
-            ca_file=creds.ca_file_for(ctx, credential),
+            **creds.client_options(ctx, credential),
         )
         logins = tasking.Logins(ctx, "hypervisors", credential.kind, server)
         error = logins.run(credential, lambda: _login(client), hypervisor.login_outcome)

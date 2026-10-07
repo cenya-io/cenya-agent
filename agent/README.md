@@ -580,10 +580,20 @@ CENYA_CREDENTIALS='[
 ```
 
 Campos admitidos: `kind` y `username` son obligatorios; `secret`, `host`,
-`port`, `key_file`, `ca_file` y `label` son opcionales. Un JSON mal escrito
+`port`, `key_file`, `ca_file`, `tls_pin` y `label` son opcionales. Un JSON mal escrito
 **no tumba el arranque**: el agente se queda sin esas credenciales y lo dice,
 igual que si no hubiera ninguna. Morir ahí dejaría sin barrido también al ping
 y al SNMP, que no tienen la culpa.
+
+**Certificados de vCenter, Proxmox y XCP-ng.** La verificación TLS no se
+desactiva nunca. Si el certificado lo firma una autoridad que el equipo no
+conoce, hay dos salidas: `ca_file` con esa autoridad, o `tls_pin`, la huella
+SHA-256 del certificado concreto (64 hexadecimales; también con `:`). Con
+huella se acepta ese certificado y ningún otro, y se comprueba al terminar el
+saludo TLS, antes de mandar nada. Desde la web es el botón «Confiar en este
+certificado» de «Probar»: cuando no se fía, el agente cuenta qué certificado le
+presentaron (huella, sujeto, emisor y caducidad) y la persona decide. WinRM y
+Hyper-V siguen con `ca_file`.
 
 ## Dependencias
 

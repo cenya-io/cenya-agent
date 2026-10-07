@@ -120,10 +120,17 @@ def _test_hypervisor(credential: creds.Credential, ctx: dict) -> Outcome:
             credential.username,
             credential.secret,
             port=credential.port,
-            ca_file=creds.ca_file_for(ctx, credential),
+            **creds.client_options(ctx, credential),
         )
         client.login()
     except hypervisor.HypervisorError as exc:
+        if exc.certificate:
+            # El certificado que presentó, para que la web ofrezca confiar en él.
+            note = probe_note(
+                "hypervisor", "tls_untrusted", f"{credential.host}: el certificado no es de confianza en este equipo",
+                host=credential.host,
+            )
+            return DONE, {"ok": False, "line": _line(note), "certificate": dict(exc.certificate)}, []
         detail = scrub(str(exc), secrets)[:120]
         note = probe_note("hypervisor", "failed", f"{credential.host}: {detail}", host=credential.host, detail=detail)
         return DONE, {"ok": False, "line": _line(note)}, []

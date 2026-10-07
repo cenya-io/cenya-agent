@@ -77,7 +77,11 @@ STATES: dict[str, str] = {
 class HyperVClient:
     """Lo justo de un Hyper-V: él mismo como host, y sus máquinas virtuales."""
 
-    def __init__(self, host: str, username: str, secret: str, *, port: int = 0, ca_file: str = "") -> None:
+    def __init__(
+        self, host: str, username: str, secret: str, *, port: int = 0, ca_file: str = "", tls_pin: str = ""
+    ) -> None:
+        # `tls_pin` se acepta por el contrato común y no se usa: WinRM va por
+        # `requests`, que sigue con la CA (`ca_file`).
         self.host = host
         self.username = username
         self.secret = secret

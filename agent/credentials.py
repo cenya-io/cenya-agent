@@ -26,6 +26,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from agent import tlspin
+
 SSH = "ssh"
 WINRM = "winrm"
 VMWARE = "vmware"
@@ -125,6 +127,10 @@ class Credential:
     #: firma la propia empresa. La salida correcta ante un certificado
     #: autofirmado es esta, no desactivar la verificación.
     ca_file: str = ""
+    #: La huella SHA-256 del certificado en el que alguien decidió confiar desde
+    #: la web («Confiar en este certificado», `agent.tlspin`). Con ella, ese
+    #: certificado y ningún otro; sin ella, la verificación de siempre.
+    tls_pin: str = ""
     #: Solo para SNMPv3. El usuario es el usuario SNMP y `secret` la contraseña
     #: de autenticación; estos tres completan el juego. Sin `secret` el nivel
     #: es noAuthNoPriv; con `secret` pero sin `priv_secret`, authNoPriv.
@@ -222,6 +228,7 @@ def _one(raw: Any, position: int = 0, secrets: Mapping[str, Any] | None = None) 
         port=port,
         key_file=str(raw.get("key_file") or "").strip(),
         ca_file=str(raw.get("ca_file") or "").strip(),
+        tls_pin=tlspin.clean_pin(raw.get("tls_pin")),
         auth_protocol=str(raw.get("auth_protocol") or "").strip().lower(),
         priv_protocol=str(raw.get("priv_protocol") or "").strip().lower(),
         priv_secret=_secret_text(source.get("priv_secret")),
@@ -463,6 +470,15 @@ def ca_file_for(ctx: dict, credential: Credential) -> str:
         return credential.ca_file
     env = ctx.get("env")
     return getattr(env, "ca_bundle", "") or ""
+
+
+def client_options(ctx: dict, credential: Credential) -> dict[str, str]:
+    """Cómo verificar el TLS de un hipervisor: su CA y, si alguien confió en un
+    certificado concreto desde la web, su huella (`agent.tlspin`)."""
+    options = {"ca_file": ca_file_for(ctx, credential)}
+    if credential.tls_pin:
+        options["tls_pin"] = credential.tls_pin
+    return options
 
 
 def for_kind(ctx: dict, kind: str) -> list[Credential]:

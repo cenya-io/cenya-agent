@@ -8,4 +8,4 @@ server remembers everything that matters.
 
 # La misma que declara agent/pyproject.toml: es la que viaja en el latido y la
 # que enseña Ajustes -> Agentes, así que las dos tienen que contar lo mismo.
-__version__ = "0.11.4"
+__version__ = "0.11.5"
