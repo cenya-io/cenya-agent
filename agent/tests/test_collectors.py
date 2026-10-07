@@ -435,3 +435,87 @@ class ArpDecodingTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StackMembersSnmpTests(unittest.TestCase):
+    """ENTITY-MIB: two or more chassis are a stack and go as `members`; one
+    chassis, or a device that does not answer, is a host without the key."""
+
+    @staticmethod
+    def _fake_walk(tables: dict[str, dict[str, str]], calls: list[str] | None = None, fail: bool = False):
+        async def walk(engine, host, auth, oid, context_name=""):  # noqa: ANN001 - mirrors snmp._walk
+            if calls is not None:
+                calls.append(oid)
+            if fail and oid.startswith("1.3.6.1.2.1.47."):
+                raise RuntimeError("noSuchObject")
+            return dict(tables.get(oid, {}))
+
+        return walk
+
+    @staticmethod
+    def _tables(entity: dict) -> dict[str, dict[str, str]]:
+        from agent import snmp
+
+        return {
+            snmp.ENTITY_CLASS_OID: entity["classes"],
+            snmp.ENTITY_POSITION_OID: entity["positions"],
+            snmp.ENTITY_SERIAL_OID: entity["serials"],
+            snmp.ENTITY_MODEL_OID: entity["models"],
+        }
+
+    def test_two_chassis_become_members(self) -> None:
+        import asyncio
+
+        from agent import snmp
+        from agent.tests.test_stacks import ENTITY_TWO_CHASSIS
+
+        with mock.patch("agent.snmp._walk", self._fake_walk(self._tables(ENTITY_TWO_CHASSIS))):
+            members = asyncio.run(snmp._query_members(None, "192.168.1.2", "public"))
+
+        self.assertEqual([(m["unit"], m["serial"]) for m in members], [(1, "FOC2231X0AA"), (2, "FOC2231X0BB")])
+
+    def test_one_chassis_asks_only_the_class_column(self) -> None:
+        import asyncio
+
+        from agent import snmp
+        from agent.tests.test_stacks import ENTITY_ONE_CHASSIS
+
+        calls: list[str] = []
+        with mock.patch("agent.snmp._walk", self._fake_walk(self._tables(ENTITY_ONE_CHASSIS), calls)):
+            members = asyncio.run(snmp._query_members(None, "192.168.1.2", "public"))
+
+        self.assertEqual(members, [])
+        self.assertEqual(calls, [snmp.ENTITY_CLASS_OID])
+
+    def test_a_device_without_entity_mib_is_still_inventoried(self) -> None:
+        import asyncio
+
+        from agent import snmp
+
+        async def no_get(*args, **kwargs):  # noqa: ANN002,ANN003
+            return None
+
+        with mock.patch("agent.snmp._walk", self._fake_walk({}, fail=True)), \
+             mock.patch("agent.snmp._get", no_get):
+            data = asyncio.run(snmp._inventory(None, "192.168.1.2", "public", {"name": "sw"}))
+
+        self.assertEqual(data["members"], [])
+        self.assertEqual(data["name"], "sw")
+
+    def test_the_host_finding_carries_members_only_for_a_stack(self) -> None:
+        members = [
+            {"unit": 1, "serial": "FOC2231X0AA", "model": "C9300-48P", "role": ""},
+            {"unit": 2, "serial": "FOC2231X0BB", "model": "C9300-24T", "role": ""},
+        ]
+        for answer, expected in (
+            ({**SnmpCollectorTests.SNMP_ANSWER, "members": members}, members),
+            ({**SnmpCollectorTests.SNMP_ANSWER, "members": []}, None),
+            (SnmpCollectorTests.SNMP_ANSWER, None),
+        ):
+            ctx = {"config": {"communities": ["public"]}, "env": None, "hosts": [{"ip": "192.168.1.2", "mac": ""}]}
+            with mock.patch("agent.collectors.snmp.snmp.AVAILABLE", True), \
+                 mock.patch("agent.collectors.snmp.snmp.query_hosts", return_value={"192.168.1.2": answer}):
+                payload = SnmpCollector().collect(ctx)[0].payload
+            self.assertEqual(payload.get("members"), expected)
+            if expected is None:
+                self.assertNotIn("members", payload)

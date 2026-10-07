@@ -267,6 +267,9 @@ def _inventory_findings(hosts: list[dict], answers: dict[str, dict]) -> list[Fin
                     # opcionales, y solo si traen algo).
                     **({"arp": data["arp"]} if data.get("arp") else {}),
                     **({"fdb_ports": ports} if (ports := _port_tables(data)) else {}),
+                    # Only for a stack (two or more chassis in ENTITY-MIB);
+                    # never an empty list.
+                    **({"members": data["members"]} if data.get("members") else {}),
                 },
             )
         )

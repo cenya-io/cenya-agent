@@ -290,6 +290,8 @@ def ssh_credentials(*names: str) -> list[dict]:
 
 class SshTaskTests(unittest.TestCase):
     RUNNING_CONFIG = "hostname sw-core-01\ninterface Gi1/0/1\n switchport access vlan 10"
+    #: La guardada difiere en una línea: alguien cambió la VLAN y no hizo `write`.
+    SAVED_CONFIG = "hostname sw-core-01\ninterface Gi1/0/1\n switchport access vlan 20"
 
     def _ctx(self, task: str, **extra: Any) -> dict:
         ctx: dict[str, Any] = {
@@ -324,6 +326,8 @@ class SshTaskTests(unittest.TestCase):
                 return ssh.Answer(connected=True, output=CISCO_SHOW_VERSION)
             if command == "show running-config":
                 return ssh.Answer(connected=True, output=self.RUNNING_CONFIG)
+            if command == "show startup-config":
+                return ssh.Answer(connected=True, output=self.SAVED_CONFIG)
             return ssh.Answer(connected=True, output=IOS_RECHAZA_EL_COMANDO_DE_LINUX)
 
         def fake_listening(ips: list[str], port: int, **kwargs: Any) -> list[str]:
@@ -360,13 +364,16 @@ class SshTaskTests(unittest.TestCase):
         ctx["config"]["credentials"] = ssh_credentials("lector", "admin")
         findings = self._collect(ctx, calls=calls, accept={"admin"}, listening=mock.Mock(side_effect=AssertionError))
 
+        # Dos órdenes, las dos con la credencial recordada y ninguna otra: la
+        # que está en marcha y la guardada (un IOS distingue las dos).
         self.assertEqual(
             [(call["host"], call["username"], call["command"]) for call in calls],
-            [("192.168.1.2", "admin", "show running-config")],
+            [("192.168.1.2", "admin", "show running-config"), ("192.168.1.2", "admin", "show startup-config")],
         )
         self.assertEqual([f.kind for f in findings], ["config"])
         self.assertEqual(findings[0].identity, {"mac": SWITCH_MAC})
         self.assertEqual(findings[0].payload["config"], self.RUNNING_CONFIG)
+        self.assertEqual(findings[0].payload["saved_config"], self.SAVED_CONFIG)
         self.assertEqual(findings[0].payload["family"], "cisco")
 
     def test_configs_skips_a_host_whose_credential_is_gone(self) -> None:
