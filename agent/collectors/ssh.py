@@ -438,7 +438,7 @@ CAPTURE_COMMANDS: dict[str, str] = {
     "mikrotik": "/export",
     "aruba": "show running-config",
     "junos": "show configuration | display set",
-    "dell": "show running-configuration",
+    "dell": "show running-config",
     "huawei": "display current-configuration",
     "comware": "display current-configuration",
     "fortinet": "show full-configuration",
@@ -455,7 +455,7 @@ CAPTURE_COMMANDS: dict[str, str] = {
 SAVED_CONFIG_COMMANDS: dict[str, str] = {
     "cisco": "show startup-config",
     "aruba": "show startup-config",
-    "dell": "show startup-configuration",
+    "dell": "show startup-config",
     "huawei": "display saved-configuration",
     "comware": "display saved-configuration",
 }
@@ -472,8 +472,9 @@ MAX_CONFIG_BYTES = 256 * 1024
 #: comparar un mensaje de error con una configuración y avisar de cambios sin
 #: guardar que no existen.
 _CLI_REJECTION_RE = re.compile(
-    r"^\s*(?:%\s*(?:Invalid|Ambiguous|Incomplete|Unrecognized|Unknown|Error)"
-    r"|Error:\s*Unrecognized|Invalid input|Unknown command|Line has invalid autocommand)",
+    r"^\s*(?:%\s*(?:Invalid|Ambiguous|Incomplete|Unrecognized|Unknown|Error|Authorization|Access denied)"
+    r"|Error:\s*Unrecognized|Invalid input|Unknown command|Line has invalid autocommand"
+    r"|Command authorization failed|Not authorized|Insufficient privilege|Permission denied)",
     re.IGNORECASE | re.MULTILINE,
 )
 
@@ -658,6 +659,21 @@ def fetch_configs(
         return {}
     running = fetch_config(host, credential, command, logins)
     if not running.strip():
+        return {}
+    if rejected_by_cli(running):
+        # The device refused the order: on Dell OS6 and Cisco that is a user
+        # without privilege (level 15) to see the configuration. The refusal
+        # is not a copy, and sending it as one stored «% Invalid input» as
+        # the device's configuration.
+        if errors is not None:
+            errors.append(
+                collector_note(
+                    "ssh",
+                    "config_needs_privilege",
+                    f"{host}: el usuario SSH entra sin privilegios y el equipo no le enseña la configuración",
+                    ip=host,
+                )
+            )
         return {}
     copies = {"config": running}
     saved_command = SAVED_CONFIG_COMMANDS.get(family, "")

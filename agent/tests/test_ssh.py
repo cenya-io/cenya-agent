@@ -14,7 +14,7 @@ import unittest
 from typing import Any
 from unittest import mock
 
-from agent import ssh
+from agent import notes, ssh
 from agent.tests import test_stacks
 from agent.credentials import Credential
 from agent.collectors import ssh as ssh_collector
@@ -1360,3 +1360,35 @@ class StackPayloadTests(unittest.TestCase):
 
         self.assertNotIn("members", payload)
         self.assertEqual(payload["serial"], "FOC2001X0AB")
+
+
+class DellAndPrivilegeTests(unittest.TestCase):
+    """07-10-2026: a Dell N2048P (OS6) gave no copy, and a refusal travelled as one."""
+
+    def test_dell_asks_the_order_os6_knows(self) -> None:
+        self.assertEqual(ssh_collector.CAPTURE_COMMANDS["dell"], "show running-config")
+        self.assertEqual(ssh_collector.SAVED_CONFIG_COMMANDS["dell"], "show startup-config")
+
+    def test_a_refusal_is_no_copy_and_says_why(self) -> None:
+        errors: list = []
+        refusal = "              ^\n% Invalid input detected at '^' marker.\n"
+        with mock.patch.object(ssh_collector, "fetch_config", return_value=refusal):
+            copies = ssh_collector.fetch_configs("10.0.0.2", mock.Mock(), "dell", errors=errors)
+
+        self.assertEqual(copies, {})
+        self.assertEqual(len(errors), 1)
+        note = notes.to_json(errors[0])
+        self.assertEqual(note["code"], "config_needs_privilege")
+        self.assertEqual(note["params"]["ip"], "10.0.0.2")
+
+    def test_an_authorization_refusal_is_recognised(self) -> None:
+        self.assertTrue(ssh_collector.rejected_by_cli("Command authorization failed.\n"))
+        self.assertTrue(ssh_collector.rejected_by_cli("% Authorization failed.\n"))
+
+    def test_a_real_configuration_is_kept(self) -> None:
+        config = "!Current Configuration:\nhostname planta-baja-SW\n" + "\n".join(f"vlan {n}" for n in range(1, 20))
+        with mock.patch.object(ssh_collector, "fetch_config", return_value=config):
+            copies = ssh_collector.fetch_configs("10.0.0.2", mock.Mock(), "dell", errors=[])
+
+        self.assertEqual(copies["config"], config)
+
