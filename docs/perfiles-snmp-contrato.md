@@ -146,3 +146,13 @@ Del análisis, la parte del agente. Las otras dos piezas de la fase ya existían
 - El vecino trae `remote_ip`; el enlace lo pone en `payload.remote.device_ip` y **nunca en la huella** (`identity.remote.device_ip` sigue vacía): un enlace ya conocido no se duplica por leer la IP. El servidor lee los extremos de la carga (`link_check`, `discovery`), así que casa por IP y sondea sin cambios.
 
 Lo que queda de la fase 3 para el servidor (otro PR): el **descubrimiento en cadena** — que un vecino con IP fuera de los rangos del perfil se ofrezca a añadir a las redes del perfil o a sondear solo, con límite de saltos y sin entrar en teléfonos ni puntos de acceso.
+# Fase 4 · Tablas ARP y MAC por SSH (rama `tablas-por-ssh`, 08-10-2026)
+
+Para las redes donde solo el cortafuegos sabe quién está, y nadie activó SNMP. Todo en el agente, protocolo sin cambios: las tablas viajan **con la forma del hallazgo SNMP** (`arp` como `[{ip, mac}]`, `fdb_ports` por boca) y los enlaces los construye el mismo código (`collectors.snmp._links_for`, con el nombre del puerto como índice).
+
+- `agent/tables.py`: una orden de ARP por familia (`ARP_COMMANDS`: Linux, Cisco, JunOS, ProCurve/Aruba, Dell, Huawei, Comware, MikroTik, Fortinet, Gaia) y una de tabla MAC solo para los switches (`MAC_COMMANDS`: Cisco, JunOS, ProCurve, Dell, Huawei, Comware, MikroTik). ESXi y la familia `cli` no se preguntan.
+- **ARP con un solo lector**: una fila es una línea con una IP y una MAC, se escriban como se escriban (`aa:bb:…`, `aabb.ccdd.eeff`, `aabb-ccdd-eeff`, `0050:56aa:bb20` de Fortinet, `001b3f-aabbcc` de ProCurve). Fuera las filas `incomplete`/`failed`, las multicast y las de broadcast.
+- **MAC con un lector por familia** (`MAC_PARSERS`), porque ahí sí cambian las columnas; fuera la fila de la CPU, las interfaces enrutadas del propio switch (`Vlan1`, `Loopback`) y, en MikroTik, las MAC locales del puente.
+- `collectors/ssh.py::with_tables` las pide **con la credencial que entró** (una o dos órdenes más por equipo de red por inventario; Linux una), después de los stacks; el hallazgo `host` lleva `arp` y `fdb_ports` solo si traen algo, y por cada MAC conocida (barrido, equipos leídos, ARP de todos) sale un enlace `fdb` como en SNMP.
+
+Pendiente de la fase: en el servidor, `coverage.py` marca el origen de las tablas como SNMP (`_SNMP_MARKS`); con tablas por SSH ese cartel habría que revisarlo.
