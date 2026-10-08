@@ -352,7 +352,11 @@ def _links_for(
         if not any(remote.values()):
             continue
         local = {**local_base, "port": neighbor["local_port"]}
-        links.append(_link(neighbor["protocol"], local, remote))
+        # The management address the neighbour advertises goes in the
+        # payload and never in the identity: the link's fingerprint must not
+        # change because this version reads it. The server reads the ends
+        # from the payload, so it gets an IP to match and to probe at.
+        links.append(_link(neighbor["protocol"], local, remote, remote_ip=neighbor.get("remote_ip", "")))
 
     proposed: set[tuple[str, str]] = set()
     for entry in data.get("fdb") or []:
@@ -382,8 +386,10 @@ def _links_for(
     return links
 
 
-def _link(protocol: str, local: dict, remote: dict, *, vlan: int | None = None) -> Finding:
+def _link(protocol: str, local: dict, remote: dict, *, vlan: int | None = None, remote_ip: str = "") -> Finding:
     payload: dict = {"protocol": protocol, "local": local, "remote": remote}
+    if remote_ip and not remote.get("device_ip"):
+        payload["remote"] = {**remote, "device_ip": remote_ip}
     if vlan is not None:
         payload["vlan"] = vlan
     return Finding(

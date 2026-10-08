@@ -125,9 +125,16 @@ LLDP_LOCAL_PORT_OID = "1.0.8802.1.1.2.1.3.7.1.3"  # lldpLocPortId, index = local
 LLDP_REM_CHASSIS_OID = "1.0.8802.1.1.2.1.4.1.1.5"  # lldpRemChassisId (usually the MAC)
 LLDP_REM_PORT_OID = "1.0.8802.1.1.2.1.4.1.1.7"  # lldpRemPortId
 LLDP_REM_NAME_OID = "1.0.8802.1.1.2.1.4.1.1.9"  # lldpRemSysName
+#: lldpRemManAddrIfSubtype: the column is a nothing, the **index** is the
+#: prize: ``timeMark.localPortNum.remIndex.addrSubtype.addrLen.octets`` -- the
+#: management address the neighbour advertises, which is how a neighbour in
+#: another subnet (one the sweep never pinged) gets an IP to be probed at.
+LLDP_REM_MAN_ADDR_OID = "1.0.8802.1.1.2.1.4.2.1.3"
 CDP_IFINDEX_OID = "1.3.6.1.4.1.9.9.23.1.2.1.1.2"  # cdpCacheIfIndex (redundant: it is the index)
 CDP_DEVICE_OID = "1.3.6.1.4.1.9.9.23.1.2.1.1.6"  # cdpCacheDeviceId
 CDP_PORT_OID = "1.3.6.1.4.1.9.9.23.1.2.1.1.7"  # cdpCacheDevicePort
+CDP_ADDRESS_TYPE_OID = "1.3.6.1.4.1.9.9.23.1.2.1.1.3"  # cdpCacheAddressType: 1 = ip
+CDP_ADDRESS_OID = "1.3.6.1.4.1.9.9.23.1.2.1.1.4"  # cdpCacheAddress: the raw octets
 
 # The forwarding table: which MAC hangs off which bridge port.
 FDB_PORT_OID = "1.3.6.1.2.1.17.7.1.2.2.1.2"  # dot1qTpFdbPort, index = vlan.mac octets
@@ -330,6 +337,34 @@ def lldp_local_port_from_suffix(suffix: str) -> str:
     return parts[1] if len(parts) == 3 else ""
 
 
+def lldp_man_addr_from_suffix(suffix: str) -> tuple[str, str]:
+    """``(lldpRemEntry index, address)`` out of an lldpRemManAddrEntry index:
+    ``timeMark.localPortNum.remIndex.addrSubtype.addrLen.octets``, subtype 1
+    IPv4 and 2 IPv6. Anything else -- a MAC, a DNS name -- is ``("", "")``."""
+    parts = suffix.split(".")
+    if len(parts) < 6 or parts[3] not in ("1", "2") or not parts[4].isdigit():
+        return "", ""
+    octets = parts[5:]
+    if len(octets) != int(parts[4]):
+        return "", ""
+    ip = _ip_from_octets(octets)
+    return (".".join(parts[:3]), ip) if ip else ("", "")
+
+
+def _ip_from_value(value: Any) -> str:
+    """An address out of a raw OctetString (cdpCacheAddress) or a text."""
+    if isinstance(value, str):
+        try:
+            return str(ipaddress.ip_address(value.strip()))
+        except ValueError:
+            return ""
+    try:
+        raw = value.asOctets()
+    except Exception:  # noqa: BLE001 - not an OctetString: not an address
+        return ""
+    return str(ipaddress.ip_address(raw)) if len(raw) in (4, 16) else ""
+
+
 async def _query_neighbors(engine, host: str, auth: Auth) -> list[dict[str, str]]:
     """LLDP neighbours first, CDP where there is no LLDP. Every entry: which
     of my ports touches what of theirs."""
@@ -339,6 +374,17 @@ async def _query_neighbors(engine, host: str, auth: Auth) -> list[dict[str, str]
         chassis = await _walk(engine, host, auth, LLDP_REM_CHASSIS_OID)
         ports = await _walk(engine, host, auth, LLDP_REM_PORT_OID)
         names = await _walk(engine, host, auth, LLDP_REM_NAME_OID)
+        # The management address, opportunistic: many devices advertise
+        # none, and the first IPv4 one wins over an IPv6 one (it is what
+        # the sweep and the probe speak).
+        addresses: dict[str, str] = {}
+        try:
+            for man_suffix in await _walk(engine, host, auth, LLDP_REM_MAN_ADDR_OID):
+                rem_suffix, ip = lldp_man_addr_from_suffix(man_suffix)
+                if rem_suffix and (rem_suffix not in addresses or ":" in addresses[rem_suffix] and ":" not in ip):
+                    addresses[rem_suffix] = ip
+        except Exception:  # noqa: BLE001 - no table, no addresses
+            addresses = {}
         for suffix, name in names.items() or ports.items():
             local_num = lldp_local_port_from_suffix(suffix)
             if not local_num:
@@ -350,6 +396,7 @@ async def _query_neighbors(engine, host: str, auth: Auth) -> list[dict[str, str]
                     "remote_mac": _mac(chassis.get(suffix, "")),
                     "remote_port": _text(ports.get(suffix, "")),
                     "remote_name": _text(names.get(suffix, "")),
+                    "remote_ip": addresses.get(suffix, ""),
                 }
             )
         if neighbors:
@@ -361,8 +408,16 @@ async def _query_neighbors(engine, host: str, auth: Auth) -> list[dict[str, str]
         ports = await _walk(engine, host, auth, CDP_PORT_OID)
         ifindexes = await _walk(engine, host, auth, CDP_IFINDEX_OID)
         ifindex_names = await _walk(engine, host, auth, IF_OIDS["name"])
+        try:
+            kinds = await _walk(engine, host, auth, CDP_ADDRESS_TYPE_OID)
+            raw_addresses = await _walk(engine, host, auth, CDP_ADDRESS_OID)
+        except Exception:  # noqa: BLE001 - no addresses, no harm
+            kinds, raw_addresses = {}, {}
         for suffix, device in devices.items():
             ifindex = _text(ifindexes.get(suffix, ""))
+            # cdpCacheAddressType 1 is "ip"; anything else (CLNS, DECnet...)
+            # is not an address the agent could reach.
+            remote_ip = _ip_from_value(raw_addresses.get(suffix, "")) if _text(kinds.get(suffix, "1")) == "1" else ""
             neighbors.append(
                 {
                     "protocol": "cdp",
@@ -370,6 +425,7 @@ async def _query_neighbors(engine, host: str, auth: Auth) -> list[dict[str, str]
                     "remote_mac": "",
                     "remote_port": _text(ports.get(suffix, "")),
                     "remote_name": _text(device),
+                    "remote_ip": remote_ip,
                 }
             )
     except Exception:  # noqa: BLE001
