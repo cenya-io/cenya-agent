@@ -698,3 +698,176 @@ class IdentitySnmpTests(unittest.TestCase):
         # Nothing that was there has moved.
         self.assertEqual(payload["hostname"], "sw-planta-1")
         self.assertEqual(payload["description"], "Cisco IOS Software, C1000")
+
+
+class KindIdentitySnmpTests(unittest.TestCase):
+    """Model and serial of printers, UPSs and PDUs when ENTITY-MIB gives
+    nothing: read-only, tolerant, and only for the kind of device that has them."""
+
+    PRINTER_TYPE = "1.3.6.1.2.1.25.3.1.5"
+    OTHER_TYPE = "1.3.6.1.2.1.25.3.1.3"  # hrDeviceProcessor
+    RICOH = {"name": "ricoh", "description": "RICOH Network Printer", "object_id": "1.3.6.1.4.1.367.1.1"}
+
+    @staticmethod
+    def _inventory(system: dict, answers: dict, tables: dict, get_calls=None, walk_calls=None, broken=()):
+        import asyncio
+
+        from agent import profiles_data
+
+        get = IdentitySnmpTests._fake_get(answers, get_calls)
+        plain_walk = IdentitySnmpTests._fake_walk(tables, walk_calls)
+
+        async def walk(engine, host, auth, oid, context_name=""):  # noqa: ANN001 - mirrors snmp._walk
+            if oid in broken:
+                raise RuntimeError("timeout")
+            return await plain_walk(engine, host, auth, oid, context_name)
+
+        with mock.patch("agent.profiles.PROFILES", profiles_data.PROFILES), \
+             mock.patch("agent.snmp._get", get), \
+             mock.patch("agent.snmp._walk", walk):
+            return asyncio.run(snmp._inventory(None, "192.168.1.9", "public", system))
+
+    def _printer_tables(self) -> dict:
+        return {
+            snmp.HR_DEVICE_TYPE_OID: {"1": self.OTHER_TYPE, "2": self.PRINTER_TYPE},
+            snmp.PRT_SERIAL_OID: {"2": "VNB3K12345"},
+            snmp.PRT_MARKER_UNIT_OID: {"2.1": "8"},
+            snmp.PRT_MARKER_LIFE_OID: {"2.1": "48213"},
+        }
+
+    def test_a_printer_without_profile_gets_model_serial_and_page_count(self) -> None:
+        answers = {f"{snmp.HR_DEVICE_DESCR_OID}.2": "HP LaserJet Pro M404dn"}
+        data = self._inventory(self.RICOH, answers, self._printer_tables())
+
+        self.assertEqual(data["identity"].model, "HP LaserJet Pro M404dn")
+        self.assertEqual(data["identity"].serial, "VNB3K12345")
+        self.assertEqual(data["page_count"], 48213)
+
+    def test_a_counter_that_is_not_in_pages_is_not_a_page_count(self) -> None:
+        tables = self._printer_tables()
+        tables[snmp.PRT_MARKER_UNIT_OID] = {"2.1": "16"}  # feet
+        data = self._inventory(self.RICOH, {}, tables)
+
+        self.assertNotIn("page_count", data)
+        self.assertEqual(data["identity"].serial, "VNB3K12345")
+
+    def test_the_profile_wins_and_the_printer_only_fills_the_gaps(self) -> None:
+        system = {
+            "name": "hp",
+            "description": "HP ETHERNET MULTI-ENVIRONMENT,SN:X,PID:HP LaserJet MFP M130nw",
+            "object_id": "1.3.6.1.4.1.11.2.3.9.1",
+        }
+        answers = {f"{snmp.HR_DEVICE_DESCR_OID}.2": "something else"}
+        data = self._inventory(system, answers, self._printer_tables())
+
+        self.assertEqual(data["identity"].model, "HP LaserJet MFP M130nw")  # the profile's
+        self.assertEqual(data["identity"].serial, "VNB3K12345")  # was empty
+        self.assertEqual(data["identity"].manufacturer, "HP")
+
+    def test_a_device_with_no_printer_row_is_left_alone(self) -> None:
+        tables = {snmp.HR_DEVICE_TYPE_OID: {"1": self.OTHER_TYPE}}
+        walk_calls: list[str] = []
+        data = self._inventory(self.RICOH, {}, tables, walk_calls=walk_calls)
+
+        self.assertEqual(data["identity"].serial, "")
+        self.assertNotIn("page_count", data)
+        self.assertNotIn(snmp.PRT_SERIAL_OID, walk_calls)
+
+    def test_a_switch_with_a_profile_is_never_asked_printer_oids(self) -> None:
+        system = {
+            "name": "sw",
+            "description": "Cisco IOS Software, C1000 Software, Version 15.2(7)E8, RELEASE",
+            "object_id": "1.3.6.1.4.1.9.1.3245",
+        }
+        get_calls: list[list[str]] = []
+        walk_calls: list[str] = []
+        data = self._inventory(system, {}, {}, get_calls, walk_calls)
+
+        self.assertEqual(data["identity"].manufacturer, "Cisco")
+        asked = [oid for call in get_calls for oid in call] + walk_calls
+        self.assertFalse([oid for oid in asked if oid.startswith(("1.3.6.1.2.1.25.3.", "1.3.6.1.2.1.43."))])
+
+    def test_printer_oids_that_fail_are_one_key_less_not_an_error(self) -> None:
+        broken = (snmp.PRT_SERIAL_OID, snmp.PRT_MARKER_LIFE_OID)
+        answers = {f"{snmp.HR_DEVICE_DESCR_OID}.2": "Ricoh SP 330"}
+        data = self._inventory(self.RICOH, answers, self._printer_tables(), broken=broken)
+
+        self.assertEqual(data["identity"].model, "Ricoh SP 330")
+        self.assertEqual(data["identity"].serial, "")
+        self.assertNotIn("page_count", data)
+        # And when even the type table fails the device is simply not a printer.
+        data = self._inventory(self.RICOH, {}, self._printer_tables(), broken=(snmp.HR_DEVICE_TYPE_OID,))
+        self.assertEqual(data["identity"].model, "")
+
+    def test_an_apc_ups_keeps_the_serial_its_profile_read(self) -> None:
+        system = {"name": "sai", "description": "APC Web/SNMP Management Card", "object_id": "1.3.6.1.4.1.318.1.3.27"}
+        answers = {
+            "1.3.6.1.4.1.318.1.1.1.1.1.1.0": "Smart-UPS 1500",
+            "1.3.6.1.4.1.318.1.1.1.1.2.3.0": "AS1234567890",
+            "1.3.6.1.2.1.33.1.2.3.0": "42",
+            "1.3.6.1.2.1.33.1.1.2.0": "SMART-UPS 1500 RM",
+        }
+        get_calls: list[list[str]] = []
+        data = self._inventory(system, answers, {}, get_calls)
+
+        self.assertEqual(data["identity"].model, "Smart-UPS 1500")
+        self.assertEqual(data["identity"].serial, "AS1234567890")
+        self.assertEqual(data["ups"]["runtime_minutes"], 42)
+        # Nothing was asked of a PDU, and the UPS identity rode along with the reading.
+        self.assertFalse([c for c in get_calls if "1.3.6.1.4.1.318.1.1.12.1.6.0" in c])
+        self.assertTrue(any(snmp.UPS_OIDS["ident_model"] in c for c in get_calls))
+
+    def test_a_generic_ups_mib_device_gets_manufacturer_and_model_without_serial(self) -> None:
+        system = {"name": "sai", "description": "UPS card", "object_id": "1.3.6.1.4.1.12345.1"}
+        answers = {
+            "1.3.6.1.2.1.33.1.1.1.0": "Riello UPS",
+            "1.3.6.1.2.1.33.1.1.2.0": "Sentinel Dual SDL 3000",
+            "1.3.6.1.2.1.33.1.2.3.0": "30",
+        }
+        walk_calls: list[str] = []
+        data = self._inventory(system, answers, {}, walk_calls=walk_calls)
+
+        self.assertEqual(
+            data["identity"].payload_fields(), {"manufacturer": "Riello UPS", "model": "Sentinel Dual SDL 3000"}
+        )
+        self.assertNotIn(snmp.HR_DEVICE_TYPE_OID, walk_calls)  # a UPS is not asked as a printer
+
+    def test_a_raritan_pdu_gets_model_and_serial(self) -> None:
+        system = {"name": "pdu", "description": "Raritan PX3", "object_id": "1.3.6.1.4.1.13742.6"}
+        answers = {snmp.RARITAN_PDU_OIDS["model"]: "PX3-5190R", snmp.RARITAN_PDU_OIDS["serial"]: "2EA1234567"}
+        data = self._inventory(system, answers, {})
+
+        self.assertEqual(
+            data["identity"].payload_fields(),
+            {"manufacturer": "Raritan", "model": "PX3-5190R", "serial": "2EA1234567"},
+        )
+
+    def test_an_apc_rack_pdu_gets_its_ident_oids(self) -> None:
+        system = {
+            "name": "pdu",
+            "description": "APC Web/SNMP Management Card",
+            "object_id": "1.3.6.1.4.1.318.1.3.4.5",
+        }
+        answers = {snmp.APC_PDU_OIDS["model"]: "AP7921", snmp.APC_PDU_OIDS["serial"]: "ZA0123456789"}
+        data = self._inventory(system, answers, {})
+
+        self.assertEqual(data["identity"].model, "AP7921")
+        self.assertEqual(data["identity"].serial, "ZA0123456789")
+        self.assertEqual(data["identity"].manufacturer, "APC")
+
+    def test_a_pdu_whose_oids_fail_is_still_inventoried(self) -> None:
+        system = {"name": "pdu", "description": "Raritan PX3", "object_id": "1.3.6.1.4.1.13742.6"}
+        data = self._inventory(system, {}, {})
+
+        self.assertEqual(data["identity"].model, "")
+        self.assertEqual(data["identity"].serial, "")
+
+    def test_the_host_payload_carries_page_count_only_when_there_is_one(self) -> None:
+        identity = profiles.Identity(manufacturer="HP", model="LaserJet", serial="X1")
+        ctx = {"config": {"communities": ["public"]}, "env": None, "hosts": [{"ip": "192.168.1.2", "mac": ""}]}
+        for extra, expected in (({"page_count": 120}, 120), ({}, None)):
+            answer = {**SnmpCollectorTests.SNMP_ANSWER, "identity": identity, **extra}
+            with mock.patch("agent.collectors.snmp.snmp.AVAILABLE", True), \
+                 mock.patch("agent.collectors.snmp.snmp.query_hosts", return_value={"192.168.1.2": answer}):
+                payload = SnmpCollector().collect(ctx)[0].payload
+            self.assertEqual(payload.get("page_count"), expected)
