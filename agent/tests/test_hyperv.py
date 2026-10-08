@@ -369,7 +369,7 @@ class HyperVClientTests(unittest.TestCase):
         se distingue un Hyper-V vacío de un Windows que nunca lo fue."""
         self.assertIn("vms          = @($vms)", hyperv.SCRIPT)
         self.assertIn("Get-Service -Name 'vmms'", hyperv.SCRIPT)
-        self.assertIn("ConvertTo-Json -Depth 4 -Compress", hyperv.SCRIPT)
+        self.assertIn("ConvertTo-Json -Depth 6 -Compress", hyperv.SCRIPT)
 
 
 
@@ -420,6 +420,52 @@ class HyperVHardwareTests(unittest.TestCase):
         self.assertIn("Win32_ComputerSystem", hyperv.SCRIPT)
         self.assertIn("Win32_BIOS", hyperv.SCRIPT)
         self.assertIn("Get-Command -Name Get-Cluster", hyperv.SCRIPT)
+
+
+class HyperVNetworkAndDisksTests(unittest.TestCase):
+    """Tarjetas con MAC, direcciones y VLAN, y el volumen donde vive cada disco."""
+
+    def _machines(self, vms: Any) -> list[dict[str, Any]]:
+        data = {"hostname": "SRV-HV01", "has_hyperv": True, "vms": vms}
+
+        class Session(_FakeSession):
+            def run_ps(self, script: str) -> _FakeResult:
+                return _FakeResult(0, as_stdout(data))
+
+        client = hyperv.HyperVClient("srv-hv01.acme.local", "ACME\\svc", "s3cr3t")
+        with mock.patch("agent.winrm.AVAILABLE", True), \
+             mock.patch("agent.winrm.pywinrm", fake_pywinrm(Session), create=True):
+            client.login()
+        return client.virtual_machines()
+
+    def test_cards_and_disks_come_out_in_the_common_shape(self) -> None:
+        vm = {
+            "id": "f0e1d2c3",
+            "name": "srv-conta",
+            "state": "Running",
+            "nics": [{"name": "LAN", "mac": "00155D0A1B2C", "ips": ["10.0.0.40", "fe80::1"], "vlan": 10}],
+            "drives": [
+                {"path": "C:\\ClusterStorage\\Volume1\\srv\\a.vhdx", "bytes": 107374182400},
+                {"path": "C:\\ClusterStorage\\Volume1\\srv\\b.vhdx", "bytes": 10737418240},
+            ],
+        }
+
+        machine = self._machines([vm])[0]
+
+        self.assertEqual(
+            machine["interfaces"],
+            [{"name": "LAN", "mac": "00:15:5d:0a:1b:2c", "ips": ["10.0.0.40", "fe80::1"], "vlan": 10}],
+        )
+        self.assertEqual(machine["disks"], [{"datastore": "C:\\ClusterStorage\\Volume1", "gb": 110}])
+
+    def test_a_single_card_unwrapped_by_convertto_json_still_counts(self) -> None:
+        vm = {"id": "x", "name": "y", "state": "Off", "nics": {"name": "LAN", "mac": "00155D0A1B2C", "ips": None, "vlan": 0}}
+
+        machine = self._machines([vm])[0]
+
+        self.assertEqual(machine["interfaces"][0]["mac"], "00:15:5d:0a:1b:2c")
+        self.assertEqual(machine["interfaces"][0]["vlan"], None)
+        self.assertEqual(machine["disks"], [])
 
 
 if __name__ == "__main__":

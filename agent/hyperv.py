@@ -27,7 +27,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from agent import winrm
+from agent import vmnet, winrm
 from agent.hypervisor import HypervisorError
 
 #: Lo que se le pregunta a un Hyper-V, de una vez. `has_hyperv` mira si existe
@@ -44,6 +44,21 @@ if ($vmms) {
   foreach ($vm in @(Get-VM -ErrorAction SilentlyContinue)) {
     $disk = [long](($vm.HardDrives | Get-VHD -ErrorAction SilentlyContinue |
       Measure-Object -Property Size -Sum).Sum)
+    $nics = @(foreach ($n in @(Get-VMNetworkAdapter -VM $vm -ErrorAction SilentlyContinue)) {
+      $tag = Get-VMNetworkAdapterVlan -VMNetworkAdapter $n -ErrorAction SilentlyContinue
+      @{
+        name = [string]$n.Name
+        mac  = [string]$n.MacAddress
+        ips  = @($n.IPAddresses | ForEach-Object { [string]$_ })
+        vlan = [int]$tag.AccessVlanId
+      }
+    })
+    $drives = @(foreach ($hd in @($vm.HardDrives)) {
+      @{
+        path  = [string]$hd.Path
+        bytes = [long](Get-VHD -Path $hd.Path -ErrorAction SilentlyContinue).Size
+      }
+    })
     $vms += @{
       id         = [string]$vm.VMId
       name       = [string]$vm.Name
@@ -51,6 +66,8 @@ if ($vmms) {
       vcpus      = [int]$vm.ProcessorCount
       ram_bytes  = [long]$vm.MemoryStartup
       disk_bytes = $disk
+      nics       = $nics
+      drives     = $drives
     }
   }
 }
@@ -69,8 +86,18 @@ $result = @{
   serial       = [string]$bios.SerialNumber
   cluster      = $cluster
 }
-$result | ConvertTo-Json -Depth 4 -Compress
+$result | ConvertTo-Json -Depth 6 -Compress
 """
+
+def _as_list(value: Any) -> list[Any]:
+    """`ConvertTo-Json` desenvuelve las listas de un elemento: una tarjeta sola
+    llega como objeto y una lista vacía como `null`."""
+    if isinstance(value, list):
+        return value
+    if value is None or value == "":
+        return []
+    return [value]
+
 
 def _text(value: Any) -> str:
     """Un texto del guion, recortado. `ConvertTo-Json` puede mandar `null`."""
@@ -223,6 +250,18 @@ class HyperVClient:
                     # máquina: se deja vacío, como las KVM de Proxmox.
                     "operating_system": "",
                     "host": hostname,
+                    "interfaces": [
+                        vmnet.interface(nic.get("name"), nic.get("mac"), _as_list(nic.get("ips")), nic.get("vlan"))
+                        for nic in _as_list(vm.get("nics"))[: vmnet.MAX_PER_MACHINE]
+                        if isinstance(nic, dict)
+                    ],
+                    "disks": vmnet.merge_disks(
+                        [
+                            vmnet.disk(vmnet.windows_datastore(drive.get("path")), drive.get("bytes"))
+                            for drive in _as_list(vm.get("drives"))
+                            if isinstance(drive, dict)
+                        ]
+                    ),
                 }
             )
         return found

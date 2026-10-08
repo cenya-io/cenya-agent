@@ -433,9 +433,9 @@ class XcpNgClientTests(unittest.TestCase):
         found = client.virtual_machines()
 
         self.assertEqual(len(found), MAX_DETAILED_VMS)
-        # login + VM + host + pool + VBD + VDI + guest metrics: siete, sea cual
-        # sea el pool.
-        self.assertEqual(len(fake.calls), 7)
+        # login + VM + host + pool + VBD + VDI + guest metrics + SR + VIF:
+        # nueve, sea cual sea el pool.
+        self.assertEqual(len(fake.calls), 9)
 
     def test_every_call_after_login_carries_the_session(self) -> None:
         client, fake = logged_in()
@@ -513,6 +513,45 @@ class XcpNgPoolAndHardwareTests(unittest.TestCase):
         client, _ = logged_in({**XAPI_RESULTS, "host.get_all_records": records})
 
         self.assertEqual(client.hosts()[0]["serial"], "")
+
+
+class XcpNgNetworkAndDisksTests(unittest.TestCase):
+    """El SR de cada disco y las tarjetas con lo que dicen las guest tools."""
+
+    def test_disks_by_sr_and_cards_with_addresses(self) -> None:
+        vm_ref = next(ref for ref, vm in VM_RECORDS.items() if not (
+            vm.get("is_a_template") or vm.get("is_default_template") or vm.get("is_control_domain")
+        ))
+        metrics_ref = "OpaqueRef:gm-net"
+        machines = {ref: dict(vm) for ref, vm in VM_RECORDS.items()}
+        machines[vm_ref]["guest_metrics"] = metrics_ref
+        results = {
+            **XAPI_RESULTS,
+            "VM.get_all_records": machines,
+            "VBD.get_all_records": {"OpaqueRef:vbd-x": {"VM": vm_ref, "VDI": "OpaqueRef:vdi-x", "type": "Disk"}},
+            "VDI.get_all_records": {"OpaqueRef:vdi-x": {"SR": "OpaqueRef:sr-1", "virtual_size": str(50 * 1024**3)}},
+            "SR.get_all_records": {"OpaqueRef:sr-1": {"name_label": "NAS iSCSI"}},
+            "VIF.get_all_records": {"OpaqueRef:vif-0": {"VM": vm_ref, "MAC": "aa:bb:cc:00:00:01", "device": "0"}},
+            "VM_guest_metrics.get_all_records": {
+                metrics_ref: {"networks": {"0/ip": "10.0.0.50", "0/ipv4/0": "10.0.0.50", "1/ip": "10.9.9.9"}}
+            },
+        }
+        client, _ = logged_in(results)
+
+        machine = next(vm for vm in client.virtual_machines() if vm["id"] in (machines[vm_ref].get("uuid"), vm_ref))
+
+        self.assertEqual(machine["disks"], [{"datastore": "NAS iSCSI", "gb": 50}])
+        self.assertEqual(
+            machine["interfaces"], [{"name": "eth0", "mac": "aa:bb:cc:00:00:01", "ips": ["10.0.0.50"], "vlan": None}]
+        )
+
+    def test_without_the_vif_table_the_machines_still_arrive(self) -> None:
+        client, _ = logged_in()
+
+        machines = client.virtual_machines()
+
+        self.assertTrue(machines)
+        self.assertEqual({len(vm["interfaces"]) for vm in machines}, {0})
 
 
 if __name__ == "__main__":

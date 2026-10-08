@@ -24,7 +24,7 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
-from agent import tlspin
+from agent import tlspin, vmnet
 
 TIMEOUT_SECONDS = 20
 VMWARE_PORT = 443
@@ -41,6 +41,12 @@ MAX_DETAILED_VMS = 500
 #: pasado el tope, las máquinas de los demás llegan sin host, que es lo que
 #: pasaba con todas antes de cruzarlo.
 MAX_HOSTS_CROSSED = 50
+
+#: A cuántas máquinas encendidas se les pregunta por dentro (las direcciones
+#: que dicen las VMware Tools o el agente QEMU). Es una petición más por
+#: máquina; en una pyme no se llega, y en un cliente grande el resto llega
+#: con sus tarjetas y sin direcciones, que es lo que había antes.
+MAX_GUEST_QUERIES = 200
 
 
 class HypervisorError(Exception):
@@ -311,11 +317,17 @@ class VMwareClient:
         found: list[dict[str, Any]] = []
         hosts_by_vm = self._hosts_by_vm()
         clusters = self._clusters_by_host()
+        guests_asked = 0
         for vm in _values(self._get("/vcenter/vm"))[:MAX_DETAILED_VMS]:
             identifier = str(vm.get("vm") or "")
             if not identifier:
                 continue
             detail = self._detail(identifier)
+            guest: list[dict[str, Any]] = []
+            powered = str(vm.get("power_state") or detail.get("power_state") or "").upper() == "POWERED_ON"
+            if powered and detail.get("nics") and guests_asked < MAX_GUEST_QUERIES:
+                guests_asked += 1
+                guest = self._guest_interfaces(identifier)
             memory_mib = _number(vm.get("memory_size_MiB")) or _number(
                 (detail.get("memory") or {}).get("size_MiB")
             )
@@ -332,9 +344,19 @@ class VMwareClient:
                     "ram_gb": round(memory_mib / 1024) if memory_mib else 0,
                     "disk_gb": _vmware_disk_gb(detail),
                     "operating_system": _vmware_guest_os(detail),
+                    "interfaces": vmnet.vmware_interfaces(detail, guest),
+                    "disks": vmnet.vmware_disks(detail),
                 }
             )
         return found
+
+    def _guest_interfaces(self, identifier: str) -> list[dict[str, Any]]:
+        """Las direcciones que ve el invitado. Solo con VMware Tools: sin ellas
+        el vCenter contesta con un error, y la máquina llega sin direcciones."""
+        try:
+            return _values(self._get(f"/vcenter/vm/{urllib.parse.quote(identifier)}/guest/networking/interfaces"))
+        except HypervisorError:
+            return []
 
     def _detail(self, identifier: str) -> dict[str, Any]:
         """El detalle de una máquina. Vacío si no se puede leer: la ficha con lo
@@ -445,6 +467,38 @@ class ProxmoxClient:
             return []
         return [item for item in data if isinstance(item, dict)]
 
+    def _get_object(self, path: str) -> dict[str, Any]:
+        """Una respuesta cuyo `data` es un objeto (la configuración de una
+        máquina), o vacío si no se puede leer."""
+        try:
+            answer = self.rest.request("GET", path, headers=self.headers)
+        except HypervisorError:
+            return {}
+        data = answer.get("data") if isinstance(answer, dict) else None
+        return data if isinstance(data, dict) else {}
+
+    def _network_and_disks(self, node: str, kind: str, vmid: str, running: bool, budget: list[int]) -> dict[str, Any]:
+        """Tarjetas y discos de una máquina, de su configuración.
+
+        Una petición por máquina, y otra más para las direcciones de una KVM
+        encendida con el agente QEMU puesto. `budget` es el contador de
+        máquinas a las que aún se puede preguntar (`MAX_GUEST_QUERIES`).
+        """
+        if not node or kind not in ("qemu", "lxc") or budget[0] <= 0:
+            return {"interfaces": [], "disks": []}
+        budget[0] -= 1
+        base = f"/api2/json/nodes/{urllib.parse.quote(node)}/{kind}/{urllib.parse.quote(vmid)}"
+        config = self._get_object(f"{base}/config")
+        container = kind == "lxc"
+        guest: Any = None
+        agent_on = str(config.get("agent") or "").split(",")[0].strip() in ("1", "enabled=1")
+        if not container and running and agent_on:
+            guest = self._get_object(f"{base}/agent/network-get-interfaces")
+        return {
+            "interfaces": vmnet.proxmox_interfaces(config, container=container, guest=guest),
+            "disks": vmnet.proxmox_disks(config, container=container),
+        }
+
     def hosts(self) -> list[dict[str, Any]]:
         cluster = self._cluster_name()
         return [
@@ -483,10 +537,18 @@ class ProxmoxClient:
         """
         found: list[dict[str, Any]] = []
         cluster = self._cluster_name()
+        budget = [MAX_GUEST_QUERIES]
         for resource in self._get("/api2/json/cluster/resources?type=vm")[:MAX_DETAILED_VMS]:
             identifier = str(resource.get("vmid") or "")
             if not identifier:
                 continue
+            inside = self._network_and_disks(
+                str(resource.get("node") or ""),
+                str(resource.get("type") or "qemu"),
+                identifier,
+                resource.get("status") == "running",
+                budget,
+            )
             memory = _number(resource.get("maxmem"))
             disk = _number(resource.get("maxdisk"))
             found.append(
@@ -502,6 +564,7 @@ class ProxmoxClient:
                     "operating_system": "Contenedor LXC" if resource.get("type") == "lxc" else "",
                     "host": str(resource.get("node") or ""),
                     "cluster": cluster,
+                    **inside,
                 }
             )
         return found
