@@ -134,3 +134,15 @@ Lo que cambia, todo en el agente y sin tocar el protocolo:
 - **Columnas nuevas de IF-MIB** por interfaz: `type` (IANAifType → `ethernet`, `lag`, `vlan`, `virtual`, `loopback`, `tunnel`, `wifi`, `other`), `admin` (`ifAdminStatus`) y `lag` (nombre del agregado al que pertenece el puerto, por `dot3adAggPortAttachedAggID` de IEEE8023-LAG-MIB, oportunista). Solo viajan cuando traen algo: un hallazgo sin ellas es idéntico al de antes. **El servidor aún no las usa**: hoy deduce el tipo por el nombre (`core/discovery.py::_interface_kind`); usarlas es un PR pequeño del servidor.
 
 Lo que el análisis proponía y **no** entra, con el porqué: «recordar el perfil detectado» no ahorra nada aquí, porque `resolve` es puro y no cuesta red (en Netdisco ahorraba cargar clases Perl). Dúplex y MTU no tienen sitio en el modelo del servidor.
+
+---
+
+# Fase 3 · Vecinos con IP (rama `vecinos-con-ip`, 08-10-2026)
+
+Del análisis, la parte del agente. Las otras dos piezas de la fase ya existían en el servidor: **descartar lo que un switch ve por una boca de subida** es `core/port_placement.py` (hito «ve detrás»), y **casar un extremo sin IP por su MAC o por su nombre** lo hace `core/link_check.py` (MAC de interfaz → IP → nombre, corto o largo). Lo que faltaba era que un vecino LLDP o CDP **llegase con IP**: sin ella, un vecino en otra subred (que el barrido nunca pingó) no tenía a quién sondear con «Descubrir».
+
+- LLDP: `lldpRemManAddrIfSubtype` (`1.0.8802.1.1.2.1.4.2.1.3`), cuyo índice lleva la dirección de gestión (`lldp_man_addr_from_suffix`); IPv4 gana a IPv6.
+- CDP: `cdpCacheAddressType` + `cdpCacheAddress` (octetos en bruto, `_ip_from_value`).
+- El vecino trae `remote_ip`; el enlace lo pone en `payload.remote.device_ip` y **nunca en la huella** (`identity.remote.device_ip` sigue vacía): un enlace ya conocido no se duplica por leer la IP. El servidor lee los extremos de la carga (`link_check`, `discovery`), así que casa por IP y sondea sin cambios.
+
+Lo que queda de la fase 3 para el servidor (otro PR): el **descubrimiento en cadena** — que un vecino con IP fuera de los rangos del perfil se ofrezca a añadir a las redes del perfil o a sondear solo, con límite de saltos y sin entrar en teléfonos ni puntos de acceso.
