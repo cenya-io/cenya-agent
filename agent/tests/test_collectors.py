@@ -502,6 +502,20 @@ class StackMembersSnmpTests(unittest.TestCase):
         self.assertEqual(data["members"], [])
         self.assertEqual(data["name"], "sw")
 
+    def test_the_host_finding_carries_power_supplies_only_when_there_are_any(self) -> None:
+        supplies = [{"index": "1000", "name": "PSU1", "description": "", "model": "", "serial": "", "status": "ok"}]
+        for answer, expected in (
+            ({**SnmpCollectorTests.SNMP_ANSWER, "power_supplies": supplies}, supplies),
+            ({**SnmpCollectorTests.SNMP_ANSWER, "power_supplies": []}, None),
+            (SnmpCollectorTests.SNMP_ANSWER, None),
+        ):
+            ctx = {"config": {"communities": ["public"]}, "env": None, "hosts": [{"ip": "192.168.1.2", "mac": ""}]}
+            with mock.patch("agent.collectors.snmp.snmp.AVAILABLE", True),                  mock.patch("agent.collectors.snmp.snmp.query_hosts", return_value={"192.168.1.2": answer}):
+                payload = SnmpCollector().collect(ctx)[0].payload
+            self.assertEqual(payload.get("power_supplies"), expected)
+            if expected is None:
+                self.assertNotIn("power_supplies", payload)
+
     def test_the_host_finding_carries_members_only_for_a_stack(self) -> None:
         members = [
             {"unit": 1, "serial": "FOC2231X0AA", "model": "C9300-48P", "role": ""},

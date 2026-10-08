@@ -156,3 +156,17 @@ Para las redes donde solo el cortafuegos sabe quién está, y nadie activó SNMP
 - `collectors/ssh.py::with_tables` las pide **con la credencial que entró** (una o dos órdenes más por equipo de red por inventario; Linux una), después de los stacks; el hallazgo `host` lleva `arp` y `fdb_ports` solo si traen algo, y por cada MAC conocida (barrido, equipos leídos, ARP de todos) sale un enlace `fdb` como en SNMP.
 
 Pendiente de la fase: en el servidor, `coverage.py` marca el origen de las tablas como SNMP (`_SNMP_MARKS`); con tablas por SSH ese cartel habría que revisarlo.
+
+---
+
+# Fase 6 · Fuentes de alimentación (rama `fuentes-por-snmp`, 08-10-2026)
+
+La pregunta que el inventario no sabía contestar: **cuántas fuentes tiene un equipo y si cada una recibe corriente**. Todo en el agente, protocolo compatible: el hallazgo `host` lleva una clave nueva, `power_supplies`, solo cuando el equipo listó alguna; un hallazgo sin ella es idéntico al de antes. El servidor la acepta en su propio PR (hasta entonces la ignora, como cualquier clave que no conoce).
+
+- **Cuántas y cómo se llaman** (`agent/power.py`, `snmp._query_power_supplies`): las filas de `entPhysicalClass` con valor `powerSupply(6)`. La columna de clase ya se recorre para la identidad y los stacks, así que contarlas no cuesta nada; el nombre, la descripción, el modelo y el número de serie de cada una son **un `get` de instancias de hoja por fuente** (`entPhysicalName.<índice>`…), nunca un `walk` de esas columnas. Tope de 16 por equipo.
+- **Estado**: una columna por fabricante indexada por el mismo `entPhysicalIndex`, otro `get` por fuente. Cisco `cefcFRUPowerOperStatus`, Huawei `hwEntityOperStatus`, y para los demás el `entStateOper` genérico de ENTITY-STATE-MIB, que casi nadie implementa. Palabras estables: `ok`, `failed`, `no_input` (la fuente está pero no le llega corriente), `off`, `absent`, y vacío cuando no se sabe. Un fabricante sin columna conocida deja el estado vacío: el servidor enseña «desconocido», nunca inventa.
+- **Dos avisos que el servidor tiene que asumir**: muchos equipos listan la **bahía vacía** como fuente (un Catalyst con una sola PSU sigue enseñando «Power Supply B»), así que la cuenta es de bahías, no de fuentes montadas, y es el estado el que las distingue; y la gama barata (Cisco SB, TP-Link, Ubiquiti, MikroTik antiguo) **no implementa ENTITY-MIB** y no manda nada, con lo que ahí manda la plantilla del modelo del catálogo (ya en el servidor, 08-10-2026).
+
+Forma de cada fuente: `{"index", "name", "description", "model", "serial", "status"}`; `name` nunca va vacío (nombre, si no descripción, si no `PSU<n>`), porque el servidor bautiza la entrada con él.
+
+Pendiente para el servidor (PR 3): crear las entradas a partir de `power_supplies` cuando el equipo no tiene ninguna ni modelo de catálogo; guardar el estado de cada fuente con fecha de lectura y alimentar el aviso de redundancia falsa. Pendiente del agente: en un stack, atribuir cada fuente a su unidad (`entPhysicalContainedIn`); hoy van todas en el hallazgo del maestro con el nombre que les da el equipo («Switch 2 - Power Supply A»).

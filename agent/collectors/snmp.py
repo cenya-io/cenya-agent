@@ -274,6 +274,11 @@ def _inventory_findings(hosts: list[dict], answers: dict[str, dict]) -> list[Fin
                     # Only for a stack (two or more chassis in ENTITY-MIB);
                     # never an empty list.
                     **({"members": data["members"]} if data.get("members") else {}),
+                    # Its power supplies (ENTITY-MIB + the vendor's status
+                    # column, `agent/power.py`), only when it listed any:
+                    # the server then knows how many inlets to draw and
+                    # which of them is actually receiving power.
+                    **({"power_supplies": data["power_supplies"]} if data.get("power_supplies") else {}),
                 },
             )
         )
