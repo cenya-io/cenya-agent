@@ -664,7 +664,9 @@ class IdentitySnmpTests(unittest.TestCase):
 
     def test_the_host_payload_is_unchanged_without_identity(self) -> None:
         """A device nobody recognises -- or an answer without the key -- gives
-        exactly the payload it gave before this existed: no empty keys."""
+        exactly the payload it gave before this existed: no empty keys (the raw
+        sysObjectID/sysDescr are the only additions, and only because the
+        answer carries them)."""
         answers = (
             SnmpCollectorTests.SNMP_ANSWER,
             {**SnmpCollectorTests.SNMP_ANSWER, "identity": profiles.Identity()},
@@ -676,7 +678,10 @@ class IdentitySnmpTests(unittest.TestCase):
                 payload = SnmpCollector().collect(ctx)[0].payload
             self.assertEqual(
                 sorted(payload),
-                ["description", "hostname", "interfaces", "ip", "mac", "management_interface", "seen_by"],
+                [
+                    "description", "hostname", "interfaces", "ip", "mac", "management_interface",
+                    "seen_by", "sys_descr", "sys_object_id",
+                ],
             )
 
     def test_the_host_payload_carries_the_identity(self) -> None:

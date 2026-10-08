@@ -253,6 +253,10 @@ def _inventory_findings(hosts: list[dict], answers: dict[str, dict]) -> list[Fin
                     "ip": ip,
                     "mac": device_mac,
                     "description": data["description"],
+                    # Raw sysObjectID and sysDescr, uninterpreted: the server
+                    # can re-identify the device later without a new sweep.
+                    # Only when the device answered them (never empty keys).
+                    **_raw_system_fields(data),
                     "interfaces": [_interface_payload(iface) for iface in interfaces],
                     "management_interface": management_name,
                     "seen_by": "snmp",
@@ -301,6 +305,21 @@ def _interface_payload(iface: dict) -> dict[str, str]:
         if iface.get(key):
             payload[key] = iface[key]
     return payload
+
+
+#: sysDescr can be a whole banner; the server needs the first lines.
+SYS_DESCR_MAX = 512
+
+
+def _raw_system_fields(data: dict) -> dict[str, str]:
+    """`sys_object_id` and `sys_descr` as the device sent them (sysDescr cut
+    to `SYS_DESCR_MAX`), only the ones with a value."""
+    fields: dict[str, str] = {}
+    if data.get("object_id"):
+        fields["sys_object_id"] = str(data["object_id"])
+    if data.get("description"):
+        fields["sys_descr"] = str(data["description"])[:SYS_DESCR_MAX]
+    return fields
 
 
 def _identity_fields(data: dict) -> dict[str, str]:
@@ -361,7 +380,13 @@ def _links_for(
         # payload and never in the identity: the link's fingerprint must not
         # change because this version reads it. The server reads the ends
         # from the payload, so it gets an IP to match and to probe at.
-        links.append(_link(neighbor["protocol"], local, remote, remote_ip=neighbor.get("remote_ip", "")))
+        # What the neighbour announces about itself (description,
+        # capabilities, LLDP-MED model/serial/manufacturer, CDP platform)
+        # rides in the payload only, never in the fingerprint.
+        extras = {key: neighbor[key] for key in NEIGHBOR_EXTRA_KEYS if neighbor.get(key)}
+        links.append(
+            _link(neighbor["protocol"], local, remote, remote_ip=neighbor.get("remote_ip", ""), extras=extras)
+        )
 
     proposed: set[tuple[str, str]] = set()
     for entry in data.get("fdb") or []:
@@ -391,8 +416,28 @@ def _links_for(
     return links
 
 
-def _link(protocol: str, local: dict, remote: dict, *, vlan: int | None = None, remote_ip: str = "") -> Finding:
+NEIGHBOR_EXTRA_KEYS = (
+    "remote_sys_descr",
+    "remote_capabilities",
+    "remote_model",
+    "remote_serial",
+    "remote_manufacturer",
+    "remote_platform",
+)
+
+
+def _link(
+    protocol: str,
+    local: dict,
+    remote: dict,
+    *,
+    vlan: int | None = None,
+    remote_ip: str = "",
+    extras: dict | None = None,
+) -> Finding:
     payload: dict = {"protocol": protocol, "local": local, "remote": remote}
+    if extras:
+        payload.update(extras)
     if remote_ip and not remote.get("device_ip"):
         payload["remote"] = {**remote, "device_ip": remote_ip}
     if vlan is not None:
