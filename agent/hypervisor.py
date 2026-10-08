@@ -501,16 +501,36 @@ class ProxmoxClient:
 
     def hosts(self) -> list[dict[str, Any]]:
         cluster = self._cluster_name()
+        storages = self._storage_config()
+        usage = self._storage_usage()
         return [
             {
                 "name": str(node.get("node") or ""),
                 "power_state": "POWERED_ON" if node.get("status") == "online" else "",
                 "connection_state": str(node.get("status") or ""),
                 "cluster": cluster,
+                "datastores": _proxmox_datastores(str(node.get("node") or ""), storages, usage),
             }
             for node in self._get("/api2/json/nodes")
             if node.get("node")
         ]
+
+    def _storage_config(self) -> list[dict[str, Any]]:
+        """La configuración de almacenamiento del clúster (`/storage`): tipo,
+        portal y destino iSCSI, servidor y exportación NFS o SMB. Necesita
+        `Datastore.Audit`; sin él, los hosts llegan sin datastores."""
+        try:
+            return self._get("/api2/json/storage")
+        except HypervisorError:
+            return []
+
+    def _storage_usage(self) -> dict[tuple[str, str], dict[str, Any]]:
+        """`{(nodo, almacenamiento): uso}`, para el tamaño de cada uno."""
+        try:
+            entries = self._get("/api2/json/cluster/resources?type=storage")
+        except HypervisorError:
+            return {}
+        return {(str(e.get("node") or ""), str(e.get("storage") or "")): e for e in entries}
 
     def _cluster_name(self) -> str:
         """El nombre del clúster de Proxmox, o "" si el nodo va suelto.
@@ -568,6 +588,55 @@ class ProxmoxClient:
                 }
             )
         return found
+
+
+#: Lo que no es un sitio donde vivan discos de máquinas.
+_PROXMOX_DISK_CONTENT = {"images", "rootdir"}
+
+
+def _proxmox_datastores(
+    node: str, storages: list[dict[str, Any]], usage: dict[tuple[str, str], dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Los almacenamientos de discos que tiene este nodo, con su origen.
+
+    Un LVM montado sobre un iSCSI (`base: <almacenamiento iscsi>:<lun>`) es,
+    para la traza, ese iSCSI: el LVM es solo cómo se reparte. Por eso hereda su
+    portal y su destino, y viaja como iSCSI.
+    """
+    by_id = {str(s.get("storage") or ""): s for s in storages}
+    found: list[dict[str, Any] | None] = []
+    for storage in storages:
+        identifier = str(storage.get("storage") or "")
+        if not identifier or str(storage.get("disable") or "") in ("1", "true"):
+            continue
+        nodes = {n.strip() for n in str(storage.get("nodes") or "").split(",") if n.strip()}
+        if nodes and node not in nodes:
+            continue
+        content = {c.strip() for c in str(storage.get("content") or "").split(",") if c.strip()}
+        if not content & _PROXMOX_DISK_CONTENT:
+            continue
+        kind = str(storage.get("type") or "")
+        source = storage
+        base = str(storage.get("base") or "")
+        if base:
+            parent = by_id.get(base.split(":", 1)[0])
+            if parent is not None and str(parent.get("type") or "") == "iscsi":
+                source, kind = parent, "iscsi"
+        used = usage.get((node, identifier)) or {}
+        export = str(source.get("export") or source.get("share") or "")
+        found.append(
+            vmnet.datastore(
+                identifier,
+                kind,
+                gb=vmnet.gb(used.get("maxdisk")),
+                local=not bool(storage.get("shared") or source.get("shared")) and kind not in ("nfs", "cifs", "iscsi"),
+                portal=str(source.get("portal") or ""),
+                target_iqn=str(source.get("target") or ""),
+                server=str(source.get("server") or ""),
+                export=export,
+            )
+        )
+    return [item for item in found if item][: vmnet.MAX_PER_MACHINE]
 
 
 def _number(value: Any) -> float:

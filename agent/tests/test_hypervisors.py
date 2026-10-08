@@ -1192,5 +1192,58 @@ class HypervisorFindingNetworkTests(unittest.TestCase):
         self.assertEqual(found[0].payload["disks"], [{"datastore": "DS01", "gb": 10}])
 
 
+class ProxmoxDatastoreTests(unittest.TestCase):
+    STORAGE = {
+        "data": [
+            {"storage": "local", "type": "dir", "content": "iso,vztmpl,backup"},
+            {"storage": "local-lvm", "type": "lvmthin", "content": "images,rootdir"},
+            {"storage": "san", "type": "iscsi", "portal": "10.0.30.5", "target": "iqn.2005-10.org.freenas.ctl:pve", "content": "none"},
+            {"storage": "san-lvm", "type": "lvm", "base": "san:0.0.0.scsi-36589", "shared": 1, "content": "images"},
+            {"storage": "nfs-vm", "type": "nfs", "server": "10.0.30.6", "export": "/mnt/vm", "content": "images", "nodes": "pve02"},
+        ]
+    }
+
+    def _hosts(self) -> dict[str, list[dict[str, Any]]]:
+        client = ProxmoxClient("pve.acme.local", "lector@pve", "s3cr3t")
+        client.rest = _Rest(  # type: ignore[assignment]
+            {
+                "/api2/json/access/ticket": PROXMOX_TICKET,
+                "/api2/json/nodes": {"data": [{"node": "pve01", "status": "online"}]},
+                "/api2/json/storage": self.STORAGE,
+                "/api2/json/cluster/resources?type=storage": {
+                    "data": [{"node": "pve01", "storage": "san-lvm", "maxdisk": 2 * 1024**4}]
+                },
+            }
+        )
+        client.login()
+        return {h["name"]: h["datastores"] for h in client.hosts()}
+
+    def test_disk_storages_of_the_node_with_their_origin(self) -> None:
+        stores = {s["name"]: s for s in self._hosts()["pve01"]}
+
+        self.assertEqual(set(stores), {"local-lvm", "san-lvm"})
+        self.assertEqual(stores["local-lvm"]["local"], True)
+        self.assertEqual(
+            stores["san-lvm"],
+            {
+                "name": "san-lvm",
+                "type": "iscsi",
+                "gb": 2048,
+                "local": False,
+                "portal": "10.0.30.5",
+                "target_iqn": "iqn.2005-10.org.freenas.ctl:pve",
+            },
+        )
+
+    def test_without_permission_on_storage_the_nodes_still_arrive(self) -> None:
+        client = ProxmoxClient("pve.acme.local", "lector@pve", "s3cr3t")
+        client.rest = _Rest(  # type: ignore[assignment]
+            {"/api2/json/access/ticket": PROXMOX_TICKET, "/api2/json/nodes": {"data": [{"node": "pve01"}]}}
+        )
+        client.login()
+
+        self.assertEqual(client.hosts()[0]["datastores"], [])
+
+
 if __name__ == "__main__":
     unittest.main()

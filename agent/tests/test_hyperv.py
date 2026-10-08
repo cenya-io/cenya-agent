@@ -127,6 +127,7 @@ class HyperVClientTests(unittest.TestCase):
                     "manufacturer": "",
                     "model": "",
                     "serial": "",
+                    "datastores": [],
                 }
             ],
         )
@@ -466,6 +467,74 @@ class HyperVNetworkAndDisksTests(unittest.TestCase):
         self.assertEqual(machine["interfaces"][0]["mac"], "00:15:5d:0a:1b:2c")
         self.assertEqual(machine["interfaces"][0]["vlan"], None)
         self.assertEqual(machine["disks"], [])
+
+
+class HyperVDatastoreTests(unittest.TestCase):
+    """De dónde vienen los discos: CSV sobre iSCSI, recurso SMB o unidad local."""
+
+    def _host(self, data: dict[str, Any]) -> dict[str, Any]:
+        full = {"hostname": "SRV-HV01", "has_hyperv": True, **data}
+
+        class Session(_FakeSession):
+            def run_ps(self, script: str) -> _FakeResult:
+                return _FakeResult(0, as_stdout(full))
+
+        client = hyperv.HyperVClient("srv-hv01.acme.local", "ACME\\svc", "s3cr3t")
+        with mock.patch("agent.winrm.AVAILABLE", True), \
+             mock.patch("agent.winrm.pywinrm", fake_pywinrm(Session), create=True):
+            client.login()
+        return client.hosts()[0]
+
+    def test_a_csv_on_iscsi_carries_target_portal_and_paths(self) -> None:
+        host = self._host(
+            {
+                "vms": [],
+                "csvs": [{"path": "C:\\ClusterStorage\\Volume1", "volume": "\\\\?\\Volume{abc}\\", "bytes": 2199023255552}],
+                "iscsi": [
+                    {
+                        "target": "iqn.2000-01.com.synology:nas01.Target-1",
+                        "initiator": "iqn.1991-05.com.microsoft:srv-hv01",
+                        "portals": ["10.0.30.5", "10.0.31.5"],
+                        "paths": ["\\\\?\\Volume{ABC}\\"],
+                        "bytes": 2199023255552,
+                    }
+                ],
+            }
+        )
+
+        self.assertEqual(
+            host["datastores"],
+            [
+                {
+                    "name": "C:\\ClusterStorage\\Volume1",
+                    "type": "iscsi",
+                    "gb": 2048,
+                    "target_iqn": "iqn.2000-01.com.synology:nas01.Target-1",
+                    "initiator_iqn": "iqn.1991-05.com.microsoft:srv-hv01",
+                    "portal": "10.0.30.5",
+                    "paths": 2,
+                }
+            ],
+        )
+
+    def test_smb_and_local_drives_come_from_the_machines(self) -> None:
+        host = self._host(
+            {
+                "vms": [
+                    {"id": "a", "name": "a", "drives": [{"path": "\\\\nas01\\vms\\a\\a.vhdx"}]},
+                    {"id": "b", "name": "b", "drives": {"path": "D:\\Hyper-V\\b.vhdx"}},
+                ]
+            }
+        )
+
+        stores = {s["name"]: s for s in host["datastores"]}
+        self.assertEqual(stores["\\\\nas01\\vms"], {"name": "\\\\nas01\\vms", "type": "smb", "server": "nas01", "export": "vms"})
+        self.assertEqual(stores["D:"], {"name": "D:", "type": "local", "local": True})
+
+    def test_a_csv_of_unknown_origin_travels_as_csv(self) -> None:
+        host = self._host({"vms": [], "csvs": {"path": "C:\\ClusterStorage\\Volume2", "volume": "x", "bytes": 0}})
+
+        self.assertEqual(host["datastores"], [{"name": "C:\\ClusterStorage\\Volume2", "type": "csv"}])
 
 
 if __name__ == "__main__":
