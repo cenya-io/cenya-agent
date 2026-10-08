@@ -29,7 +29,7 @@ import urllib.error
 import urllib.request
 from typing import Any
 
-from agent import tlspin
+from agent import tlspin, vmnet
 from agent.hypervisor import MAX_DETAILED_VMS, TIMEOUT_SECONDS, HypervisorError, untrusted
 
 XCPNG_PORT = 443
@@ -189,9 +189,12 @@ class XcpNgClient:
                 or vm.get("is_control_domain")
             )
         ][:MAX_DETAILED_VMS]
+        self._tables: dict[str, dict[str, dict[str, Any]] | None] = {}
         host_names = self._host_names()
         pool = self._pool_name()
         disk_gb = self._disk_gb_by_vm()
+        disks = self._datastores_by_vm()
+        cards = self._interfaces_by_vm(dict(machines))
         os_names = self._os_by_guest_metrics()
         found: list[dict[str, Any]] = []
         for ref, vm in machines:
@@ -209,6 +212,8 @@ class XcpNgClient:
                     "host": host_names.get(str(vm.get("resident_on") or ""), ""),
                     "cluster": pool,
                     "operating_system": os_names.get(str(vm.get("guest_metrics") or ""), ""),
+                    "interfaces": cards.get(ref, []),
+                    "disks": disks.get(ref, []),
                 }
             )
         return found
@@ -237,10 +242,9 @@ class XcpNgClient:
         incompleto vale más que ninguno, y el disco es el dato que menos
         decide al revisar la bandeja.
         """
-        try:
-            vbds = _records(self._call("VBD.get_all_records", [self.session]))
-            vdis = _records(self._call("VDI.get_all_records", [self.session]))
-        except HypervisorError:
+        vbds = self._table("VBD")
+        vdis = self._table("VDI")
+        if vbds is None or vdis is None:
             return {}
         bytes_by_vm: dict[str, float] = {}
         for vbd in vbds.values():
@@ -261,9 +265,8 @@ class XcpNgClient:
         demás apuntan a `OpaqueRef:NULL` y salen con "". Si la llamada falla,
         todas salen sin sistema operativo, por lo mismo que los discos.
         """
-        try:
-            records = _records(self._call("VM_guest_metrics.get_all_records", [self.session]))
-        except HypervisorError:
+        records = self._table("VM_guest_metrics")
+        if records is None:
             return {}
         names: dict[str, str] = {}
         for ref, record in records.items():
@@ -271,6 +274,68 @@ class XcpNgClient:
             if isinstance(os_version, dict) and os_version.get("name"):
                 names[ref] = str(os_version["name"])
         return names
+
+    def _table(self, cls: str) -> dict[str, dict[str, Any]] | None:
+        """`<clase>.get_all_records`, una vez por barrido; `None` si falla.
+
+        Discos, datastores, sistema y direcciones salen de las mismas cuatro
+        tablas: pedirlas una vez cada una es lo que mantiene el coste fijo sea
+        cual sea el pool.
+        """
+        tables = getattr(self, "_tables", None)
+        if tables is None:
+            tables = self._tables = {}
+        if cls not in tables:
+            try:
+                tables[cls] = _records(self._call(f"{cls}.get_all_records", [self.session]))
+            except HypervisorError:
+                tables[cls] = None
+        return tables[cls]
+
+    def _datastores_by_vm(self) -> dict[str, list[dict[str, Any]]]:
+        """`{referencia de la VM: [{datastore, gb}]}`: el SR de cada disco.
+
+        En XCP-ng el «datastore» es el SR (repositorio de almacenamiento). Un
+        SR que no se puede leer deja a esas máquinas sin discos, no sin todo.
+        """
+        vbds, vdis, srs = self._table("VBD"), self._table("VDI"), self._table("SR")
+        if vbds is None or vdis is None or srs is None:
+            return {}
+        by_vm: dict[str, list[dict[str, Any] | None]] = {}
+        for vbd in vbds.values():
+            if vbd.get("type") != "Disk":
+                continue
+            vdi = vdis.get(str(vbd.get("VDI") or ""))
+            if not isinstance(vdi, dict):
+                continue
+            sr = srs.get(str(vdi.get("SR") or ""))
+            if not isinstance(sr, dict):
+                continue
+            by_vm.setdefault(str(vbd.get("VM") or ""), []).append(
+                vmnet.disk(sr.get("name_label"), vdi.get("virtual_size"))
+            )
+        return {ref: vmnet.merge_disks(items) for ref, items in by_vm.items() if ref}
+
+    def _interfaces_by_vm(self, machines: dict[str, dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+        """`{referencia de la VM: [tarjetas]}`, con las direcciones que dicen
+        las guest tools (`networks` de guest metrics, `"0/ip"`, `"0/ipv6/0"`…)
+        cruzadas por número de dispositivo."""
+        vifs = self._table("VIF")
+        if vifs is None:
+            return {}
+        metrics = self._table("VM_guest_metrics") or {}
+        by_vm: dict[str, list[dict[str, Any]]] = {}
+        for vif in sorted(vifs.values(), key=lambda v: str(v.get("device") or "")):
+            vm_ref = str(vif.get("VM") or "")
+            device = str(vif.get("device") or "")
+            record = metrics.get(str((machines.get(vm_ref) or {}).get("guest_metrics") or ""), {})
+            networks = record.get("networks") if isinstance(record.get("networks"), dict) else {}
+            ips: list[str] = []
+            for key, value in networks.items():
+                if str(key).startswith(f"{device}/") and value and str(value) not in ips:
+                    ips.append(str(value))
+            by_vm.setdefault(vm_ref, []).append(vmnet.interface(f"eth{device}", vif.get("MAC"), ips))
+        return by_vm
 
 
 def _error_text(error: Any) -> str:

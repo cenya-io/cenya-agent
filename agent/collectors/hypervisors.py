@@ -267,6 +267,11 @@ def _vm_finding(vm: dict[str, Any], platform: str, credential: creds.Credential)
             "host": vm.get("host", ""),
             "cluster": credential.host,
             "cluster_name": str(vm.get("cluster") or ""),
+            # Tarjetas (nombre, MAC, direcciones, VLAN) y en qué datastore
+            # vive cada disco: lo que mete a la máquina en el direccionamiento
+            # y en la traza de dependencia (`agent/vmnet.py`).
+            "interfaces": vm.get("interfaces") if isinstance(vm.get("interfaces"), list) else [],
+            "disks": vm.get("disks") if isinstance(vm.get("disks"), list) else [],
             "platform": platform,
             "seen_by": "hypervisor",
         },

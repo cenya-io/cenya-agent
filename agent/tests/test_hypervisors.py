@@ -1054,5 +1054,143 @@ class HypervisorFindingClusterTests(unittest.TestCase):
         self.assertEqual(found[1].payload["cluster_name"], "")
 
 
+class VMwareNetworkAndDisksTests(unittest.TestCase):
+    DETAIL = {
+        **VMWARE_VM_DETAIL,
+        "nics": {"4000": {"label": "Network adapter 1", "mac_address": "00:50:56:aa:bb:01"}},
+    }
+
+    def _logged_in(self, extra: dict[str, Any]) -> tuple[VMwareClient, _Rest]:
+        client = VMwareClient("vc.acme.local", "lector@vsphere.local", "s3cr3t")
+        rest = _Rest({"/api/session": VMWARE_TOKEN, **extra})
+        client.rest = rest  # type: ignore[assignment]
+        client.login()
+        return client, rest
+
+    def test_a_running_machine_comes_with_cards_addresses_and_datastores(self) -> None:
+        client, _ = self._logged_in(
+            {
+                "/api/vcenter/vm": [{"vm": "vm-101", "name": "srv-ficheros", "power_state": "POWERED_ON"}],
+                "/api/vcenter/vm/vm-101": self.DETAIL,
+                "/api/vcenter/vm/vm-101/guest/networking/interfaces": [
+                    {"mac_address": "00:50:56:aa:bb:01", "ip": {"ip_addresses": [{"ip_address": "10.0.0.25", "prefix_length": 24}]}}
+                ],
+            }
+        )
+
+        machine = client.virtual_machines()[0]
+
+        self.assertEqual(machine["interfaces"][0]["ips"], ["10.0.0.25/24"])
+        self.assertEqual(machine["disks"], [{"datastore": "datastore1", "gb": 192}])
+
+    def test_a_stopped_machine_is_not_asked_from_inside(self) -> None:
+        client, rest = self._logged_in(
+            {
+                "/api/vcenter/vm": [{"vm": "vm-101", "name": "srv-ficheros", "power_state": "POWERED_OFF"}],
+                "/api/vcenter/vm/vm-101": self.DETAIL,
+            }
+        )
+
+        machine = client.virtual_machines()[0]
+
+        self.assertFalse(any("/guest/" in call[1] for call in rest.calls))
+        self.assertEqual(machine["interfaces"][0]["mac"], "00:50:56:aa:bb:01")
+
+    def test_without_tools_the_machine_arrives_without_addresses(self) -> None:
+        client, _ = self._logged_in(
+            {
+                "/api/vcenter/vm": [{"vm": "vm-101", "name": "srv-ficheros", "power_state": "POWERED_ON"}],
+                "/api/vcenter/vm/vm-101": self.DETAIL,
+            }
+        )
+
+        self.assertEqual(client.virtual_machines()[0]["interfaces"][0]["ips"], [])
+
+    def test_the_inside_questions_have_a_ceiling(self) -> None:
+        many = [{"vm": f"vm-{i}", "name": f"m{i}", "power_state": "POWERED_ON"} for i in range(hypervisor.MAX_GUEST_QUERIES + 20)]
+        routes = {"/api/vcenter/vm": many}
+        routes.update({f"/api/vcenter/vm/vm-{i}": self.DETAIL for i in range(len(many))})
+        client, rest = self._logged_in(routes)
+
+        client.virtual_machines()
+
+        asked = [call for call in rest.calls if "/guest/" in call[1]]
+        self.assertEqual(len(asked), hypervisor.MAX_GUEST_QUERIES)
+
+
+class ProxmoxNetworkAndDisksTests(unittest.TestCase):
+    def _client(self, routes: dict[str, Any]) -> tuple[ProxmoxClient, _Rest]:
+        client = ProxmoxClient("pve.acme.local", "lector@pve", "s3cr3t")
+        rest = _Rest({"/api2/json/access/ticket": PROXMOX_TICKET, **routes})
+        client.rest = rest  # type: ignore[assignment]
+        client.login()
+        return client, rest
+
+    RESOURCES = {
+        "data": [
+            {"vmid": 100, "name": "srv-kvm", "node": "pve01", "type": "qemu", "status": "running"},
+            {"vmid": 101, "name": "ct-dns", "node": "pve01", "type": "lxc", "status": "running"},
+        ]
+    }
+
+    def test_each_machine_reads_its_config(self) -> None:
+        client, _ = self._client(
+            {
+                "/api2/json/cluster/resources?type=vm": self.RESOURCES,
+                "/api2/json/nodes/pve01/qemu/100/config": {
+                    "data": {"net0": "virtio=BC:24:11:AA:BB:CC,bridge=vmbr0,tag=10", "scsi0": "local-lvm:vm-100-disk-0,size=32G", "agent": "1"}
+                },
+                "/api2/json/nodes/pve01/qemu/100/agent/network-get-interfaces": {
+                    "data": {"result": [{"hardware-address": "bc:24:11:aa:bb:cc", "ip-addresses": [{"ip-address": "10.0.0.30", "prefix": 24}]}]}
+                },
+                "/api2/json/nodes/pve01/lxc/101/config": {
+                    "data": {"net0": "name=eth0,hwaddr=BC:24:11:00:00:01,ip=192.168.1.5/24", "rootfs": "local-lvm:vm-101-disk-0,size=8G"}
+                },
+            }
+        )
+
+        machines = {vm["name"]: vm for vm in client.virtual_machines()}
+
+        self.assertEqual(machines["srv-kvm"]["interfaces"][0]["ips"], ["10.0.0.30/24"])
+        self.assertEqual(machines["srv-kvm"]["interfaces"][0]["vlan"], 10)
+        self.assertEqual(machines["srv-kvm"]["disks"], [{"datastore": "local-lvm", "gb": 32}])
+        self.assertEqual(machines["ct-dns"]["interfaces"][0]["ips"], ["192.168.1.5/24"])
+
+    def test_a_config_that_cannot_be_read_does_not_lose_the_machine(self) -> None:
+        client, _ = self._client({"/api2/json/cluster/resources?type=vm": self.RESOURCES})
+
+        machines = client.virtual_machines()
+
+        self.assertEqual(len(machines), 2)
+        self.assertEqual(machines[0]["interfaces"], [])
+
+    def test_a_kvm_without_the_qemu_agent_is_not_asked_from_inside(self) -> None:
+        client, rest = self._client(
+            {
+                "/api2/json/cluster/resources?type=vm": {"data": [self.RESOURCES["data"][0]]},
+                "/api2/json/nodes/pve01/qemu/100/config": {"data": {"net0": "virtio=BC:24:11:AA:BB:CC"}},
+            }
+        )
+
+        client.virtual_machines()
+
+        self.assertFalse(any("/agent/" in call[1] for call in rest.calls))
+
+
+class HypervisorFindingNetworkTests(unittest.TestCase):
+    def test_the_machine_finding_carries_cards_and_disks(self) -> None:
+        card = {"name": "nic", "mac": "00:50:56:aa:bb:01", "ips": ["10.0.0.25/24"], "vlan": None}
+        build = client_factory(
+            vms={"vc.acme.local": [{"id": "vm-1", "name": "srv", "interfaces": [card], "disks": [{"datastore": "DS01", "gb": 10}]}]}
+        )
+        ctx = {"config": {"credentials": [{"kind": "vmware", "username": "u", "secret": "s", "host": "vc.acme.local"}]}, "env": None}
+        with mock.patch.dict("agent.collectors.hypervisors.CLIENTS", {"vmware": build}, clear=True), \
+             mock.patch("agent.collectors.hypervisors.net.resolve", lambda name: ""):
+            found = HypervisorCollector().collect(ctx)
+
+        self.assertEqual(found[0].payload["interfaces"], [card])
+        self.assertEqual(found[0].payload["disks"], [{"datastore": "DS01", "gb": 10}])
+
+
 if __name__ == "__main__":
     unittest.main()
