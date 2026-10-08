@@ -35,7 +35,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cenya-agent"
-version = "0.12.0"
+version = "0.13.0"
 description = "El agente de descubrimiento de NetInventory: barre la red y propone, sin guardar estado y solo con HTTPS saliente."
 readme = "README.md"
 requires-python = ">=3.10"
