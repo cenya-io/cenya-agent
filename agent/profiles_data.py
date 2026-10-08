@@ -266,16 +266,31 @@ PROFILES: tuple[Profile, ...] = (
         serial_oid="1.3.6.1.4.1.2604.5.1.1.4.0",
     ),
     # --- Huawei, D-Link, Allied Telesis ----------------------------------
-    # SNMP::Info Layer3::Huawei (os_ver: the V200R003C01SPC900-style string);
-    # LibreNMS vrp.yaml hwEntitySystemModel.0 (value in vrp_5720.snmprec).
+    # Netdisco gets the Huawei model by translating sysObjectID with the
+    # vendor MIB, which the agent has not got; LibreNMS (os_discovery/vrp.yaml)
+    # asks hwEntitySystemModel.0 and hwProductName.0, the ESN for the serial
+    # (hwDeviceEsn.0, HUAWEI-DEVICE-EXT-MIB = hwDatacomm 188), and reads the
+    # banner with `\((?<hardware>[^)]+) (?<version>V\d{3}R\d{3}...)`.
+    #
+    # The banner is always «Huawei Versatile Routing Platform Software … VRP
+    # (R) software, Version 5.170 (S5720 V200R019C10SPC500)»: the old regex
+    # «the word after Huawei» read «Versatile» as the model on every VRP, and
+    # that non-empty answer also stopped ENTITY-MIB from being asked. Now:
+    # the first word when the banner starts with the model itself
+    # («S2700-9TP-EI-AC Huawei Versatile…», LibreNMS vrp_4.snmprec, the full
+    # name), else the family in the parentheses («S5720», «AR1220», «CE6850EI»).
     Profile(
         key="huawei",
         vendor="Huawei",
         enterprise=2011,
         os="VRP",
-        model_oid="1.3.6.1.4.1.2011.5.25.31.6.5.0",
-        model_from_description=r"^Huawei (\S+) ",
-        version_from_description=r"\b(V\d{3}R\d{3}\w*)\b",
+        model_oid="1.3.6.1.4.1.2011.5.25.31.6.5.0",  # hwEntitySystemModel.0
+        serial_oid="1.3.6.1.4.1.2011.5.25.188.1.1.0",  # hwDeviceEsn.0
+        model_from_description=(
+            r"^(?!Huawei\b)(\S+)\s+Huawei Versatile Routing Platform"
+            r"|\(([^)\s][^)]*?) V\d{3}R\d{3}[0-9A-Z]*\)"
+        ),
+        version_from_description=r"\b(V\d{3}R\d{3}[0-9A-Z]*)\b",
     ),
     # LibreNMS dlink.yaml: serial .171.12.1.1.12.0 (value in
     # dlink_dgs-3000-28x.snmprec), version probeSoftwareRev.0 (RMON2, value in
