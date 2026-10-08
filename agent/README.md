@@ -522,6 +522,33 @@ Un colector que no puede correr --le falta su librería, le falta el binario, no
 hay credenciales-- lo dice en el resultado del barrido y devuelve cero
 hallazgos. **El barrido sale parcial, nunca roto.**
 
+### Windows sin WinRM (WMI sobre DCOM)
+
+Si un servidor Windows tiene cerrados los puertos de WinRM (5985 y 5986) pero
+sí abierto el 135, el colector `winrm` lo identifica igualmente por **WMI sobre
+DCOM**, con **las mismas credenciales de Windows** que ya tengas puestas (no
+hay un tipo de credencial nuevo). Es lo que hacen Lansweeper y ServiceNow.
+
+- **Solo funciona en un agente Windows** (con PowerShell, que trae el sistema):
+  usa las órdenes CIM nativas de PowerShell, sin ninguna biblioteca nueva. En
+  Linux o Docker no hace nada y no escribe ningún aviso.
+- **Solo se prueba si WinRM no contesta.** Si el 5985/5986 está abierto y
+  rechaza la credencial, no se insiste por DCOM: sería un segundo intento
+  fallido contra la misma cuenta, y en un Directorio Activo eso la bloquea.
+  Un fallo de DCOM cuenta igual que uno de WinRM para el límite de intentos
+  fallidos y el descanso de 24 horas.
+- **La contraseña no viaja en la línea de órdenes**: entra al PowerShell por su
+  entrada estándar, y el script es siempre el mismo.
+- **Puertos que hay que abrir en el servidor** (reglas de Windows Defender
+  Firewall «Windows Management Instrumentation (DCOM-In)» y «Windows
+  Management Instrumentation (WMI-In)»): TCP 135, TCP 445 y el rango dinámico de
+  RPC, TCP 49152-65535.
+- **Con una cuenta que no sea administrador local** hacen falta, según la
+  documentación de otros fabricantes (**sin probar con nuestro agente**), que
+  pertenezca a los grupos *Distributed COM Users* y *Performance Monitor Users*
+  y tenga permiso de lectura (*Enable Account* y *Remote Enable*) en el espacio
+  de nombres `root\cimv2`. Con administrador local no hace falta nada de esto.
+
 ### Qué órdenes ejecuta en los equipos por SSH
 
 Todas son de **solo lectura**: el agente nunca cambia nada en un equipo. La

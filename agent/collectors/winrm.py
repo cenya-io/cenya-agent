@@ -9,6 +9,11 @@ Eso último es lo que convierte una lista de servidores en un mapa: saber cuál
 es el controlador de dominio y cuál tiene Hyper-V es media respuesta a «¿de qué
 depende esto?», que es la pregunta que vende el producto.
 
+Si un Windows no tiene WinRM (5985/5986 cerrados) pero sí el 135, y el agente
+corre en Windows, se le pregunta por WMI sobre DCOM con las mismas credenciales
+(`agent.dcom`): ver `_dcom_targets`. Si WinRM contestó y rechazó la credencial,
+DCOM no se prueba: sería un segundo intento fallido contra la misma cuenta.
+
 El hallazgo mantiene el ``kind`` ``host`` y la identidad del barrido: enriquece
 la fila que ya está en la bandeja en vez de abrir otra.
 """
@@ -19,7 +24,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from agent import credentials as creds
-from agent import net, winrm
+from agent import dcom, net, winrm
 from agent.collectors import register, tasking
 from agent.collectors.base import Finding
 from agent.notes import collector_note
@@ -28,6 +33,8 @@ from agent.notes import collector_note
 #: un Windows endurecido tiene el 5985 cerrado y solo escucha en el 5986.
 PORTS: tuple[int, ...] = (winrm.DEFAULT_PORT, winrm.DEFAULT_TLS_PORT)
 WORKERS = 10
+#: Con DCOM cada equipo es un proceso PowerShell: pocos a la vez.
+DCOM_WORKERS = 4
 
 #: `Win32_ComputerSystem.DomainRole`. Los dos últimos son controladores de
 #: dominio; los demás, miembros o máquinas sueltas. Números y no texto porque es
@@ -71,17 +78,26 @@ def interrogate(host: str, port: int, credentials: list[creds.Credential], ctx: 
 
 
 def interrogate_with(
-    host: str, port: int, credentials: list[creds.Credential], ctx: dict, logins: tasking.Logins | None = None
+    host: str,
+    port: int,
+    credentials: list[creds.Credential],
+    ctx: dict,
+    logins: tasking.Logins | None = None,
+    transport: str = "winrm",
 ) -> tuple[dict[str, Any], creds.Credential | None]:
     """``interrogate``, y además con qué credencial se entró: la memoria la
     recuerda para empezar por ella la próxima vez.
 
     Cada intento pasa por `logins` (el límite global de credenciales, spec
     2.3): es aquí donde una clave de dominio equivocada bloquearía la cuenta.
+    `transport` ``"dcom"`` hace la misma pregunta por WMI/DCOM (el `port` se
+    ignora): mismo veto, mismo cortacircuitos, mismos veredictos.
     """
     for credential in credentials:
 
         def call(credential: creds.Credential = credential) -> winrm.Answer:
+            if transport == "dcom":
+                return dcom.query(host=host, username=credential.username, secret=credential.secret)
             return winrm.query(
                 host=host,
                 username=credential.username,
@@ -151,7 +167,11 @@ class WinrmCollector:
             listening = set(net.hosts_listening(pending, port, **tasking.listen_options(ctx)))
             targets.extend((ip, port) for ip in pending if ip in listening)
             pending = [ip for ip in pending if ip not in listening]
-        if not targets:
+        # Windows sin WinRM: los que no abrieron ningún puerto de WinRM y tienen
+        # el 135. Solo los que no escuchan: uno que escucha y rechazó la
+        # credencial ya cuenta como intento fallido de esa cuenta.
+        dcom_ips = _dcom_targets(ctx, pending, credentials)
+        if not targets and not dcom_ips:
             return []
 
         def usable(port: int) -> list[creds.Credential]:
@@ -164,19 +184,24 @@ class WinrmCollector:
             """
             return [c for c in credentials if (c.port or port) == port]
 
-        progress = tasking.Progress(ctx, self.name, len(targets))
+        all_targets: list[tuple[str, int, str]] = [(ip, port, "winrm") for ip, port in targets]
+        all_targets += [(ip, dcom.PORT, "dcom") for ip in dcom_ips]
+        progress = tasking.Progress(ctx, self.name, len(all_targets))
 
-        def visit(target: tuple[str, int]) -> dict[str, Any]:
+        def visit(target: tuple[str, int, str]) -> dict[str, Any]:
             """Un equipo: qué credenciales tocan (alcance y memoria), y entrar."""
-            ip, port = target
+            ip, port, transport = target
             try:
-                order, full = tasking.plan(ctx, ip, by_ip[ip], "winrm", usable(port))
+                # DCOM no tiene puerto propio de credencial: valen las que no
+                # fijan uno (un puerto escrito es de un WinRM concreto).
+                candidates = usable(port) if transport == "winrm" else [c for c in credentials if not c.port]
+                order, full = tasking.plan(ctx, ip, by_ip[ip], "winrm", candidates)
                 if not order:
                     # La memoria dice que hoy no toca: ni un intento contra un
                     # dominio que cuenta los fallos.
                     return {}
                 logins = tasking.Logins(ctx, self.name, "winrm", ip, by_ip[ip])
-                data, credential = interrogate_with(ip, port, order, ctx, logins)
+                data, credential = interrogate_with(ip, port, order, ctx, logins, transport)
                 full = full and not logins.skipped
                 tasking.settle(ctx, ip, by_ip[ip], "winrm", credential, attempted=True, full=full)
                 if credential is not None and not data:
@@ -185,44 +210,64 @@ class WinrmCollector:
             finally:
                 progress.tick()
 
-        with ThreadPoolExecutor(max_workers=tasking.workers(ctx, "login", WORKERS)) as pool:
-            answers = list(pool.map(visit, targets))
+        # Cada DCOM es un PowerShell entero (decenas de MB y varios segundos):
+        # menos a la vez que las conexiones WinRM, que son sockets.
+        pool_size = tasking.workers(ctx, "login", WORKERS)
+        if dcom_ips:
+            pool_size = min(pool_size, DCOM_WORKERS)
+        with ThreadPoolExecutor(max_workers=pool_size) as pool:
+            answers = list(pool.map(visit, all_targets))
 
         findings: list[Finding] = []
-        for (ip, _port), data in zip(targets, answers):
+        for (ip, _port, transport), data in zip(all_targets, answers):
             if not data:
                 continue
-            sweep_mac = by_ip.get(ip, "")
-            interfaces = _interfaces(data)
-            own_mac = next((iface["mac"] for iface in interfaces if iface["mac"]), "")
-            # La MAC del barrido manda sobre la que diga el equipo: la huella se
-            # calcula de la identidad, y cambiar de MAC entre barridos abre una
-            # segunda fila en la bandeja para un equipo que ya estaba.
-            identity = {"mac": sweep_mac or own_mac} if (sweep_mac or own_mac) else {"ip": ip}
-            description = " ".join(
-                part for part in (str(data.get("os") or ""), str(data.get("os_version") or "")) if part
-            ).strip()
-            findings.append(
-                Finding(
-                    kind="host",
-                    identity=identity,
-                    payload={
-                        "hostname": str(data.get("hostname") or ""),
-                        "ip": ip,
-                        "mac": sweep_mac or own_mac,
-                        "description": description,
-                        "os": description,
-                        "domain": str(data.get("domain") or "") if data.get("in_domain") else "",
-                        "roles": roles_of(data),
-                        "manufacturer": str(data.get("manufacturer") or ""),
-                        "model": str(data.get("model") or ""),
-                        "serial": str(data.get("serial") or ""),
-                        "interfaces": interfaces,
-                        "seen_by": "winrm",
-                    },
-                )
-            )
+            findings.append(host_finding(ip, by_ip.get(ip, ""), data, transport))
         return findings
+
+
+def _dcom_targets(ctx: dict, pending: list[str], credentials: list[creds.Credential]) -> list[str]:
+    """Hosts without WinRM that answer on the RPC port, when DCOM is possible.
+
+    Silent (no error line) when this agent cannot do DCOM: on Linux or Docker
+    there is nothing to report, it is simply not a thing that agent does.
+    """
+    if not pending or not dcom.available() or not any(not c.port for c in credentials):
+        return []
+    return list(net.hosts_listening(pending, dcom.PORT, **tasking.listen_options(ctx)))
+
+
+def host_finding(ip: str, sweep_mac: str, data: dict[str, Any], transport: str = "winrm") -> Finding:
+    """The finding for one answered Windows; the same for WinRM and DCOM.
+
+    ``transport`` is only added to the payload for DCOM, as a diagnostic.
+    """
+    interfaces = _interfaces(data)
+    own_mac = next((iface["mac"] for iface in interfaces if iface["mac"]), "")
+    # La MAC del barrido manda sobre la que diga el equipo: la huella se
+    # calcula de la identidad, y cambiar de MAC entre barridos abre una
+    # segunda fila en la bandeja para un equipo que ya estaba.
+    identity = {"mac": sweep_mac or own_mac} if (sweep_mac or own_mac) else {"ip": ip}
+    description = " ".join(
+        part for part in (str(data.get("os") or ""), str(data.get("os_version") or "")) if part
+    ).strip()
+    payload: dict[str, Any] = {
+        "hostname": str(data.get("hostname") or ""),
+        "ip": ip,
+        "mac": sweep_mac or own_mac,
+        "description": description,
+        "os": description,
+        "domain": str(data.get("domain") or "") if data.get("in_domain") else "",
+        "roles": roles_of(data),
+        "manufacturer": str(data.get("manufacturer") or ""),
+        "model": str(data.get("model") or ""),
+        "serial": str(data.get("serial") or ""),
+        "interfaces": interfaces,
+        "seen_by": "winrm",
+    }
+    if transport != "winrm":
+        payload["transport"] = transport
+    return Finding(kind="host", identity=identity, payload=payload)
 
 
 def _interfaces(data: dict[str, Any]) -> list[dict[str, str]]:
