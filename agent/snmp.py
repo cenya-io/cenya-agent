@@ -18,6 +18,7 @@ names, so ``lookupMib=False`` everywhere.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import ipaddress
 import re
 from typing import Any, Callable, Iterable
@@ -113,6 +114,10 @@ UPS_OIDS = {
     "charge_percent": "1.3.6.1.2.1.33.1.2.4.0",  # upsEstimatedChargeRemaining
     "output_source": "1.3.6.1.2.1.33.1.4.1.0",  # upsOutputSource
     "load_percent": "1.3.6.1.2.1.33.1.4.4.1.5.1",  # upsOutputPercentLoad, primera salida
+    # Identidad (RFC 1628 no tiene serie). Van en la misma petición que lo
+    # demás: dos OIDs más en un GET que ya se hace, ningún paquete extra.
+    "ident_manufacturer": "1.3.6.1.2.1.33.1.1.1.0",  # upsIdentManufacturer
+    "ident_model": "1.3.6.1.2.1.33.1.1.2.0",  # upsIdentModel
 }
 
 #: `upsOutputSource`: de dónde sale la corriente ahora mismo. El 5 es batería;
@@ -120,6 +125,30 @@ UPS_OIDS = {
 #: elevador) no son «tirando de batería» pero tampoco son un funcionamiento
 #: tranquilo, así que solo se afirma lo que se sabe: on_battery o no.
 UPS_SOURCE_ON_BATTERY = "5"
+
+# Identity fallbacks for the devices whose ENTITY-MIB is empty (most printers,
+# UPSs and PDUs). Every OID below was checked against the MIB text (RFC 1628,
+# RFC 3805, Raritan PDU2-MIB, APC PowerNet-MIB), not remembered.
+HR_DEVICE_TYPE_OID = "1.3.6.1.2.1.25.3.2.1.2"  # hrDeviceType, index = hrDeviceIndex
+HR_DEVICE_DESCR_OID = "1.3.6.1.2.1.25.3.2.1.3"  # hrDeviceDescr: usually the commercial model
+HR_DEVICE_PRINTER = "1.3.6.1.2.1.25.3.1.5"  # hrDevicePrinter
+PRT_SERIAL_OID = "1.3.6.1.2.1.43.5.1.1.17"  # prtGeneralSerialNumber, index = hrDeviceIndex
+PRT_MARKER_UNIT_OID = "1.3.6.1.2.1.43.10.2.1.3"  # prtMarkerCounterUnit, index = hrDeviceIndex.marker
+PRT_MARKER_LIFE_OID = "1.3.6.1.2.1.43.10.2.1.4"  # prtMarkerLifeCount, same index
+#: prtMarkerCounterUnit values that count pages: impressions and sheets.
+PRT_PAGE_UNITS = ("7", "8")
+#: Vendor profiles of printers: they are always asked (page counter included);
+#: a device with no profile at all is asked only while model or serial are missing.
+PRINTER_PROFILE_KEYS = ("brother", "hp-printer", "canon", "epson")
+RARITAN_ENTERPRISE = 13742
+RARITAN_PDU_OIDS = {
+    "model": "1.3.6.1.4.1.13742.6.3.2.1.1.3.1",  # pduModel, first PDU of the nameplate table
+    "serial": "1.3.6.1.4.1.13742.6.3.2.1.1.4.1",  # pduSerialNumber
+}
+APC_PDU_OIDS = {
+    "model": "1.3.6.1.4.1.318.1.1.12.1.5.0",  # rPDUIdentModelNumber
+    "serial": "1.3.6.1.4.1.318.1.1.12.1.6.0",  # rPDUIdentSerialNumber
+}
 
 # Neighbours: LLDP-MIB and Cisco's CDP.
 LLDP_LOCAL_PORT_OID = "1.0.8802.1.1.2.1.3.7.1.3"  # lldpLocPortId, index = local port num
@@ -533,6 +562,93 @@ async def _query_identity(
     return profiles.identify(profile, description, extra, entity) if entity else identity
 
 
+async def _query_printer(engine, host: str, auth: Auth) -> dict[str, str]:
+    """Model, serial and page counter of a printer (Host Resources + Printer-MIB).
+
+    Only a device that lists an hrDevicePrinter row gets the Printer-MIB
+    questions; anything else (a Linux box, a switch) answers `{}`. Every read
+    is its own try: an OID that does not answer is one key less, never an error.
+    """
+    try:
+        types = {i: _text(v) for i, v in (await _walk(engine, host, auth, HR_DEVICE_TYPE_OID)).items()}
+    except Exception:  # noqa: BLE001
+        return {}
+    rows = sorted((i for i, kind in types.items() if kind.lstrip(".") == HR_DEVICE_PRINTER), key=profiles._index_key)
+    if not rows:
+        return {}
+    index = rows[0]
+    found: dict[str, str] = {}
+    try:
+        descr = await _get(engine, host, auth, {"model": f"{HR_DEVICE_DESCR_OID}.{index}"}) or {}
+    except Exception:  # noqa: BLE001
+        descr = {}
+    if descr.get("model"):
+        found["model"] = descr["model"]
+    try:
+        serials = {i: _text(v) for i, v in (await _walk(engine, host, auth, PRT_SERIAL_OID)).items()}
+    except Exception:  # noqa: BLE001
+        serials = {}
+    serial = serials.get(index) or next((serials[i] for i in sorted(serials, key=profiles._index_key) if serials[i]), "")
+    if serial:
+        found["serial"] = serial
+    try:
+        lives = {i: _text(v) for i, v in (await _walk(engine, host, auth, PRT_MARKER_LIFE_OID)).items()}
+        units = {i: _text(v) for i, v in (await _walk(engine, host, auth, PRT_MARKER_UNIT_OID)).items()}
+    except Exception:  # noqa: BLE001
+        lives, units = {}, {}
+    for marker in sorted(lives, key=profiles._index_key):
+        # A counter in hours or feet is no page count; an absent unit is trusted.
+        if _number(lives[marker]) is not None and units.get(marker, "7") in PRT_PAGE_UNITS:
+            found["page_count"] = lives[marker]
+            break
+    return found
+
+
+async def _query_kind_identity(
+    engine, host: str, auth: Auth, system: dict[str, str], identity: profiles.Identity, ups_raw: dict[str, str]
+) -> tuple[profiles.Identity, dict[str, Any]]:
+    """The fallback identity of printers, UPSs and PDUs, whose ENTITY-MIB is
+    usually empty: fills only the fields the vendor profile and ENTITY-MIB left
+    empty (they win), and returns the optional extras (`page_count`).
+
+    What is read depends on what the device already told us: a UPS-MIB answer
+    reuses the GET that was made anyway; Raritan and APC PDUs get their two
+    leaf OIDs; printers (or a device nobody recognised) get Host Resources;
+    a switch with a profile gets none of this.
+    """
+    object_id = system.get("object_id", "")
+    profile = profiles.resolve(object_id, system.get("description", ""))
+    enterprise = profiles.enterprise_of(object_id)
+    key = profile.key if profile is not None else ""
+    missing = not (identity.model and identity.serial)
+    found: dict[str, str] = {}
+    ups_answered = bool(
+        ups_raw.get("ident_model") or ups_raw.get("ident_manufacturer") or ups_raw.get("runtime_minutes")
+    )
+    if ups_answered:
+        found = {"model": ups_raw.get("ident_model", ""), "manufacturer": ups_raw.get("ident_manufacturer", "")}
+    pdu_oids: dict[str, str] = {}
+    if enterprise == RARITAN_ENTERPRISE and missing:
+        pdu_oids, found["manufacturer"] = RARITAN_PDU_OIDS, "Raritan"
+    elif key == "apc" and missing:
+        pdu_oids = APC_PDU_OIDS
+    if pdu_oids:
+        try:
+            found.update({k: v for k, v in (await _get(engine, host, auth, pdu_oids) or {}).items() if v})
+        except Exception:  # noqa: BLE001 - an OID that does not answer is one key less
+            pass
+    extras: dict[str, Any] = {}
+    is_power = ups_answered or enterprise == RARITAN_ENTERPRISE or key == "apc"
+    if not is_power and (key in PRINTER_PROFILE_KEYS or (profile is None and missing)):
+        printer = await _query_printer(engine, host, auth)
+        found.update({k: v for k, v in printer.items() if k in ("model", "serial") and v})
+        page_count = _number(printer.get("page_count", ""))
+        if page_count is not None:
+            extras["page_count"] = page_count
+    filled = {k: v for k, v in found.items() if v and not getattr(identity, k)}
+    return (dataclasses.replace(identity, **filled) if filled else identity), extras
+
+
 async def _entity_chassis(engine, host: str, auth: Auth, classes: dict[str, str]) -> dict[str, str]:
     """The chassis row of entPhysicalTable: model, serial, software revision
     and manufacturer of the first row of class chassis, by one `get` of its
@@ -836,6 +952,12 @@ async def _inventory(engine, host: str, auth: Auth, system: dict[str, str]) -> d
         identity = await _query_identity(engine, host, auth, system, classes)
     except Exception:  # noqa: BLE001
         identity = profiles.Identity()
+    # Printers, UPSs and PDUs: model and serial when nobody else gave them.
+    extras: dict[str, Any] = {}
+    try:
+        identity, extras = await _query_kind_identity(engine, host, auth, system, identity, ups)
+    except Exception:  # noqa: BLE001
+        extras = {}
     try:
         members = await _query_members(engine, host, auth, classes)
     except Exception:  # noqa: BLE001
@@ -857,6 +979,7 @@ async def _inventory(engine, host: str, auth: Auth, system: dict[str, str]) -> d
         "fdb": fdb,
         "arp": arp,
         "ups": _ups_reading(ups),
+        **extras,
         "members": members,
         "power_supplies": power_supplies,
     }

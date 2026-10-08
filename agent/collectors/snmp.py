@@ -270,6 +270,8 @@ def _inventory_findings(hosts: list[dict], answers: dict[str, dict]) -> list[Fin
                     # hallazgo y no en uno aparte: un SAI es un equipo más,
                     # y la huella tiene que seguir siendo una sola fila.
                     **({"ups": data["ups"]} if data.get("ups") else {}),
+                    # Printer page counter (Printer-MIB), additive and optional.
+                    **({"page_count": data["page_count"]} if data.get("page_count") else {}),
                     # Sus tablas, para que el servidor deduzca quién está
                     # detrás de qué boca (formato 2 del hallazgo; las dos
                     # opcionales, y solo si traen algo).
