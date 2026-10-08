@@ -35,18 +35,35 @@ hours and no collector can see what the others said earlier; the server's
 which does not tell a Server from a client edition (hence names such as
 "Windows 10 1809 / Server 2019").
 
+* **NetBIOS (UDP 137), SSDP/UPnP (UDP 1900), mDNS (UDP 5353)**: one standard
+  query each, unicast to the host. They name NAS boxes, printers, Macs and
+  Samba machines that have no SNMP and no credentials (``fingerprint.netbios``,
+  ``fingerprint.upnp``, ``fingerprint.mdns``). The UPnP description is only
+  downloaded from the *same IP* that answered (never a LOCATION pointing
+  elsewhere), over http, at most 64 KB.
+
+``manufacturer``/``model``/``serial`` are deliberately NOT copied to the top
+level of the payload: the server's ``merge_payload`` only protects ``seen_by``
+and ``hostname`` from a poorer source, so a UPnP guess would overwrite what SNMP
+or SSH had found. They live only inside ``fingerprint.upnp`` and ``.mdns``.
+
 Silence is the rule: a closed port, a timeout or garbage on the wire adds
 nothing and notes nothing (the server has no sentence for such notes).
 """
 
 from __future__ import annotations
 
+import http.client
+import ipaddress
 import os
 import re
 import socket
 import ssl
 import struct
+import time
 import uuid
+from urllib.parse import urlsplit
+from xml.etree import ElementTree
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
@@ -464,6 +481,371 @@ def probe_https(ip: str, port: int, timeout: float = TIMEOUT) -> dict[str, Any]:
         return {}
 
 
+# --- UDP probes: NetBIOS, SSDP/UPnP, mDNS ---------------------------------------------------
+#
+# Three more questions a host answers to anybody on the LAN, aimed at what has no
+# SNMP and no credentials: NAS boxes, printers, Macs, Samba and old Windows.
+# Same rules as above: read-only, one attempt per host, ~2 s, silence on failure.
+# The UDP "ports" double as the keys of the per-host answers dict, next to the
+# TCP ports (no TCP service is probed on them here, so there is no clash).
+
+PORT_NETBIOS = 137
+PORT_SSDP = 1900
+PORT_MDNS = 5353
+UDP_PORTS: tuple[int, ...] = (PORT_NETBIOS, PORT_SSDP, PORT_MDNS)
+
+UPNP_XML_MAX = 64 * 1024
+MDNS_SERVICES_MAX = 20
+_TEXT_MAX = 200
+_DNS_MAX_HOPS = 16
+
+
+def _clip(text: str) -> str:
+    return text.replace("\x00", "").strip()[:_TEXT_MAX]
+
+
+def _udp_ask(ip: str, port: int, packets: list[bytes], timeout: float, expected: int = 1) -> list[bytes]:
+    """Send ``packets`` to ``ip:port`` from one socket and collect up to
+    ``expected`` datagrams that really come from that address (anything else on
+    the wire is ignored) before ``timeout`` seconds pass in total."""
+    replies: list[bytes] = []
+    try:
+        family = socket.AF_INET6 if ":" in ip else socket.AF_INET
+        with socket.socket(family, socket.SOCK_DGRAM) as sock:
+            for packet in packets:
+                sock.sendto(packet, (ip, port))
+            deadline = time.monotonic() + timeout
+            while len(replies) < expected:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                sock.settimeout(remaining)
+                data, sender = sock.recvfrom(8192)
+                if sender[0] == ip:
+                    replies.append(data)
+    except OSError:  # includes timeout and ICMP "port unreachable" resets
+        pass
+    return replies
+
+
+# DNS wire format, just enough for NBSTAT and mDNS.
+
+
+def dns_read_name(data: bytes, pos: int) -> tuple[str, int]:
+    """A (possibly compressed) domain name at ``pos`` -> ``(name, next position)``.
+
+    ``next position`` is where the record continues in the *original* stream,
+    i.e. just after the first pointer. A pointer that loops, or too many hops,
+    raises ``ValueError``: a hostile responder cannot make us spin.
+    """
+    labels: list[str] = []
+    end = -1
+    hops = 0
+    while True:
+        length = data[pos]
+        if length & 0xC0 == 0xC0:
+            hops += 1
+            if hops > _DNS_MAX_HOPS:
+                raise ValueError("compression loop")
+            if end < 0:
+                end = pos + 2
+            pos = ((length & 0x3F) << 8) | data[pos + 1]
+            continue
+        if length & 0xC0:
+            raise ValueError("bad label")
+        pos += 1
+        if length == 0:
+            return ".".join(labels), end if end >= 0 else pos
+        if pos + length > len(data):
+            raise ValueError("truncated label")
+        labels.append(data[pos : pos + length].decode("utf-8", errors="replace"))
+        pos += length
+        if len(labels) > 127:
+            raise ValueError("name too long")
+
+
+def dns_encode_name(name: str) -> bytes:
+    out = b""
+    for label in name.strip(".").split("."):
+        raw = label.encode("utf-8")
+        out += bytes([len(raw)]) + raw
+    return out + b"\x00"
+
+
+def dns_records(data: bytes) -> list[tuple[str, int, int, int]]:
+    """Every record of a DNS message as ``(owner, type, rdata offset, rdata length)``.
+    Questions are skipped. Raises ``ValueError``/``IndexError``/``struct.error`` on junk."""
+    _ident, _flags, questions, answers, authority, additional = struct.unpack_from(">HHHHHH", data, 0)
+    pos = 12
+    for _ in range(questions):
+        _name, pos = dns_read_name(data, pos)
+        pos += 4
+    records = []
+    for _ in range(min(answers + authority + additional, 100)):
+        owner, pos = dns_read_name(data, pos)
+        rtype, _cls, _ttl, rdlen = struct.unpack_from(">HHIH", data, pos)
+        pos += 10
+        if pos + rdlen > len(data):
+            raise ValueError("truncated record")
+        records.append((owner, rtype, pos, rdlen))
+        pos += rdlen
+    return records
+
+
+# NetBIOS Name Service (RFC 1002): NBSTAT ("node status") query for "*".
+
+_NBSTAT_ID = 0x4E42
+
+
+def netbios_query() -> bytes:
+    """NBSTAT for the wildcard name: "*" padded with NULs to 16 bytes, first-level
+    encoded (each nibble becomes a letter A-P)."""
+    raw = b"*" + b"\x00" * 15
+    encoded = bytes(65 + nibble for byte in raw for nibble in (byte >> 4, byte & 0x0F))
+    return struct.pack(">HHHHHH", _NBSTAT_ID, 0, 1, 0, 0, 0) + b"\x20" + encoded + b"\x00" + struct.pack(">HH", 0x21, 1)
+
+
+def parse_nbstat(data: bytes) -> dict[str, str]:
+    """``{"name", "workgroup", "mac"}`` from an NBSTAT response; only keys that came.
+
+    ``name`` is the unique name with suffix 0x00 (the workstation service),
+    ``workgroup`` the *group* name with suffix 0x00. An all-zero MAC (Samba, some
+    NAS) is no information and is dropped. Never raises.
+    """
+    try:
+        ident, flags = struct.unpack_from(">HH", data, 0)
+        if ident != _NBSTAT_ID or not flags & 0x8000:
+            return {}
+        questions, answers = struct.unpack_from(">HH", data, 4)
+        if answers < 1:
+            return {}
+        pos = 12
+        for _ in range(questions):
+            _name, pos = dns_read_name(data, pos)
+            pos += 4
+        _name, pos = dns_read_name(data, pos)
+        rtype = struct.unpack_from(">H", data, pos)[0]
+        if rtype != 0x21:
+            return {}
+        pos += 10
+        count = data[pos]
+        pos += 1
+        found: dict[str, str] = {}
+        for _ in range(count):
+            raw, suffix, name_flags = struct.unpack_from(">15sBH", data, pos)
+            pos += 18
+            if suffix != 0:
+                continue
+            text = _clip(raw.decode("ascii", errors="replace"))
+            if not text:
+                continue
+            if name_flags & 0x8000:
+                found.setdefault("workgroup", text)
+            else:
+                found.setdefault("name", text)
+        mac = data[pos : pos + 6]
+        if len(mac) == 6 and any(mac):
+            found["mac"] = ":".join(f"{byte:02x}" for byte in mac)
+        return found
+    except (struct.error, IndexError, ValueError):
+        return {}
+
+
+def probe_netbios(ip: str, port: int = PORT_NETBIOS, timeout: float = TIMEOUT) -> dict[str, str]:
+    for reply in _udp_ask(ip, port, [netbios_query()], timeout):
+        found = parse_nbstat(reply)
+        if found:
+            return found
+    return {}
+
+
+# SSDP / UPnP: unicast M-SEARCH, then the device description the host points to.
+
+
+def ssdp_search(ip: str) -> bytes:
+    host = f"[{ip}]" if ":" in ip else ip
+    return (
+        f'M-SEARCH * HTTP/1.1\r\nHOST: {host}:{PORT_SSDP}\r\nMAN: "ssdp:discover"\r\n'
+        "MX: 1\r\nST: upnp:rootdevice\r\n\r\n"
+    ).encode()
+
+
+def parse_ssdp_response(data: bytes) -> dict[str, str]:
+    """Headers (lower-case names) of an SSDP ``HTTP/1.1 200 OK`` reply, or ``{}``."""
+    lines = data[:4096].decode("utf-8", errors="replace").split("\r\n")
+    if not lines[0].startswith("HTTP/1.") or " 200" not in lines[0]:
+        return {}
+    headers: dict[str, str] = {}
+    for line in lines[1:]:
+        name, sep, value = line.partition(":")
+        if sep:
+            headers.setdefault(name.strip().lower(), value.strip())
+    return headers
+
+
+def same_host_location(location: str, ip: str) -> tuple[int, str] | None:
+    """``(port, path)`` of a LOCATION URL, but only when it is plain http and
+    points at ``ip`` itself. The responder is untrusted: a LOCATION aimed at any
+    other address would make the agent fetch arbitrary URLs inside the customer's
+    network on a stranger's say-so (SSRF), so it is refused, not followed."""
+    try:
+        parts = urlsplit(location)
+        if parts.scheme != "http" or not parts.hostname:
+            return None
+        if ipaddress.ip_address(parts.hostname) != ipaddress.ip_address(ip):
+            return None
+        path = parts.path or "/"
+        if parts.query:
+            path += "?" + parts.query
+        return parts.port or 80, path
+    except ValueError:
+        return None
+
+
+def parse_upnp_description(xml: bytes) -> dict[str, str]:
+    """Fields of the first ``<device>`` of a UPnP description; only keys present.
+
+    DTDs and entities are refused outright: an entity-expansion bomb fits in 64 KB.
+    """
+    upper = xml.upper()
+    if b"<!DOCTYPE" in upper or b"<!ENTITY" in upper:
+        return {}
+    try:
+        root = ElementTree.fromstring(xml)
+    except ElementTree.ParseError:
+        return {}
+
+    def local(tag: str) -> str:
+        return tag.rsplit("}", 1)[-1]
+
+    device = next((el for el in root.iter() if local(el.tag) == "device"), None)
+    if device is None:
+        return {}
+    wanted = {
+        "friendlyName": "friendly_name",
+        "manufacturer": "manufacturer",
+        "modelName": "model",
+        "modelNumber": "model_number",
+        "serialNumber": "serial",
+        "deviceType": "device_type",
+    }
+    found: dict[str, str] = {}
+    for child in device:
+        key = wanted.get(local(child.tag))
+        text = _clip(child.text or "")
+        if key and text and key not in found:
+            found[key] = text
+    return found
+
+
+def _fetch_description(ip: str, port: int, path: str, timeout: float) -> bytes:
+    """GET of the description: no redirects followed, 64 KB at most (more -> nothing)."""
+    conn = http.client.HTTPConnection(ip, port, timeout=timeout)
+    try:
+        conn.request("GET", path, headers={"User-Agent": "cenya-agent", "Connection": "close"})
+        response = conn.getresponse()
+        if response.status != 200:
+            return b""
+        data = response.read(UPNP_XML_MAX + 1)
+        return data if len(data) <= UPNP_XML_MAX else b""
+    finally:
+        conn.close()
+
+
+def probe_ssdp(ip: str, port: int = PORT_SSDP, timeout: float = TIMEOUT) -> dict[str, str]:
+    """M-SEARCH to the host; if it answers with a LOCATION on its own address,
+    read its description. Without a usable description there is nothing to report."""
+    try:
+        for reply in _udp_ask(ip, port, [ssdp_search(ip)], timeout):
+            target = same_host_location(parse_ssdp_response(reply).get("location", ""), ip)
+            if target is None:
+                continue
+            found = parse_upnp_description(_fetch_description(ip, target[0], target[1], timeout))
+            if found:
+                return found
+    except (OSError, ValueError, http.client.HTTPException):
+        pass
+    return {}
+
+
+# mDNS / DNS-SD (RFC 6762/6763): a unicast question straight to the host's port 5353.
+
+MDNS_QUESTIONS = ("_device-info._tcp.local", "_workstation._tcp.local", "_services._dns-sd._udp.local")
+
+
+def mdns_query(name: str, ident: int) -> bytes:
+    return struct.pack(">HHHHHH", ident, 0, 1, 0, 0, 0) + dns_encode_name(name) + struct.pack(">HH", 12, 1)
+
+
+def parse_mdns(packets: list[bytes]) -> dict[str, Any]:
+    """``{"model", "hostname", "services"}`` out of the responses; only keys that came.
+
+    * ``model``: the ``model=`` entry of the TXT record under ``_device-info._tcp``
+      (Apple, avahi and Synology publish it).
+    * ``hostname``: the SRV target, else the ``_workstation`` instance (avahi
+      writes ``host [mac]``), else the ``_device-info`` instance; ``.local`` cut.
+    * ``services``: the service types listed under ``_services._dns-sd._udp``
+      (``_smb._tcp.local`` -> ``smb``), at most ``MDNS_SERVICES_MAX``.
+    Junk packets are skipped one by one; never raises.
+    """
+    model = ""
+    targets: list[str] = []
+    workstation = ""
+    device_info = ""
+    services: list[str] = []
+    for data in packets:
+        try:
+            for owner, rtype, offset, length in dns_records(data):
+                low = owner.lower()
+                if rtype == 12:  # PTR
+                    target, _ = dns_read_name(data, offset)
+                    if low == "_services._dns-sd._udp.local":
+                        service = _clip(target.split(".", 1)[0].lstrip("_"))
+                        if service and service not in services:
+                            services.append(service)
+                    elif low.endswith("_workstation._tcp.local") and not workstation:
+                        workstation = target.split("._workstation", 1)[0]
+                    elif low.endswith("_device-info._tcp.local") and not device_info:
+                        device_info = target.split("._device-info", 1)[0]
+                elif rtype == 16 and low.endswith("_device-info._tcp.local"):  # TXT
+                    rdata = data[offset : offset + length]
+                    position = 0
+                    while position < len(rdata):
+                        size = rdata[position]
+                        entry = rdata[position + 1 : position + 1 + size].decode("utf-8", errors="replace")
+                        position += 1 + size
+                        if entry.lower().startswith("model=") and not model:
+                            model = _clip(entry[6:])
+                    if not device_info:
+                        device_info = owner.split("._device-info", 1)[0]
+                elif rtype == 33 and length >= 7:  # SRV: priority, weight, port, target
+                    target, _ = dns_read_name(data, offset + 6)
+                    targets.append(target)
+        except (struct.error, IndexError, ValueError):
+            continue
+    hostname = ""
+    for candidate in (*targets, workstation.split(" [", 1)[0], device_info):
+        candidate = _clip(candidate)
+        if candidate.lower().endswith(".local"):
+            candidate = candidate[: -len(".local")]
+        if candidate:
+            hostname = candidate
+            break
+    found: dict[str, Any] = {}
+    if model:
+        found["model"] = model
+    if hostname:
+        found["hostname"] = hostname
+    if services:
+        found["services"] = services[:MDNS_SERVICES_MAX]
+    return found
+
+
+def probe_mdns(ip: str, port: int = PORT_MDNS, timeout: float = TIMEOUT) -> dict[str, Any]:
+    queries = [mdns_query(name, index + 1) for index, name in enumerate(MDNS_QUESTIONS)]
+    return parse_mdns(_udp_ask(ip, port, queries, timeout, expected=len(queries)))
+
+
 # --- Assembly -----------------------------------------------------------------------------
 
 _NAME_KEYS = ("nb_name", "nb_domain", "dns_name", "dns_domain", "dns_tree", "os_version")
@@ -477,6 +859,12 @@ def _probe(ip: str, port: int) -> tuple[str, int, Any]:
             return ip, port, probe_rdp(ip)
         if port == PORT_SSH:
             return ip, port, probe_ssh(ip)
+        if port == PORT_NETBIOS:
+            return ip, port, probe_netbios(ip)
+        if port == PORT_SSDP:
+            return ip, port, probe_ssdp(ip)
+        if port == PORT_MDNS:
+            return ip, port, probe_mdns(ip)
         return ip, port, probe_https(ip, port)
     except Exception:  # noqa: BLE001 - a probe never costs the run
         return ip, port, {}
@@ -511,6 +899,17 @@ def assemble(answers: dict[int, Any]) -> tuple[dict[str, Any], str, str]:
             fingerprint["tls"] = tls
         if raw.get("panel") and "panel" not in fingerprint:
             fingerprint["panel"] = raw["panel"]
+    for key, port, names in (
+        ("netbios", PORT_NETBIOS, ("name", "workgroup", "mac")),
+        ("upnp", PORT_SSDP, ("manufacturer", "model", "model_number", "serial", "friendly_name", "device_type")),
+        ("mdns", PORT_MDNS, ("model", "hostname", "services")),
+    ):
+        raw = answers.get(port) or {}
+        block = {name: raw[name] for name in names if raw.get(name)}
+        if block:
+            fingerprint[key] = block
+    # The weakest hostname hints: only when no stronger probe gave one.
+    hostname = hostname or fingerprint.get("netbios", {}).get("name", "") or fingerprint.get("mdns", {}).get("hostname", "")
     return fingerprint, hostname, windows or ssh.get("distro", "")
 
 
@@ -530,7 +929,7 @@ class FingerprintCollector:
         }
         if not by_ip:
             return []
-        jobs = [(ip, port) for ip in by_ip for port in PORTS]
+        jobs = [(ip, port) for ip in by_ip for port in (*PORTS, *UDP_PORTS)]
         progress = tasking.Progress(ctx, self.name, len(jobs))
 
         def run(job: tuple[str, int]) -> tuple[str, int, Any]:

@@ -325,7 +325,7 @@ class CollectorTests(unittest.TestCase):
 
     def test_closed_ports_give_no_finding_and_no_notes(self) -> None:
         ctx = {"hosts": [{"ip": "127.0.0.1", "mac": ""}]}
-        with mock.patch.object(fp, "PORTS", (closed_port(), closed_port())):
+        with mock.patch.object(fp, "PORTS", (closed_port(), closed_port())), mock.patch.object(fp, "UDP_PORTS", ()):
             self.assertEqual(FingerprintCollector().collect(ctx), [])
         self.assertEqual(ctx.get("errors", []), [])
 
@@ -358,7 +358,8 @@ class CollectorTests(unittest.TestCase):
         with mock.patch.object(fp, "probe_smb", side_effect=RuntimeError("boom")), \
              mock.patch.object(fp, "probe_ssh", return_value={}), \
              mock.patch.object(fp, "probe_rdp", return_value={}), \
-             mock.patch.object(fp, "probe_https", return_value={}):
+             mock.patch.object(fp, "probe_https", return_value={}), \
+             mock.patch.object(fp, "UDP_PORTS", ()):
             self.assertEqual(FingerprintCollector().collect(ctx), [])
 
 
