@@ -1,0 +1,21 @@
+Cenya Agent
+Copyright 2026 Cenya
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+It includes vendor-identification data (SNMP enterprise numbers, sysObjectID
+prefixes, sysDescr patterns and vendor-specific OIDs in agent/profiles_data.py)
+derived from SNMP::Info, part of the Netdisco project:
+
+    https://github.com/netdisco/snmp-info
+    Copyright (c) 2002-2024 Max Baker, Eric Miller, Bill Fenner, Oliver Gorwits
+    and the SNMP::Info contributors. All rights reserved.
+    Licensed under the BSD 3-Clause License.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the conditions of that license are
+met; the full text is available at the URL above. Neither the names of the
+authors nor the names of their contributors may be used to endorse or promote
+products derived from this software without specific prior written permission.
+THE SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES ARE DISCLAIMED.

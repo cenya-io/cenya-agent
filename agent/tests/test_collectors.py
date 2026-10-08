@@ -8,7 +8,7 @@ import time
 import unittest
 from unittest import mock
 
-from agent import net
+from agent import net, profiles, snmp
 from agent.collectors import RUN_ORDER, all_collectors
 from agent.collectors.snmp import SnmpCollector, _communities
 from agent.collectors.sweep import SweepCollector, _subnets
@@ -519,3 +519,168 @@ class StackMembersSnmpTests(unittest.TestCase):
             self.assertEqual(payload.get("members"), expected)
             if expected is None:
                 self.assertNotIn("members", payload)
+
+
+class IdentitySnmpTests(unittest.TestCase):
+    """What the device is: the vendor profile's OIDs, then ENTITY-MIB, then
+    nothing -- and whatever happens, the same inventory as before."""
+
+    from agent.tests.test_profiles import CISCO_DESCR, TABLE
+
+    @staticmethod
+    def _fake_get(answers: dict[str, object], calls: list[list[str]] | None = None, fail_on: str = ""):
+        """`snmp._get` over a dict {oid: value}; a missing OID answers like a
+        real v2c device: a NoSuchObject bind, not an error. `fail_on` makes
+        the whole get raise when it asks that OID."""
+        from pysnmp.proto.rfc1905 import NoSuchObject
+
+        async def get(engine, host, auth, oids, context_name=""):  # noqa: ANN001 - mirrors snmp._get
+            if calls is not None:
+                calls.append(list(oids.values()))
+            if fail_on and fail_on in oids.values():
+                raise RuntimeError("timeout")
+            return {name: snmp._text(answers.get(oid, NoSuchObject())) for name, oid in oids.items()}
+
+        return get
+
+    @staticmethod
+    def _fake_walk(tables: dict[str, dict[str, str]], calls: list[str] | None = None):
+        async def walk(engine, host, auth, oid, context_name=""):  # noqa: ANN001 - mirrors snmp._walk
+            if calls is not None:
+                calls.append(oid)
+            return dict(tables.get(oid, {}))
+
+        return walk
+
+    def _inventory(self, system: dict, get, walk) -> dict:
+        import asyncio
+
+        with mock.patch("agent.profiles.PROFILES", self.TABLE), \
+             mock.patch("agent.snmp._get", get), \
+             mock.patch("agent.snmp._walk", walk):
+            return asyncio.run(snmp._inventory(None, "192.168.1.2", "public", system))
+
+    def test_the_profile_oids_are_asked_in_one_get(self) -> None:
+        get_calls: list[list[str]] = []
+        system = {"name": "rb", "description": "RouterOS CCR1009-7G-1C-1S+", "object_id": "1.3.6.1.4.1.14988.1"}
+        get = self._fake_get(
+            {"1.3.6.1.4.1.14988.1.1.7.3.0": "ABC123", "1.3.6.1.4.1.14988.1.1.4.4.0": "7.15.3"}, get_calls
+        )
+        data = self._inventory(system, get, self._fake_walk({}))
+
+        identity = data["identity"]
+        self.assertEqual(identity.serial, "ABC123")
+        self.assertEqual(identity.os_version, "7.15.3")
+        self.assertEqual(identity.model, "CCR1009-7G-1C-1S+")
+        self.assertEqual(identity.payload_fields()["os"], "RouterOS 7.15.3")
+        profile_gets = [c for c in get_calls if "1.3.6.1.4.1.14988.1.1.7.3.0" in c]
+        self.assertEqual(len(profile_gets), 1)
+        self.assertEqual(sorted(profile_gets[0]), ["1.3.6.1.4.1.14988.1.1.4.4.0", "1.3.6.1.4.1.14988.1.1.7.3.0"])
+
+    def test_no_such_object_is_empty_not_a_sentence(self) -> None:
+        """A v2c get of a missing OID answers with a NoSuchObject bind whose
+        text is "No Such Object currently exists at this OID". That must
+        never become a serial number."""
+        system = {"name": "rb", "description": "RouterOS hAP ac2", "object_id": "1.3.6.1.4.1.14988.1"}
+        data = self._inventory(system, self._fake_get({}), self._fake_walk({}))
+
+        self.assertEqual(data["identity"].serial, "")
+        self.assertEqual(data["identity"].os_version, "")
+        self.assertEqual(
+            data["identity"].payload_fields(), {"manufacturer": "MikroTik", "model": "hAP ac2", "os": "RouterOS"}
+        )
+
+    def test_entity_mib_fills_what_the_profile_could_not(self) -> None:
+        """Cisco IOS: no serial or model OID in the profile, so the chassis
+        row of ENTITY-MIB is asked -- one get of its four leaf instances, on
+        the index the class column marks as chassis -- and the class column
+        is walked once for identity and stack together."""
+        from agent.tests.test_stacks import ENTITY_ONE_CHASSIS
+
+        get_calls: list[list[str]] = []
+        walk_calls: list[str] = []
+        system = {"name": "sw", "description": self.CISCO_DESCR, "object_id": "1.3.6.1.4.1.9.1.3245"}
+        get = self._fake_get(
+            {
+                snmp.ENTITY_MODEL_OID + ".1": "WS-C2960X-48FPD-L",
+                snmp.ENTITY_SERIAL_OID + ".1": "FOC2001X0AB",
+                snmp.ENTITY_SOFTWARE_OID + ".1": "15.2(7)E8",
+                snmp.ENTITY_MFG_OID + ".1": "Cisco Systems, Inc.",
+            },
+            get_calls,
+        )
+        walk = self._fake_walk({snmp.ENTITY_CLASS_OID: ENTITY_ONE_CHASSIS["classes"]}, walk_calls)
+        data = self._inventory(system, get, walk)
+
+        identity = data["identity"]
+        self.assertEqual(identity.model, "WS-C2960X-48FPD-L")
+        self.assertEqual(identity.serial, "FOC2001X0AB")
+        self.assertEqual(identity.os_version, "15.2(7)E8")  # the sysDescr regex, before ENTITY's
+        self.assertEqual(identity.manufacturer, "Cisco")  # the profile's, not entPhysicalMfgName
+        self.assertEqual(walk_calls.count(snmp.ENTITY_CLASS_OID), 1)
+        self.assertNotIn(snmp.ENTITY_MODEL_OID, walk_calls)
+        self.assertNotIn(snmp.ENTITY_SERIAL_OID, walk_calls)
+        self.assertEqual(data["members"], [])
+
+    def test_a_profile_without_fallback_never_asks_entity(self) -> None:
+        get_calls: list[list[str]] = []
+        system = {"name": "sg", "description": "SG350-28", "object_id": "1.3.6.1.4.1.9.6.1.1004"}
+        walk = self._fake_walk({snmp.ENTITY_CLASS_OID: {"1": "3"}})
+        data = self._inventory(system, self._fake_get({}, get_calls), walk)
+
+        self.assertEqual(data["identity"].profile, "cisco-sb")
+        self.assertFalse(any(snmp.ENTITY_MODEL_OID in oid for call in get_calls for oid in call))
+
+    def test_without_a_profile_entity_alone_identifies(self) -> None:
+        system = {"name": "x", "description": "Unknown box", "object_id": "1.3.6.1.4.1.99999.1"}
+        get = self._fake_get({snmp.ENTITY_MODEL_OID + ".1": "Box-1", snmp.ENTITY_MFG_OID + ".1": "Acme"})
+        data = self._inventory(system, get, self._fake_walk({snmp.ENTITY_CLASS_OID: {"1": "3", "2": "10"}}))
+
+        self.assertEqual(data["identity"].payload_fields(), {"manufacturer": "Acme", "model": "Box-1"})
+        self.assertEqual(data["identity"].profile, "")
+
+    def test_a_profile_get_that_blows_up_does_not_cost_the_inventory(self) -> None:
+        system = {"name": "rb", "description": "RouterOS hAP ac2", "object_id": "1.3.6.1.4.1.14988.1"}
+        get = self._fake_get({}, fail_on="1.3.6.1.4.1.14988.1.1.7.3.0")
+        data = self._inventory(system, get, self._fake_walk({}))
+
+        self.assertEqual(data["name"], "rb")
+        self.assertEqual(data["identity"].manufacturer, "MikroTik")
+        self.assertEqual(data["identity"].serial, "")
+
+    def test_the_host_payload_is_unchanged_without_identity(self) -> None:
+        """A device nobody recognises -- or an answer without the key -- gives
+        exactly the payload it gave before this existed: no empty keys."""
+        answers = (
+            SnmpCollectorTests.SNMP_ANSWER,
+            {**SnmpCollectorTests.SNMP_ANSWER, "identity": profiles.Identity()},
+        )
+        for answer in answers:
+            ctx = {"config": {"communities": ["public"]}, "env": None, "hosts": [{"ip": "192.168.1.2", "mac": ""}]}
+            with mock.patch("agent.collectors.snmp.snmp.AVAILABLE", True), \
+                 mock.patch("agent.collectors.snmp.snmp.query_hosts", return_value={"192.168.1.2": answer}):
+                payload = SnmpCollector().collect(ctx)[0].payload
+            self.assertEqual(
+                sorted(payload),
+                ["description", "hostname", "interfaces", "ip", "mac", "management_interface", "seen_by"],
+            )
+
+    def test_the_host_payload_carries_the_identity(self) -> None:
+        identity = profiles.Identity(
+            manufacturer="Cisco", model="C1000-24T-4G-L", serial="FOC2341", os="IOS", os_version="15.2(7)E8", profile="cisco"
+        )
+        answer = {**SnmpCollectorTests.SNMP_ANSWER, "identity": identity}
+        ctx = {"config": {"communities": ["public"]}, "env": None, "hosts": [{"ip": "192.168.1.2", "mac": ""}]}
+        with mock.patch("agent.collectors.snmp.snmp.AVAILABLE", True), \
+             mock.patch("agent.collectors.snmp.snmp.query_hosts", return_value={"192.168.1.2": answer}):
+            payload = SnmpCollector().collect(ctx)[0].payload
+
+        self.assertEqual(payload["manufacturer"], "Cisco")
+        self.assertEqual(payload["model"], "C1000-24T-4G-L")
+        self.assertEqual(payload["serial"], "FOC2341")
+        self.assertEqual(payload["os"], "IOS 15.2(7)E8")
+        self.assertEqual(payload["os_version"], "15.2(7)E8")
+        self.assertNotIn("profile", payload)
+        # Nothing that was there has moved.
+        self.assertEqual(payload["hostname"], "sw-planta-1")
+        self.assertEqual(payload["description"], "Cisco IOS Software, C1000")
