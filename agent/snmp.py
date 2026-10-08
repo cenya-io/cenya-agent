@@ -23,6 +23,7 @@ import re
 from typing import Any, Callable, Iterable
 
 from agent import credentials as creds
+from agent import power
 from agent import profiles
 from agent import stacks
 
@@ -153,7 +154,9 @@ ARP_MEDIA_OID = "1.3.6.1.2.1.4.22.1.2"  # ipNetToMediaPhysAddress, index = ifInd
 MAX_ARP_ENTRIES = 4096
 # Cisco hides each VLAN's FDB behind community@vlan; the VLAN list lives here.
 # ENTITY-MIB entPhysicalTable: the units of a stack, one chassis row each.
-ENTITY_CLASS_OID = "1.3.6.1.2.1.47.1.1.1.1.5"  # entPhysicalClass, 3 = chassis
+ENTITY_DESCR_OID = "1.3.6.1.2.1.47.1.1.1.1.2"  # entPhysicalDescr
+ENTITY_CLASS_OID = "1.3.6.1.2.1.47.1.1.1.1.5"  # entPhysicalClass, 3 = chassis, 6 = power supply
+ENTITY_NAME_OID = "1.3.6.1.2.1.47.1.1.1.1.7"  # entPhysicalName
 ENTITY_POSITION_OID = "1.3.6.1.2.1.47.1.1.1.1.6"  # entPhysicalParentRelPos
 ENTITY_SOFTWARE_OID = "1.3.6.1.2.1.47.1.1.1.1.10"  # entPhysicalSoftwareRev
 ENTITY_SERIAL_OID = "1.3.6.1.2.1.47.1.1.1.1.11"  # entPhysicalSerialNum
@@ -516,6 +519,42 @@ async def _query_members(
     return stacks.entity_members(classes, columns["position"], columns["serial"], columns["model"])
 
 
+async def _query_power_supplies(
+    engine, host: str, auth: Auth, classes: dict[str, str], object_id: str
+) -> list[dict[str, str]]:
+    """The power supplies of the device (see ``agent/power.py``): one row per
+    entPhysicalClass powerSupply, named by its leaf instances and with the
+    state the vendor's column gives it.
+
+    Two `get`s per supply at most -- the name row and the status instance --
+    and never a walk: a chassis with hundreds of entities would otherwise
+    pay for all of them to learn about two. A supply whose `get` fails is
+    still counted, nameless and in unknown state: the bay exists.
+    """
+    indexes = power.supply_indexes(classes)
+    if not indexes:
+        return []
+    status_oid, states = power.status_column(object_id)
+    supplies: list[dict[str, str]] = []
+    for position, index in enumerate(indexes, start=1):
+        columns = {
+            "name": f"{ENTITY_NAME_OID}.{index}",
+            "description": f"{ENTITY_DESCR_OID}.{index}",
+            "model": f"{ENTITY_MODEL_OID}.{index}",
+            "serial": f"{ENTITY_SERIAL_OID}.{index}",
+        }
+        try:
+            row = await _get(engine, host, auth, columns) or {}
+        except Exception:  # noqa: BLE001 - the bay is still there
+            row = {}
+        try:
+            answer = await _get(engine, host, auth, {"status": f"{status_oid}.{index}"}) or {}
+        except Exception:  # noqa: BLE001 - no status column: unknown, not absent
+            answer = {}
+        supplies.append(power.supply(index, position, row, power.status_of(answer.get("status", ""), states)))
+    return supplies
+
+
 async def _query_fdb(engine, host: str, auth: Auth, object_id: str) -> list[dict[str, str]]:
     """MAC -> bridge port. Cisco slices the table per VLAN: behind
     ``community@vlan`` in v2c, behind the ``vlan-N`` context in v3; everyone
@@ -739,6 +778,11 @@ async def _inventory(engine, host: str, auth: Auth, system: dict[str, str]) -> d
         members = await _query_members(engine, host, auth, classes)
     except Exception:  # noqa: BLE001
         members = []
+    # The power supplies, from the same class column. Opportunistic too.
+    try:
+        power_supplies = await _query_power_supplies(engine, host, auth, classes, system.get("object_id", ""))
+    except Exception:  # noqa: BLE001
+        power_supplies = []
     return {
         "name": system.get("name", ""),
         "description": system.get("description", ""),
@@ -752,6 +796,7 @@ async def _inventory(engine, host: str, auth: Auth, system: dict[str, str]) -> d
         "arp": arp,
         "ups": _ups_reading(ups),
         "members": members,
+        "power_supplies": power_supplies,
     }
 
 
