@@ -380,7 +380,7 @@ class RunOrderTests(unittest.TestCase):
         """Nadie se queda fuera por no estar nombrado en `RUN_ORDER`."""
         names = {collector.name for collector in all_collectors()}
 
-        self.assertEqual(names, {"local", "sweep", "fingerprint", "snmp", "ssh", "winrm", "hypervisors"})
+        self.assertEqual(names, {"local", "sweep", "fingerprint", "directory", "snmp", "ssh", "winrm", "hypervisors"})
 
 
 class SubnetExpansionTests(unittest.TestCase):

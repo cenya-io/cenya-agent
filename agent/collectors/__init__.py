@@ -32,12 +32,17 @@ def register(cls: type[Collector]) -> type[Collector]:
 #: hallazgo gane en las claves sueltas (`os`, `hostname`), así lo que cuenten
 #: los protocolos con credencial pisa lo que este solo adivina.
 #:
+#: `directory` (Directorio Activo, sin credenciales) va justo detrás de
+#: `fingerprint`: el sistema operativo exacto del directorio debe pisar la
+#: pista por build de la huella, y lo que digan SNMP/SSH/WinRM después manda
+#: sobre ambos.
+#:
 #: Lo mismo vale para SSH y WinRM, que tampoco llaman a nadie que no haya
 #: contestado antes al barrido. Los hipervisores van al final porque no
 #: dependen de `ctx["hosts"]` --un vCenter tiene dirección propia-- pero sí
 #: interesa que sus hallazgos lleguen después de los del barrido: así los
 #: enriquecen en vez de estrenar la fila.
-RUN_ORDER: tuple[str, ...] = ("local", "sweep", "fingerprint", "snmp", "ssh", "winrm", "hypervisors")
+RUN_ORDER: tuple[str, ...] = ("local", "sweep", "fingerprint", "directory", "snmp", "ssh", "winrm", "hypervisors")
 
 
 def all_collectors() -> list[Collector]:
@@ -54,6 +59,7 @@ def all_collectors() -> list[Collector]:
 # Importing the modules is what fills the registry; `RUN_ORDER` decides who
 # goes first, so this line is free to stay alphabetical.
 from agent.collectors import (  # noqa: E402,F401
+    directory,
     fingerprint,
     hypervisors,
     local,
