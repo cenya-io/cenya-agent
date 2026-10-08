@@ -698,3 +698,23 @@ class ProbeTaskTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class KnownHostsPlanTests(unittest.TestCase):
+    """Fase 2 (Netdisco): el que ya contestó alguna vez solo recibe la
+    pasada rápida; el primer contacto, las dos."""
+
+    _ctx = SnmpTaskTests._ctx
+    _collect = SnmpTaskTests._collect
+
+    def test_the_second_inventory_marks_the_answering_devices_as_known(self) -> None:
+        memory = Memory.load(None)
+        _first, query_plan = self._collect(self._ctx("inventory", memory=memory), {"192.168.1.2": SWITCH_ANSWER})
+        self.assertEqual(list(query_plan.call_args.kwargs["known"]), [])
+
+        _second, query_plan = self._collect(self._ctx("inventory", memory=memory), {"192.168.1.2": SWITCH_ANSWER})
+        self.assertEqual(list(query_plan.call_args.kwargs["known"]), ["192.168.1.2"])
+
+    def test_without_memory_nobody_is_known(self) -> None:
+        _findings, query_plan = self._collect(self._ctx("inventory"), {})
+        self.assertEqual(list(query_plan.call_args.kwargs["known"]), [])

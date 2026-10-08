@@ -122,3 +122,15 @@ Los que no se puedan documentar con un `sysDescr`/`sysObjectID` real **no se inv
 - `python -m unittest agent.tests.test_profiles agent.tests.test_profiles_data agent.tests.test_collectors` en verde.
 - Un equipo sin perfil y sin ENTITY-MIB sigue produciendo exactamente el mismo hallazgo que hoy (test de regresión en `test_collectors`).
 - Un OID de perfil que no contesta no rompe el inventario del equipo.
+
+---
+
+# Fase 2 · Conectar como Netdisco (rama `conexion-netdisco`, 08-10-2026)
+
+Lo que cambia, todo en el agente y sin tocar el protocolo:
+
+- **Pasada rápida y pasada lenta** (`agent/snmp.py::_query_host_indexed`): primero todas las credenciales con 0,5 s y sin reintento; solo si nadie contesta, otra vez con 2 s y un reintento. Un equipo que **ya contestó alguna vez** (la memoria recuerda una credencial para él, `tasking.answered_before`) solo recibe la pasada rápida: si hoy calla es que está apagado. `query_plan(..., known=[...])` es quien lo dice; `query_hosts` (protocolo 1, sin memoria) sigue siendo paciente con todos.
+- **Qué cuenta como sesión** (`_answered`): `sysDescr` o `sysUpTime` con valor. Cuatro binds vacíos no son un equipo y su comunidad no se recuerda como la buena. `sysUpTime` entra en `SYSTEM_OIDS` por eso.
+- **Columnas nuevas de IF-MIB** por interfaz: `type` (IANAifType → `ethernet`, `lag`, `vlan`, `virtual`, `loopback`, `tunnel`, `wifi`, `other`), `admin` (`ifAdminStatus`) y `lag` (nombre del agregado al que pertenece el puerto, por `dot3adAggPortAttachedAggID` de IEEE8023-LAG-MIB, oportunista). Solo viajan cuando traen algo: un hallazgo sin ellas es idéntico al de antes. **El servidor aún no las usa**: hoy deduce el tipo por el nombre (`core/discovery.py::_interface_kind`); usarlas es un PR pequeño del servidor.
+
+Lo que el análisis proponía y **no** entra, con el porqué: «recordar el perfil detectado» no ahorra nada aquí, porque `resolve` es puro y no cuesta red (en Netdisco ahorraba cargar clases Perl). Dúplex y MTU no tienen sitio en el modelo del servidor.

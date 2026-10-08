@@ -150,6 +150,9 @@ class SnmpCollector:
             concurrency=tasking.workers(ctx, "snmp", snmp.CONCURRENCY),
             ups_only=ups_task,
             on_done=progress.tick,
+            # The devices that already answered SNMP some day get the fast
+            # pass only; the slow pass is for first contact.
+            known=[ip for ip, (mac, _order, _full) in orders.items() if tasking.answered_before(ctx, ip, mac, "snmp")],
         )
         answers: dict[str, dict] = {}
         for ip, (mac, order, full) in orders.items():
@@ -250,15 +253,7 @@ def _inventory_findings(hosts: list[dict], answers: dict[str, dict]) -> list[Fin
                     "ip": ip,
                     "mac": device_mac,
                     "description": data["description"],
-                    "interfaces": [
-                        {
-                            "name": iface["name"],
-                            "mac": iface["mac"],
-                            "status": iface["status"],
-                            "speed_mbps": iface["speed_mbps"],
-                        }
-                        for iface in interfaces
-                    ],
+                    "interfaces": [_interface_payload(iface) for iface in interfaces],
                     "management_interface": management_name,
                     "seen_by": "snmp",
                     # What the device is, through its vendor profile
@@ -284,6 +279,23 @@ def _inventory_findings(hosts: list[dict], answers: dict[str, dict]) -> list[Fin
         )
         findings.extend(_links_for(ip, data, device_mac, known))
     return findings
+
+
+def _interface_payload(iface: dict) -> dict[str, str]:
+    """One interface as the server sees it. `type`, `admin` and `lag` (IF-MIB
+    ifType, ifAdminStatus and the LAG aggregator) go only when the inventory
+    brought them: an answer without them -- a test double, an older shape --
+    produces the same four keys as always."""
+    payload = {
+        "name": iface["name"],
+        "mac": iface["mac"],
+        "status": iface["status"],
+        "speed_mbps": iface["speed_mbps"],
+    }
+    for key in ("type", "admin", "lag"):
+        if iface.get(key):
+            payload[key] = iface[key]
+    return payload
 
 
 def _identity_fields(data: dict) -> dict[str, str]:

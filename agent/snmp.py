@@ -20,7 +20,7 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import re
-from typing import Any, Callable
+from typing import Any, Callable, Iterable
 
 from agent import credentials as creds
 from agent import profiles
@@ -51,6 +51,15 @@ except ImportError:  # the standalone agent without pysnmp: sweep still works
 #: Con qué se pregunta: una comunidad v2c tal cual, o un usuario SNMPv3.
 Auth = str | creds.Credential
 
+#: Two ways of knocking, Netdisco's: a **fast pass** first (short wait, no
+#: retry) over every credential, and only if nobody answered a **slow pass**
+#: with the conservative settings. On a LAN a device that is going to answer
+#: does so in milliseconds; what costs minutes in a sweep is waiting two
+#: seconds twice for every wrong community on every silent host. The slow
+#: pass is for the first contact with a device (nothing remembered yet) and
+#: for a slow link; a device that already answered once is asked fast only.
+FAST_TIMEOUT_SECONDS = 0.5
+FAST_RETRIES = 0
 TIMEOUT_SECONDS = 2
 RETRIES = 1
 CONCURRENCY = 20
@@ -58,6 +67,7 @@ CONCURRENCY = 20
 SYSTEM_OIDS = {
     "description": "1.3.6.1.2.1.1.1.0",
     "object_id": "1.3.6.1.2.1.1.2.0",
+    "uptime": "1.3.6.1.2.1.1.3.0",  # sysUpTime: the one value every agent has
     "name": "1.3.6.1.2.1.1.5.0",
 }
 # Column OIDs, walked: index-suffix -> value.
@@ -67,6 +77,29 @@ IF_OIDS = {
     "mac": "1.3.6.1.2.1.2.2.1.6",  # ifPhysAddress
     "status": "1.3.6.1.2.1.2.2.1.8",  # ifOperStatus: 1 up, 2 down
     "speed": "1.3.6.1.2.1.31.1.1.1.15",  # ifHighSpeed, in Mbps
+    "type": "1.3.6.1.2.1.2.2.1.3",  # ifType (IANAifType): what the interface is
+    "admin": "1.3.6.1.2.1.2.2.1.7",  # ifAdminStatus: 1 up, 2 down (switched off on purpose)
+}
+#: IEEE8023-LAG-MIB dot3adAggPortAttachedAggID: for each port, the ifIndex of
+#: the aggregator it belongs to (0 or itself when it is in none). Lives under
+#: 1.2.840, not under 1.3.6.1: it is an IEEE MIB, not an IETF one.
+LAG_MEMBER_OID = "1.2.840.10006.300.43.1.2.1.1.13"
+
+#: IANAifType -> a word the server can reason about. The numbers are the
+#: ones a switch, a router or a server actually use; the rest is "other".
+IF_TYPES = {
+    "6": "ethernet",  # ethernetCsmacd
+    "7": "ethernet",  # iso88023Csmacd (old agents)
+    "117": "ethernet",  # gigabitEthernet (old agents)
+    "161": "lag",  # ieee8023adLag
+    "53": "virtual",  # propVirtual (Cisco/Linux VLAN SVIs, bridges)
+    "135": "vlan",  # l2vlan
+    "136": "vlan",  # l3ipvlan
+    "24": "loopback",  # softwareLoopback
+    "131": "tunnel",  # tunnel
+    "150": "tunnel",  # mplsTunnel
+    "71": "wifi",  # ieee80211
+    "1": "other",  # other
 }
 IP_TO_IFINDEX_OID = "1.3.6.1.2.1.4.20.1.2"  # ipAdEntIfIndex: which interface owns an IP
 
@@ -152,8 +185,10 @@ def _mac(value: Any) -> str:
         return ""
 
 
-async def _target(host: str):
+async def _target(host: str, fast: bool = False):
     # pysnmp 7: create() is a coroutine; the constructor does not take the address.
+    if fast:
+        return await UdpTransportTarget.create((host, 161), timeout=FAST_TIMEOUT_SECONDS, retries=FAST_RETRIES)
     return await UdpTransportTarget.create((host, 161), timeout=TIMEOUT_SECONDS, retries=RETRIES)
 
 
@@ -199,9 +234,9 @@ def _context(context_name: str = ""):
 
 
 async def _get(
-    engine, host: str, auth: Auth, oids: dict[str, str], context_name: str = ""
+    engine, host: str, auth: Auth, oids: dict[str, str], context_name: str = "", fast: bool = False
 ) -> dict[str, str] | None:
-    target = await _target(host)
+    target = await _target(host, fast)
     error, _, _, binds = await get_cmd(
         engine,
         _auth_data(auth),
@@ -509,19 +544,47 @@ async def _query_host(host: str, auths: list[Auth]) -> dict[str, Any] | None:
     return found[1] if found is not None else None
 
 
-async def _query_host_indexed(host: str, auths: list[Auth]) -> tuple[int, dict[str, Any]] | None:
-    """Like ``_query_host``, plus *which* auth answered (its index in ``auths``):
-    the memory remembers it so the next inventory starts with it."""
-    engine = SnmpEngine()
+def _answered(system: dict[str, str] | None) -> bool:
+    """A session only counts when the device said something about itself.
+
+    Netdisco's rule: uptime or a description, or it is not a session. A
+    device that answers the ``get`` with four empty binds (a proxy, a broken
+    agent) would otherwise be inventoried as a nameless nothing and, worse,
+    its community remembered as the one that works.
+    """
+    return bool(system) and bool(system.get("description") or system.get("uptime"))
+
+
+async def _knock(engine, host: str, auths: list[Auth], fast: bool) -> tuple[int, dict[str, str]] | None:
+    """One pass over the auths, in order: the first that answers, with its index."""
     for index, auth in enumerate(auths):
         try:
-            system = await _get(engine, host, auth, SYSTEM_OIDS)
+            system = await _get(engine, host, auth, SYSTEM_OIDS, fast=fast)
         except Exception:  # noqa: BLE001 - timeout, refused, garbage: next auth
             continue
-        if system is None:
-            continue
-        return index, await _inventory(engine, host, auth, system)
+        if _answered(system):
+            return index, system or {}
     return None
+
+
+async def _query_host_indexed(host: str, auths: list[Auth], slow: bool = True) -> tuple[int, dict[str, Any]] | None:
+    """Like ``_query_host``, plus *which* auth answered (its index in ``auths``):
+    the memory remembers it so the next inventory starts with it.
+
+    Fast pass first over every auth; then, only if ``slow`` and nobody
+    answered, the slow pass with the conservative timeout and a retry. The
+    caller says ``slow=False`` for a device it already knows: one that
+    answered yesterday in milliseconds and is silent today is not slow, it
+    is off, and waiting six seconds more per credential will not wake it.
+    """
+    engine = SnmpEngine()
+    found = await _knock(engine, host, auths, fast=True)
+    if found is None and slow:
+        found = await _knock(engine, host, auths, fast=False)
+    if found is None:
+        return None
+    index, system = found
+    return index, await _inventory(engine, host, auths[index], system)
 
 
 async def _query_ups_host(host: str, auths: list[Auth]) -> tuple[int, dict[str, Any]] | None:
@@ -553,15 +616,30 @@ async def _inventory(engine, host: str, auth: Auth, system: dict[str, str]) -> d
             columns[key] = await _walk(engine, host, auth, oid)
         except Exception:  # noqa: BLE001 - a missing table empties a column
             columns[key] = {}
+    # Which aggregator each port belongs to (LAG), opportunistic: a device
+    # without the IEEE MIB simply has no members. 0 or the port itself means
+    # "in none".
+    try:
+        lag_of = {index: _text(value) for index, value in (await _walk(engine, host, auth, LAG_MEMBER_OID)).items()}
+    except Exception:  # noqa: BLE001
+        lag_of = {}
+    names = {
+        index: _text(name) or _text(columns["descr"].get(index, ""))
+        for index, name in (columns["name"] or columns["descr"]).items()
+    }
     interfaces = []
-    for index, name in (columns["name"] or columns["descr"]).items():
+    for index, name in names.items():
+        aggregator = lag_of.get(index, "")
         interfaces.append(
             {
                 "index": index,
-                "name": _text(name) or _text(columns["descr"].get(index, "")),
+                "name": name,
                 "mac": _mac(columns["mac"].get(index, "")),
                 "status": {"1": "up", "2": "down"}.get(_text(columns["status"].get(index, "")), "unknown"),
                 "speed_mbps": _text(columns["speed"].get(index, "")),
+                "type": IF_TYPES.get(_text(columns["type"].get(index, "")), "other"),
+                "admin": {"1": "up", "2": "down"}.get(_text(columns["admin"].get(index, "")), "unknown"),
+                "lag": names.get(aggregator, "") if aggregator not in ("", "0", index) else "",
             }
         )
     try:
@@ -674,9 +752,14 @@ async def _query_plan(
     concurrency: int,
     ups_only: bool,
     on_done: Callable[[], None] | None,
+    known: frozenset[str] = frozenset(),
 ) -> dict[str, tuple[int, dict[str, Any]]]:
     semaphore = asyncio.Semaphore(max(1, concurrency))
-    query = _query_ups_host if ups_only else _query_host_indexed
+
+    async def query(host: str, auths: list[Auth]):
+        if ups_only:
+            return await _query_ups_host(host, auths)
+        return await _query_host_indexed(host, auths, slow=host not in known)
 
     async def bounded(host: str, auths: list[Auth]):
         async with semaphore:
@@ -701,6 +784,7 @@ def query_plan(
     concurrency: int = CONCURRENCY,
     ups_only: bool = False,
     on_done: Callable[[], None] | None = None,
+    known: Iterable[str] = (),
 ) -> dict[str, tuple[int, dict[str, Any]]]:
     """Each host with **its own** auths, in its own order: {host: (index, data)}.
 
@@ -709,7 +793,9 @@ def query_plan(
     what not to try at all. ``index`` says which of that host's auths answered.
     ``ups_only`` asks the UPS-MIB and nothing else (the ``ups`` task).
     ``on_done`` is called once per host as it finishes, for the progress bar.
+    ``known`` are the hosts that already answered SNMP some day: those get
+    the fast pass only (see ``_query_host_indexed``).
     """
     if not AVAILABLE or not plan:
         return {}
-    return asyncio.run(_query_plan(plan, concurrency, ups_only, on_done))
+    return asyncio.run(_query_plan(plan, concurrency, ups_only, on_done, frozenset(known)))

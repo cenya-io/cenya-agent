@@ -130,6 +130,16 @@ def _guarded(call, *args, default=None, **kwargs):
         return default
 
 
+def answered_before(ctx: dict, ip: str, mac: str, protocol: str) -> bool:
+    """Whether the memory remembers a credential that got into this device
+    by that protocol. Without memory nobody is known: everyone gets the
+    patient treatment."""
+    mem = memory(ctx)
+    if mem is None or not hasattr(mem, "remembered"):
+        return False
+    return bool(_guarded(mem.remembered, host_key(ctx, ip, mac), protocol, default=""))
+
+
 def host_key(ctx: dict, ip: str, mac: str) -> str:
     mem = memory(ctx)
     if mem is not None and hasattr(mem, "key_for"):
