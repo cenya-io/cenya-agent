@@ -105,6 +105,11 @@ def run_task(name: str, ctx: dict) -> tuple[list[dict[str, Any]], list[Note | st
     worked = tasking.credentials_ok(ctx)
     if worked:
         stats["credentials_ok"] = worked
+    tried = tasking.attempts(ctx)
+    if tried:
+        # Qué se intentó con cada equipo y qué pasó (`tasking.record`); el
+        # servidor lo pega al hallazgo de cada IP.
+        stats[tasking.ATTEMPTS] = tried
     return items, list(ctx["errors"]), stats
 
 

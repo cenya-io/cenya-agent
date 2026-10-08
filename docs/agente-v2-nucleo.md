@@ -594,6 +594,15 @@ Sustituye a `communities` y a los secretos en claro de 1.4:
   0.11 entiende las dos formas.
 - El agente informa de lo que funcionó en `stats` de `results`:
   `"credentials_ok": {"<id>": <nº de equipos>}`.
+- Y de lo que se intentó con cada equipo (desde 0.11.6), en
+  `"attempts": [{"ip", "protocol", "code", "credential"?}]` (como mucho 4000):
+  `protocol` es `ssh`, `snmp`, `winrm` o `hypervisor`; `code` uno de `ok`,
+  `ok_unknown` (entró pero no dijo qué es), `auth_failed`, `unreachable`,
+  `old_ssh`, `tls_untrusted`, `suspended`, `resting` (ronda fallida hace menos
+  de 24 h), `no_credentials` (escucha y ninguna credencial lo cubre) y
+  `silent` (SNMP no contestó). `credential` es el `id` del servidor; **nunca
+  un secreto**. Cada protocolo cuenta lo suyo: un equipo puede no dejar entrar
+  por SSH y contestar por SNMP.
 
 ### 3.3 Encargos nuevos
 

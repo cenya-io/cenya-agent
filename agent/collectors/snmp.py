@@ -157,6 +157,8 @@ class SnmpCollector:
             if hit is not None and 0 <= hit[0] < len(order):
                 credential = order[hit[0]]
                 answers[ip] = hit[1]
+            if not ups_task:
+                tasking.record(ctx, ip, "snmp", tasking.LOGGED_IN if credential else tasking.SILENT, credential)
             tasking.settle(ctx, ip, mac, "snmp", credential, attempted=True, full=full)
 
         if ups_task:

@@ -152,6 +152,10 @@ def plan(
     demás no se volverían a probar nunca.
     """
     in_scope = [credential for credential in candidates if credential.covers(ip)]
+    if not in_scope:
+        # Un equipo que escucha y ninguna credencial lo cubre: se dice, que si
+        # no ese equipo se queda en «solo responde» sin explicación.
+        record(ctx, ip, protocol, NO_CREDENTIALS)
     mem = memory(ctx)
     if mem is None:
         return in_scope, True
@@ -163,7 +167,80 @@ def plan(
     order = _guarded(mem.order_for, key, protocol, in_scope, moment, default=None)
     if order is None:
         return in_scope, True
+    if in_scope and not order:
+        # Falló una ronda entera hace menos de 24 h: hoy no se insiste.
+        record(ctx, ip, protocol, RESTING)
     return list(order), len(order) == len(in_scope)
+
+
+# --- Qué se intentó con cada equipo (08-10-2026) ------------------------------------------
+#
+# Un equipo que contesta al ping y en el que nada entra se quedaba en la bandeja
+# sin un porqué: el colector solo devuelve hallazgos de lo que funcionó, y lo
+# que falló contra un equipo concreto no se anotaba (sería ruido en el
+# historial). Ahora se apunta por IP y protocolo, con un código y el `id` de la
+# credencial, **nunca un secreto**, y viaja en `stats.attempts`; el servidor lo
+# pega al hallazgo de esa IP y la web dice qué pasó con cada protocolo. Que un
+# equipo no conteste a SSH no quita que conteste a SNMP: cada protocolo cuenta
+# lo suyo.
+
+#: La clave de `ctx` y la de `stats`.
+ATTEMPTS = "attempts"
+#: Un barrido de un /16 no puede convertir el resultado en megas.
+MAX_ATTEMPTS = 4000
+
+#: Entró (y, si es un inventario, se presentó).
+LOGGED_IN = "ok"
+#: Entró pero no dijo qué equipo es: ninguna orden conocida le sirvió.
+UNRECOGNISED = "ok_unknown"
+#: Esa credencial no le valió.
+REJECTED = "auth_failed"
+#: No se llegó a mandar la credencial: no contestó, cerró, o el saludo falló.
+NOT_REACHED = "unreachable"
+#: Solo habla un SSH antiguo que este equipo no admite.
+OLD_SSH = "old_ssh"
+#: El certificado no es de confianza (hipervisores).
+UNTRUSTED = "tls_untrusted"
+#: La credencial está suspendida por fallar demasiado (límite global).
+SUSPENDED = "suspended"
+#: Falló una ronda entera hace menos de 24 h; hoy no se insiste.
+RESTING = "resting"
+#: Escucha, pero ninguna credencial de ese protocolo lo cubre.
+NO_CREDENTIALS = "no_credentials"
+#: SNMP: no contestó con ninguna comunidad ni usuario.
+SILENT = "silent"
+
+
+def record(ctx: dict, ip: str, protocol: str, code: str, credential: creds.Credential | None = None) -> None:
+    """Apunta un intento. Nunca lanza: una cifra no tumba un colector."""
+    if not ip:
+        return
+    entry: dict[str, str] = {"ip": str(ip), "protocol": protocol, "code": code}
+    if credential is not None and credential.from_server:
+        entry["credential"] = credential.ident
+    try:
+        bucket = ctx.setdefault(ATTEMPTS, [])
+        if len(bucket) < MAX_ATTEMPTS:
+            bucket.append(entry)  # `append` es atómico con el GIL
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def attempts(ctx: dict) -> list[dict[str, str]]:
+    found = ctx.get(ATTEMPTS)
+    return list(found) if isinstance(found, list) else []
+
+
+def _verdict_code(verdict: str, result: Any) -> str:
+    """El código de un intento a partir de su veredicto y de lo que devolvió."""
+    if verdict == OK:
+        return LOGGED_IN
+    error = str(getattr(result, "error", "") or "").lower()
+    if "unable to negotiate" in error:
+        return OLD_SSH
+    if getattr(result, "certificate", None):
+        return UNTRUSTED
+    return REJECTED if verdict == AUTH_FAILED else NOT_REACHED
 
 
 def settle(
@@ -213,6 +290,7 @@ class Logins:
         self.ctx = ctx
         self.collector = collector
         self.protocol = protocol
+        self.ip = ip
         self.explicit = explicit
         self.skipped = False
         mem = memory(ctx)
@@ -222,7 +300,9 @@ class Logins:
     def run(self, credential: creds.Credential, call: Any, outcome: Any) -> Any:
         mem = self._memory
         if mem is None:
-            return call()
+            result = call()
+            self._record(credential, outcome, result)
+            return result
         remembered = bool(self._key) and _guarded(mem.remembered, self._key, self.protocol, default="") == credential.ident
         attempt = _guarded(
             mem.reserve,
@@ -234,19 +314,28 @@ class Logins:
             default=False,
         )
         if attempt is False:
-            return call()  # la memoria falló: es prescindible, se intenta como siempre
+            result = call()  # la memoria falló: es prescindible, se intenta como siempre
+            self._record(credential, outcome, result)
+            return result
         if attempt is None:
             self.skipped = True
             note_suspended(self.ctx, self.collector, credential)
+            record(self.ctx, self.ip, self.protocol, SUSPENDED, credential)
             return SKIPPED
         verdict = AUTH_FAILED  # ante la duda, un fallo de autenticación: es lo prudente
+        result: Any = None
         try:
             result = call()
             verdict = outcome(result)
             return result
         finally:
+            record(self.ctx, self.ip, self.protocol, _verdict_code(verdict, result), credential)
             if _guarded(mem.finish, attempt, verdict, now(), default=False):
                 note_suspended(self.ctx, self.collector, credential)
+
+    def _record(self, credential: creds.Credential, outcome: Any, result: Any) -> None:
+        verdict = _guarded(outcome, result, default=AUTH_FAILED)
+        record(self.ctx, self.ip, self.protocol, _verdict_code(verdict, result), credential)
 
 
 _NOTED_LOCK = threading.Lock()

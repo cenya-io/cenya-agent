@@ -179,6 +179,8 @@ class WinrmCollector:
                 data, credential = interrogate_with(ip, port, order, ctx, logins)
                 full = full and not logins.skipped
                 tasking.settle(ctx, ip, by_ip[ip], "winrm", credential, attempted=True, full=full)
+                if credential is not None and not data:
+                    tasking.record(ctx, ip, "winrm", tasking.UNRECOGNISED, credential)
                 return data
             finally:
                 progress.tick()

@@ -807,6 +807,10 @@ class SshCollector:
                 # entera: no se apunta como fallida.
                 full = full and not logins.skipped
                 tasking.settle(ctx, ip, by_ip[ip], "ssh", credential, attempted=True, full=full)
+                if credential is not None and not data:
+                    # Entró, pero ninguna orden conocida le sirvió: sin esto el
+                    # equipo desaparecía sin rastro (08-10-2026, un Huawei).
+                    tasking.record(ctx, ip, "ssh", tasking.UNRECOGNISED, credential)
                 if data and credential is not None:
                     # A stack answers as one host: ask for its units, with the
                     # same credential, after the login rounds are settled.
