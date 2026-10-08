@@ -1215,7 +1215,8 @@ class NewFamilyCaptureTests(unittest.TestCase):
 
         self.assertEqual(
             set(CAPTURE_COMMANDS),
-            {"cisco", "mikrotik", "aruba", "junos", "dell", "huawei", "comware", "fortinet", "gaia"},
+            {"cisco", "mikrotik", "aruba", "junos", "dell", "huawei", "comware", "fortinet", "gaia",
+             "exos", "icx", "awplus", "edgeos"},
         )
         for command in CAPTURE_COMMANDS.values():
             self.assertTrue(command.strip())

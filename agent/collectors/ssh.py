@@ -76,6 +76,11 @@ _LINUX_SECTIONS: tuple[tuple[str, str], ...] = (
     # El serie del DMI solo lo lee root. Se pide igual y si no hay permiso sale
     # vacío: pedirlo con `sudo` sería pedir una contraseña que no tenemos.
     ("serial", "cat /sys/class/dmi/id/product_serial 2>/dev/null"),
+    # EdgeOS is a Linux underneath: `uname` answers, so it would be signed as
+    # a plain Linux and never get a configuration copy. These two clues tell
+    # it apart (see `_is_edgeos`).
+    ("vyatta", "test -x /opt/vyatta/bin/vyatta-op-cmd-wrapper && echo yes"),
+    ("ubnt", "cat /etc/version 2>/dev/null"),
 )
 
 LINUX_COMMAND = "; ".join(f"echo {MARK}{name}; {command}" for name, command in _LINUX_SECTIONS)
@@ -140,15 +145,33 @@ def parse_linux(output: str) -> dict[str, Any]:
     if not (uname or hostname or interfaces):
         # Contestó, pero no a esto. Que lo intente la familia siguiente.
         return {}
+    edgeos = _is_edgeos(uname, sections)
     return {
+        # Only set for EdgeOS; every other Linux keeps the family of the try.
+        **({"family": "edgeos"} if edgeos else {}),
         "hostname": hostname,
         "description": description,
         "os": description or uname,
         "interfaces": interfaces,
-        "manufacturer": _first_line(sections.get("vendor")),
+        "manufacturer": _first_line(sections.get("vendor")) or ("Ubiquiti" if edgeos else ""),
         "model": _first_line(sections.get("model")),
         "serial": _first_line(sections.get("serial")),
     }
+
+
+def _is_edgeos(uname: str, sections: dict[str, list[str]]) -> bool:
+    """Whether this Linux is a Ubiquiti EdgeOS (EdgeRouter, EdgeSwitch on EdgeOS).
+
+    The Vyatta op-mode wrapper is what the copy needs, so it has to be there;
+    on top of it, either the kernel says "UBNT" or ``/etc/version`` says
+    "Edge". Both are needed so a VyOS (same wrapper, no Ubiquiti) stays a plain
+    Linux. The "-UBNT" kernel suffix and the "Edge..." text of ``/etc/version``
+    are from public forum output, still to be confirmed on a real device.
+    """
+    if "yes" not in [line.strip() for line in sections.get("vyatta") or []]:
+        return False
+    version = " ".join(sections.get("ubnt") or []).lower()
+    return "ubnt" in uname.lower() or "edge" in version
 
 
 def _first_line(lines: list[str] | None) -> str:
@@ -320,15 +343,156 @@ def parse_dell(output: str) -> dict[str, Any]:
     }
 
 
+_EXOS_IMAGE_RE = re.compile(r"^\s*Image\s*:\s*(ExtremeXOS.*?)\s*$", re.MULTILINE)
+_EXOS_SWITCH_RE = re.compile(r"^\s*Switch\s*:\s*(\S+)\s+(\S+)", re.MULTILINE)
+
+
+def parse_exos(output: str) -> dict[str, Any]:
+    """Extreme Networks EXOS: ``show version`` with its "Image :" and "Switch :" lines.
+
+    The signature is the word "ExtremeXOS" (or "Extreme Networks" next to an
+    "Image :"/"Switch :" line), never a banner. The "Switch :" line is
+    ``<part number> <serial> Rev ...``; the model (``X460-24t``) is only in
+    ``show switch``, so it stays empty here. Format from public documentation,
+    still to be confirmed on a real X4xx/X6xx.
+    """
+    image = _EXOS_IMAGE_RE.search(output)
+    switch = _EXOS_SWITCH_RE.search(output)
+    if "ExtremeXOS" not in output and not ("Extreme Networks" in output and (image or switch)):
+        return {}
+    description = image.group(1) if image else "ExtremeXOS"
+    return {
+        "family": "exos",
+        "hostname": "",
+        "description": description,
+        "os": description,
+        "interfaces": [],
+        "manufacturer": "Extreme Networks",
+        "model": "",
+        "serial": switch.group(2) if switch else "",
+    }
+
+
+_ICX_MARK_RE = re.compile(r"\bICX\d|FastIron", re.IGNORECASE)
+_ICX_VENDOR_RE = re.compile(r"Ruckus|Brocade|Foundry|CommScope|UNIT\s+\d+:\s+compiled on", re.IGNORECASE)
+_ICX_MODEL_RE = re.compile(r"^\s*HW:\s*(?:Stackable\s+)?(ICX\S+)", re.MULTILINE | re.IGNORECASE)
+_ICX_SERIAL_RE = re.compile(r"Serial\s*#\s*:\s*(\S+)", re.IGNORECASE)
+_ICX_SW_RE = re.compile(r"^\s*SW:\s*(Version\s+\S+)", re.MULTILINE | re.IGNORECASE)
+
+
+def parse_icx(output: str) -> dict[str, Any]:
+    """Ruckus ICX / Brocade FastIron: ``show version`` with "UNIT 1: compiled on" and "HW: Stackable ICX...".
+
+    Needs the model line (``ICX7150``/"FastIron") **and** a vendor clue, so an
+    unrelated output that mentions "ICX" does not sign. In a stack the first
+    serial is the active unit's. Format from public documentation, still to be
+    confirmed on a real ICX.
+    """
+    if not (_ICX_MARK_RE.search(output) and _ICX_VENDOR_RE.search(output)):
+        return {}
+    model = _ICX_MODEL_RE.search(output)
+    version = _ICX_SW_RE.search(output)
+    serial = _ICX_SERIAL_RE.search(output)
+    vendor = "Brocade" if "Brocade" in output and "Ruckus" not in output else "Ruckus"
+    description = f"{vendor} FastIron {version.group(1)}" if version else f"{vendor} FastIron"
+    return {
+        "family": "icx",
+        "hostname": "",
+        "description": description,
+        "os": description,
+        "interfaces": [],
+        "manufacturer": vendor,
+        "model": model.group(1) if model else "",
+        "serial": serial.group(1) if serial else "",
+    }
+
+
+_AWPLUS_MODEL_RE = re.compile(r"\b((?:x\d{3}|GS\d{3}|XS\d{3}|IE\d{3}|IX\d|SBx\d{3,4}|AR\d{4})[\w-]*)")
+_AWPLUS_VERSION_RE = re.compile(r"AlliedWare Plus(?:\s*\(TM\))?\s*(\d[\w.\-]*)")
+
+
+def parse_awplus(output: str) -> dict[str, Any]:
+    """Allied Telesis AlliedWare Plus: "AlliedWare Plus" or "Allied Telesis" in ``show version``/``show system``.
+
+    The model is looked for with the product-line prefixes (x230, x510, GS900,
+    x930...). The hostname is in neither output (``show system`` has it as
+    "System Name"). Format from public documentation, still to be confirmed on
+    a real x230/x510/GS900MX/x930.
+    """
+    if "AlliedWare Plus" not in output and "Allied Telesis" not in output:
+        return {}
+    version = _AWPLUS_VERSION_RE.search(output)
+    model = _AWPLUS_MODEL_RE.search(output)
+    description = f"AlliedWare Plus {version.group(1)}" if version else "AlliedWare Plus"
+    return {
+        "family": "awplus",
+        "hostname": "",
+        "description": description,
+        "os": description,
+        "interfaces": [],
+        "manufacturer": "Allied Telesis",
+        "model": model.group(1) if model else "",
+        "serial": "",
+    }
+
+
+_EDGEOS_VERSION_RE = re.compile(r"^\s*Version:\s*(\S+)", re.MULTILINE)
+_EDGEOS_MODEL_RE = re.compile(r"^\s*HW model:\s*(\S.*?)\s*$", re.MULTILINE)
+_EDGEOS_SERIAL_RE = re.compile(r"^\s*HW S/N:\s*(\S+)", re.MULTILINE)
+
+
+def parse_edgeos(output: str) -> dict[str, Any]:
+    """Ubiquiti EdgeOS (Vyatta-based): ``show version`` with "Version:", "Build ID:", "HW model:".
+
+    "Build ID:" is required next to a Ubiquiti clue, so a plain "Version:"
+    (Fortinet, a VyOS) never signs. This path is for the session fallback
+    (`parse_session`) and for an EdgeOS whose CLI answers `show version`; an
+    EdgeRouter reached by exec is a Linux and is told apart in `parse_linux`.
+    The EdgeSwitch IOS-like firmware prints "System Description...." instead
+    and is left alone. Format from public forum output, still to be confirmed
+    on a real EdgeRouter.
+    """
+    if not re.search(r"^\s*Build ID\s*:", output, re.MULTILINE):
+        return {}
+    if not re.search(r"Ubiquiti|EdgeRouter|EdgeOS|^\s*HW model\s*:", output, re.MULTILINE):
+        return {}
+    version = _EDGEOS_VERSION_RE.search(output)
+    model = _EDGEOS_MODEL_RE.search(output)
+    serial = _EDGEOS_SERIAL_RE.search(output)
+    description = f"EdgeOS {version.group(1)}" if version else "EdgeOS"
+    return {
+        "family": "edgeos",
+        "hostname": "",
+        "description": description,
+        "os": description,
+        "interfaces": [],
+        "manufacturer": "Ubiquiti",
+        "model": model.group(1) if model else "",
+        "serial": serial.group(1) if serial else "",
+    }
+
+
 def parse_show_version(output: str) -> dict[str, Any]:
     """Un solo comando, varios fabricantes: la firma del texto decide.
 
-    `show version` lo entienden IOS, JunOS, ArubaOS y Dell Networking; una
+    `show version` lo entienden IOS, JunOS, ArubaOS, Dell Networking, EXOS,
+    ICX, AlliedWare Plus y EdgeOS; una
     conexión por fabricante para repetir el mismo comando serían intentos de
     autenticación de más sin aprender nada nuevo. Cisco va primero por ser lo
-    más común; JunOS antes que Aruba y Dell porque su firma es inconfundible.
+    más común; JunOS antes que Aruba y Dell porque su firma es inconfundible. Los
+    cuatro últimos (EXOS, ICX, AW+, EdgeOS) van detrás de los que ya existían:
+    sus firmas son estrechas y, así, no pueden quitarle un equipo a nadie.
     """
-    for parse in (parse_cisco, parse_junos, parse_aruba, parse_dell):
+    for parse in (
+        parse_cisco,
+        parse_junos,
+        parse_aruba,
+        parse_dell,
+        parse_exos,
+        parse_icx,
+        parse_awplus,
+        parse_edgeos,
+    ):
         data = parse(output)
         if data:
             return data
@@ -463,6 +627,15 @@ CAPTURE_COMMANDS: dict[str, str] = {
     "comware": "display current-configuration",
     "fortinet": "show full-configuration",
     "gaia": "show configuration",
+    # EXOS pages unless `disable clipaging` was sent; the exec channel has no
+    # tty and the session fallback switches paging off (`sshshell.PAGING_OFF`).
+    "exos": "show configuration",
+    # Privileged exec needed; ICX paging is off in the fallback (`skip-page-display`).
+    "icx": "show running-config",
+    "awplus": "show running-config",
+    # An exec channel is a plain shell where `show` does not exist: the Vyatta
+    # op-mode wrapper is what runs it (also fine inside an interactive session).
+    "edgeos": "/opt/vyatta/bin/vyatta-op-cmd-wrapper show configuration",
 }
 
 #: La orden que vuelca la configuración **guardada** --la que el equipo carga al
@@ -492,9 +665,10 @@ MAX_CONFIG_BYTES = 256 * 1024
 #: comparar un mensaje de error con una configuración y avisar de cambios sin
 #: guardar que no existen.
 _CLI_REJECTION_RE = re.compile(
-    r"^\s*(?:%\s*(?:Invalid|Ambiguous|Incomplete|Unrecognized|Unknown|Error|Authorization|Access denied)"
+    r"^\s*(?:%+\s*(?:Invalid|Ambiguous|Incomplete|Unrecognized|Unknown|Error|Authorization|Access denied)"
     r"|Error:\s*Unrecognized|Invalid input|Unknown command|Line has invalid autocommand"
-    r"|Command authorization failed|Not authorized|Insufficient privilege|Permission denied)",
+    r"|Command authorization failed|Not authorized|Insufficient privilege|Permission denied"
+    r"|[^\n]*command not found)",
     re.IGNORECASE | re.MULTILINE,
 )
 

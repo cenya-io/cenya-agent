@@ -57,6 +57,9 @@ PAGING_OFF = (
     "screen-length 0 temporary",  # Huawei VRP
     "screen-length disable",  # HPE Comware
     "no page",  # ArubaOS-Switch
+    "disable clipaging",  # Extreme EXOS
+    "skip-page-display",  # Ruckus ICX / Brocade FastIron (privileged mode)
+    "set terminal length 0",  # Ubiquiti EdgeOS (Vyatta op mode)
 )
 IDENTIFY = (*PAGING_OFF, "show version", "display version", "show system")
 
