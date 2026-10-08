@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from agent import credentials as creds
-from agent import net, ssh, stacks
+from agent import net, ssh, sshshell, stacks
 from agent.collectors import register, tasking
 from agent.collectors.base import Finding
 from agent.notes import collector_note
@@ -279,10 +279,12 @@ def parse_aruba(output: str) -> dict[str, Any]:
 
 
 def parse_dell(output: str) -> dict[str, Any]:
-    """Un Dell Networking (OS10, series N…): la firma es la marca en el banner."""
-    if "Dell" not in output:
+    """Un Dell Networking (OS10, series N…, PowerConnect): la firma es la marca en el banner."""
+    if "Dell" not in output and "PowerConnect" not in output:
         return {}
-    banner = next((line.strip() for line in output.splitlines() if "Dell" in line), "Dell Networking")
+    banner = next(
+        (line.strip() for line in output.splitlines() if "Dell" in line or "PowerConnect" in line), "Dell Networking"
+    )
     # N-series (OS6) prints "Serial Number....." per unit; the first section is
     # the management unit. OS10 has neither and keeps both empty.
     serial, model = stacks.dell_identity(output)
@@ -558,6 +560,58 @@ def stack_members(
 # --- El colector ----------------------------------------------------------------
 
 
+_SYSTEM_DESCRIPTION_RE = re.compile(r"^\s*System Description\s*[:.]*\s*(.+?)\s*$", re.MULTILINE | re.IGNORECASE)
+_SW_VERSION_RE = re.compile(r"^\s*(?:SW version|Software version|Version)\s*[:.]*\s*(\S.*?)\s*$", re.MULTILINE | re.IGNORECASE)
+
+
+def parse_session(output: str) -> dict[str, Any]:
+    """What an interactive session said (`agent.sshshell`).
+
+    First the vendors that sign their answer; if none does, the device still
+    presented itself -- a CLI answered with its name in the prompt -- and that
+    is enough to stop being «solo responde»: its name, and the line that says
+    what it is if there is one. The name in the prompt also fills the
+    hostname a vendor parser left empty.
+    """
+    name = sshshell.prompt_name(output)
+    for parse in (parse_show_version, parse_display_version):
+        data = parse(output)
+        if data:
+            return {**data, "hostname": data.get("hostname") or name}
+    if not name:
+        return {}
+    described = _SYSTEM_DESCRIPTION_RE.search(output) or _SW_VERSION_RE.search(output)
+    description = described.group(1)[:200] if described else ""
+    return {
+        "family": "cli",
+        "hostname": name,
+        "description": description,
+        "os": description,
+        "interfaces": [],
+        "manufacturer": "",
+        "model": "",
+        "serial": "",
+    }
+
+
+def _wants_session(answer: Any) -> bool:
+    """When the plain command did not work but a session might.
+
+    It got in and no family recognised the answer (empty: the device only
+    talks inside a terminal; unknown: the prompt still says its name), SSH
+    authenticated and then the command hung (a PowerConnect asks for the user
+    inside the session), or it closed without a clear «Permission denied».
+    Never after a clear denial or before the login was offered: that would be
+    a failed try more.
+    """
+    if answer is tasking.SKIPPED or answer is None:
+        return False
+    if answer.connected or getattr(answer, "authenticated", False):
+        return True
+    error = (answer.error or "").lower()
+    return not answer.unreachable and "permission denied" not in error and "too many" not in error
+
+
 def interrogate(
     host: str, credentials: list[creds.Credential], logins: tasking.Logins | None = None
 ) -> tuple[dict[str, Any], creds.Credential | None]:
@@ -577,6 +631,7 @@ def interrogate(
     """
     for credential in credentials:
         connected = False
+        answer: Any = None
         for family in FAMILIES:
             answer = _login(logins, host, credential, family.command)
             if answer is tasking.SKIPPED or not answer.connected:
@@ -588,9 +643,40 @@ def interrogate(
                 # sirve a cuatro fabricantes); si no lo hace, vale la del
                 # intento.
                 return {**data, "family": data.get("family", family.name)}, credential
+            if not (answer.output or "").strip():
+                # Entró y no dijo nada: no contesta a órdenes sueltas. Repetir
+                # con otra orden son inicios de sesión de más sin aprender nada.
+                break
+        if _wants_session(answer):
+            session = _session(logins, host, credential)
+            if session is not tasking.SKIPPED and session.connected:
+                return parse_session(session.output), credential
         if connected:
             return {}, credential
     return {}, None
+
+
+def _session(
+    logins: tasking.Logins | None,
+    host: str,
+    credential: creds.Credential,
+    commands: tuple[str, ...] = sshshell.IDENTIFY,
+) -> Any:
+    """Una sesión interactiva (`agent.sshshell`), por el límite de credenciales si lo hay."""
+
+    def call() -> ssh.Answer:
+        return sshshell.run(
+            host=host,
+            username=credential.username,
+            secret=credential.secret,
+            port=credential.port,
+            key_file=credential.key_file,
+            commands=commands,
+        )
+
+    if logins is None:
+        return call()
+    return logins.run(credential, call, ssh.outcome)
 
 
 def _login(logins: tasking.Logins | None, host: str, credential: creds.Credential, command: str) -> Any:
@@ -614,11 +700,20 @@ def _login(logins: tasking.Logins | None, host: str, credential: creds.Credentia
 def fetch_config(
     host: str, credential: creds.Credential, command: str, logins: tasking.Logins | None = None
 ) -> str:
-    """La configuración del equipo, o "". Nunca truncada en silencio."""
+    """La configuración del equipo, o "". Nunca truncada en silencio.
+
+    Si la orden suelta no contesta (un Huawei, un PowerConnect: ver
+    `agent.sshshell`), se pide dentro de una sesión, con la paginación apagada.
+    """
     answer = _login(logins, host, credential, command)
-    if answer is tasking.SKIPPED or not answer.connected:
+    if answer is tasking.SKIPPED:
         return ""
-    output = answer.output or ""
+    output = (answer.output or "") if answer.connected else ""
+    if not output.strip() and _wants_session(answer):
+        session = _session(logins, host, credential, commands=(*sshshell.PAGING_OFF, command))
+        if session is tasking.SKIPPED or not session.connected:
+            return ""
+        output = sshshell.command_output(session.output, command)
     if len(output.encode()) > MAX_CONFIG_BYTES:
         # Una configuración de pyme cabe de sobra en 256 KB; algo mayor es
         # otra cosa (un volcado, un banner infinito) y guardar media copia

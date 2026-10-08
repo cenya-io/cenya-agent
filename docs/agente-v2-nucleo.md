@@ -603,6 +603,16 @@ Sustituye a `communities` y a los secretos en claro de 1.4:
   `silent` (SNMP no contestó). `credential` es el `id` del servidor; **nunca
   un secreto**. Cada protocolo cuenta lo suyo: un equipo puede no dejar entrar
   por SSH y contestar por SNMP.
+- **Equipos que solo hablan dentro de una sesión** (desde 0.11.7, `agent/sshshell.py`):
+  si la orden suelta (`ssh equipo "show version"`) entra pero no contesta, o
+  `ssh` ya se autenticó y la orden se queda colgada, el agente abre una sesión
+  con terminal como haría una persona: contesta «User Name:» y «Password:»
+  cuando el equipo los pide dentro (Dell PowerConnect, que acepta la conexión
+  sin pedir nada), apaga la paginación con la orden de cada fabricante, pide
+  `show version`, `display version` y `show system`, y lee el nombre del
+  indicador (`SW#`, `<SW>`). Igual para la copia de configuración. Una sesión
+  autenticada que no contesta no cuenta como credencial fallida; una
+  contraseña rechazada dentro de la sesión, sí.
 
 ### 3.3 Encargos nuevos
 

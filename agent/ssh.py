@@ -167,6 +167,9 @@ class Answer:
     #: secreto. Solo cuando es **seguro**: ante la duda, `False`, y el intento
     #: cuenta como fallido para el límite de credenciales (spec 2.3).
     unreachable: bool = False
+    #: `ssh` dijo «Authenticated to …»: pasó la autenticación de SSH y lo que
+    #: falló vino después (la orden no contestó). No es una credencial mala.
+    authenticated: bool = False
 
 
 #: Lo que `ssh` escribe cuando falla antes de pedir ninguna credencial.
@@ -242,10 +245,20 @@ def before_auth(stderr: str) -> bool:
 
 
 def outcome(answer: Answer) -> str:
-    """El veredicto de un intento para el límite de credenciales (`agent.memory`)."""
+    """El veredicto de un intento para el límite de credenciales (`agent.memory`).
+
+    Una sesión que `ssh` ya dio por autenticada y que luego no contesta no es
+    una contraseña mala: un Dell PowerConnect acepta la conexión sin pedir nada
+    («none») y pregunta el usuario dentro de la sesión; la orden suelta se
+    queda esperando, y tres de esas pausaron una credencial buena en todos los
+    equipos durante 24 horas (08-10-2026). Lo demás sigue como estaba: ante la
+    duda, cuenta.
+    """
     if answer.connected:
         return "ok"
-    return "unreachable" if answer.unreachable else "auth_failed"
+    if answer.unreachable or answer.authenticated:
+        return "unreachable"
+    return "auth_failed"
 
 
 #: Los dos métodos con los que se entrega una contraseña. Uno por intento.
@@ -292,6 +305,11 @@ def argv_for(
         f"ConnectTimeout={CONNECT_TIMEOUT_SECONDS}",
         "-o",
         "StrictHostKeyChecking=accept-new",
+        # Para saber si la autenticación de SSH pasó («Authenticated to …»),
+        # que es lo que separa una contraseña mala de un equipo que pide el
+        # usuario dentro de la sesión (`outcome`).
+        "-o",
+        "LogLevel=VERBOSE",
     ]
     if with_password:
         if method not in _METHOD_SWITCHES:
@@ -446,16 +464,39 @@ def _attempt(
             timeout=COMMAND_TIMEOUT_SECONDS,
             env=environment_for(secret, mode),
         )
-    except subprocess.TimeoutExpired:
-        # El tope duro llega después de conectar (el de conexión es menor): no
-        # se sabe si la clave llegó a pedirse, así que cuenta como intento.
-        return Answer(connected=False, error="tiempo de espera agotado"), ""
+    except subprocess.TimeoutExpired as exc:
+        # El tope duro llega después de conectar (el de conexión es menor). Si
+        # `ssh` ya dijo que había entrado, la orden es la que no contestó; si
+        # no, no se sabe si la clave llegó a pedirse y cuenta como intento.
+        partial = exc.stderr.decode(errors="replace") if isinstance(exc.stderr, bytes) else str(exc.stderr or "")
+        return Answer(connected=False, error="tiempo de espera agotado", authenticated=authenticated(partial)), partial
     except OSError as exc:
         return Answer(connected=False, error=str(exc), unreachable=True), ""
     stderr = result.stderr or ""
     if result.returncode == SSH_FAILURE_CODE:
-        return Answer(connected=False, error=_reason(stderr), unreachable=before_auth(stderr)), stderr
-    return Answer(connected=True, output=result.stdout or "", error=stderr.strip()), stderr
+        return (
+            Answer(
+                connected=False,
+                error=_reason(stderr),
+                unreachable=before_auth(stderr),
+                authenticated=authenticated(stderr),
+            ),
+            stderr,
+        )
+    return Answer(connected=True, output=result.stdout or "", error=_quiet(stderr)), stderr
+
+
+def authenticated(stderr: str) -> bool:
+    """`ssh` pasó la autenticación (lo dice con ``LogLevel=VERBOSE``)."""
+    return "authenticated to " in (stderr or "").lower()
+
+
+#: Lo que ``LogLevel=VERBOSE`` añade y no es un motivo de nada.
+_VERBOSE = ("Authenticated to ", "Transferred:", "Bytes per second", "Connection to ", "debug", "Server accepts key")
+
+
+def _quiet(stderr: str) -> str:
+    return "\n".join(line for line in (stderr or "").strip().splitlines() if not line.strip().startswith(_VERBOSE))
 
 
 def _reason(stderr: str) -> str:
@@ -467,6 +508,7 @@ def _reason(stderr: str) -> str:
     exchange», que tampoco explica nada.
     """
     lines = [line.strip() for line in stderr.strip().splitlines() if line.strip()]
+    lines = [line for line in lines if not line.startswith(_VERBOSE)] or lines
     meaningful = [line for line in lines if not line.startswith(("**", "Warning:", "@"))]
     if meaningful:
         return meaningful[0]
