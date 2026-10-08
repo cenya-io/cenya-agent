@@ -24,9 +24,10 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from agent import credentials as creds
-from agent import net, ssh, sshshell, stacks
+from agent import net, ssh, sshshell, stacks, tables
 from agent.collectors import register, tasking
 from agent.collectors.base import Finding
+from agent.collectors.snmp import ROUTER_MIN_IPS, _arp_ips, _links_for, _port_tables
 from agent.notes import collector_note
 
 SSH_PORT = 22
@@ -574,6 +575,36 @@ def stack_members(
     return enriched
 
 
+def with_tables(
+    host: str, credential: creds.Credential, data: dict[str, Any], logins: tasking.Logins | None = None
+) -> dict[str, Any]:
+    """``data`` with its ``arp`` and ``fdb`` (``agent.tables``), read with
+    the credential that already got in. Nothing here raises: a device whose
+    tables cannot be read is a host without them."""
+    family = str(data.get("family") or "")
+    if family not in tables.ARP_COMMANDS and family not in tables.MAC_COMMANDS:
+        return data
+    try:
+        found = tables.read_tables(family, lambda command: _ask(host, credential, command, logins))
+    except Exception:  # noqa: BLE001
+        return data
+    return {**data, **found} if found else data
+
+
+def _as_snmp_shape(data: dict[str, Any]) -> dict[str, Any]:
+    """The SSH answer in the shape ``collectors.snmp`` reads: the port name is
+    its own index, so the forwarding rows (``ifindex`` = port) resolve."""
+    ports = {row["ifindex"] for row in data.get("fdb") or []}
+    return {
+        "name": data.get("hostname", ""),
+        "interfaces": [{"index": port, "name": port} for port in sorted(ports)],
+        "neighbors": [],
+        "fdb": data.get("fdb") or [],
+        "arp": data.get("arp") or [],
+    }
+
+
+
 # --- El colector ----------------------------------------------------------------
 
 
@@ -969,6 +1000,9 @@ class SshCollector:
                     # A stack answers as one host: ask for its units, with the
                     # same credential, after the login rounds are settled.
                     data = stack_members(ip, credential, data, logins)
+                    # And its ARP and MAC tables (phase 4): the firewall that
+                    # knows who is in the network, the switch without SNMP.
+                    data = with_tables(ip, credential, data, logins)
                 return data, credential
             finally:
                 progress.tick()
@@ -980,6 +1014,20 @@ class SshCollector:
         # de la tarea `configs`, una vez al día, con la credencial que entró hoy.
         capture = _capture_enabled(ctx) and task != "inventory"
         findings: list[Finding] = []
+        # MACs this sweep knows, for the links the MAC tables propose: the
+        # live hosts, the devices themselves, and what their ARP tables say
+        # (same rule as the SNMP collector: what the sweep saw wins).
+        known: dict[str, dict[str, str]] = {}
+        for host in hosts:
+            if host.get("mac"):
+                known[host["mac"]] = {"ip": host["ip"], "hostname": ""}
+        for ip, (data, _credential) in zip(reachable, answers):
+            for iface in data.get("interfaces") or [] if data else []:
+                if iface.get("mac"):
+                    known.setdefault(iface["mac"], {"ip": ip, "hostname": data.get("hostname", "")})
+        for mac, ips in _arp_ips({ip: data for ip, (data, _c) in zip(reachable, answers) if data}).items():
+            if mac not in known:
+                known[mac] = {"ip": sorted(ips)[0] if len(ips) < ROUTER_MIN_IPS else "", "hostname": ""}
         for ip, (data, credential) in zip(reachable, answers):
             if not data:
                 continue
@@ -1020,9 +1068,16 @@ class SshCollector:
                         # Only for a stack of two or more units; never an
                         # empty list (for the server, no key is "a single unit").
                         **({"members": data["members"]} if data.get("members") else {}),
+                        # Its tables, when it has them (phase 4), in the shape
+                        # of the SNMP finding: the server places devices behind
+                        # ports with them, and puts IPs to MACs.
+                        **({"arp": data["arp"]} if data.get("arp") else {}),
+                        **({"fdb_ports": ports} if (ports := _port_tables(_as_snmp_shape(data))) else {}),
                     },
                 )
             )
+            if data.get("fdb"):
+                findings.extend(_links_for(ip, _as_snmp_shape(data), sweep_mac or own_mac, known))
 
             # La copia de configuración, con la misma credencial que entró.
             # Solo las familias que tienen comando (equipos de red): la del
