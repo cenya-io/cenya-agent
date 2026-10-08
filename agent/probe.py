@@ -135,7 +135,7 @@ def _snmp_answers(ip: str, ctx: dict, credential: creds.Credential) -> bool:
     return False
 
 
-def _ssh_logs_in(ip: str, ctx: dict, credential: creds.Credential) -> bool:
+def _ssh_logs_in(ip: str, ctx: dict, credential: creds.Credential) -> ssh.Answer | None:
     """Un intento de SSH con esa credencial, por el cortacircuitos (spec 2.3).
 
     Lo pide una persona (`explicit`): puede probar una credencial suspendida,
@@ -153,10 +153,25 @@ def _ssh_logs_in(ip: str, ctx: dict, credential: creds.Credential) -> bool:
         )
 
     answer = tasking.Logins(ctx, "probe", "ssh", ip, explicit=True).run(credential, call, ssh.outcome)
-    if answer is not tasking.SKIPPED and answer.connected:
+    if answer is tasking.SKIPPED:
+        return None
+    if answer.connected:
         _remember(ctx, ip, "ssh", credential)
-        return True
-    return False
+    return answer
+
+
+def _ssh_failed_line(answers: list[ssh.Answer | None]) -> Note:
+    """Por qué no entró: si ni se llegó a ofrecer la contraseña, se dice eso.
+
+    «Ninguna credencial entró» hace pensar en una contraseña mal escrita; con
+    un equipo que no comparte ningún algoritmo con este, la contraseña ni salió.
+    """
+    if answers and all(answer is not None and ssh.negotiation_failed(answer.error) for answer in answers):
+        return probe_note(
+            "ssh", "no_common_algorithms",
+            "puerto abierto, pero el equipo solo habla un SSH antiguo que el de este equipo no admite; la contraseña no llegó a enviarse",
+        )
+    return probe_note("ssh", "none_worked", "puerto abierto; ninguna credencial entró")
 
 
 def _winrm_logs_in(ip: str, ctx: dict, credential: creds.Credential, open_port: int) -> tuple[bool, str]:
@@ -211,11 +226,12 @@ def test_line(ip: str, ctx: dict, credential: creds.Credential) -> tuple[bool, N
         if protocol == "ssh":
             if not _port_open(ip, SSH_PORT):
                 return False, probe_note("ssh", "closed", "puerto 22 cerrado", port=SSH_PORT)
-            if _ssh_logs_in(ip, ctx, credential):
+            answer = _ssh_logs_in(ip, ctx, credential)
+            if answer is not None and answer.connected:
                 return True, probe_note(
                     "ssh", "logged_in", f"puerto abierto; entró con «{credential.username}»", username=credential.username
                 )
-            return False, probe_note("ssh", "none_worked", "puerto abierto; ninguna credencial entró")
+            return False, _ssh_failed_line([answer])
         if protocol == "winrm":
             open_port = next(
                 (port for port in (winrm.DEFAULT_PORT, winrm.DEFAULT_TLS_PORT) if _port_open(ip, port)), 0
@@ -265,14 +281,17 @@ def _ssh_line(ip: str, ctx: dict) -> Note:
     credentials = creds.for_kind(ctx, creds.SSH)
     if not credentials:
         return probe_note("ssh", "open_no_credentials", "puerto 22 abierto; sin credenciales SSH configuradas", port=SSH_PORT)
+    answers: list[ssh.Answer | None] = []
     for credential in credentials:
         if not credential.covers(ip):
             continue
-        if _ssh_logs_in(ip, ctx, credential):
+        answer = _ssh_logs_in(ip, ctx, credential)
+        if answer is not None and answer.connected:
             return probe_note(
                 "ssh", "logged_in", f"puerto abierto; entró con «{credential.username}»", username=credential.username
             )
-    return probe_note("ssh", "none_worked", "puerto abierto; ninguna credencial entró")
+        answers.append(answer)
+    return _ssh_failed_line(answers)
 
 
 def _winrm_line(ip: str, ctx: dict) -> Note:

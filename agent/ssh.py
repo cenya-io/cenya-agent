@@ -38,6 +38,7 @@ import subprocess
 import sys
 import sysconfig
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 
 from agent.askpass import SECRET_ENV
@@ -185,6 +186,53 @@ _BEFORE_AUTH = (
 )
 
 
+#: Lo que hablan los equipos de red de hace diez años (OpenSSH 5.x, Dell
+#: PowerConnect y N, Cisco viejos, HP ProCurve): intercambio de claves con
+#: SHA-1, claves de host `ssh-rsa`/`ssh-dss`, cifrados CBC y `hmac-sha1`. Un OpenSSH
+#: actual los trae apagados. Solo se encienden **en un segundo intento y solo
+#: si el equipo dijo «no hay ningún método en común»** (`run`): el primer
+#: intento no llegó a mandar nada, y con un equipo moderno nada cambia. Y
+#: siempre con «+», añadidos a los de siempre: SSH negocia el mejor que tengan
+#: los dos, y esa negociación va firmada, así que nadie en medio puede forzar
+#: uno de estos con un equipo que hable otro mejor.
+LEGACY_ALGORITHMS = {
+    # El de grupo fijo antes que `group-exchange`: un switch viejo que ofrece
+    # los dos se queda colgado calculando el grupo grande que pide un OpenSSH
+    # actual (visto el 08-10-2026 con un OpenSSH 5.9 de Dell), y el fijo
+    # termina en un momento.
+    "KexAlgorithms": ("kex", ("diffie-hellman-group14-sha1", "diffie-hellman-group1-sha1", "diffie-hellman-group-exchange-sha1")),
+    "HostKeyAlgorithms": ("key", ("ssh-rsa", "ssh-dss")),
+    "Ciphers": ("cipher", ("aes128-cbc", "aes256-cbc", "3des-cbc")),
+    "MACs": ("mac", ("hmac-sha1", "hmac-sha1-96")),
+}
+
+
+def negotiation_failed(stderr: str) -> bool:
+    """`ssh` se rindió porque no había ningún algoritmo en común."""
+    return "unable to negotiate" in (stderr or "").lower()
+
+
+@lru_cache(maxsize=1)
+def legacy_options() -> tuple[str, ...]:
+    """Las opciones para un equipo antiguo, solo con lo que este `ssh` sabe hablar.
+
+    Se pregunta al propio binario (`ssh -Q`): un nombre que no conoce no se
+    ignora, hace fallar la orden entera, y `ssh-dss` ya no viene en OpenSSH 10.
+    """
+    options: list[str] = []
+    for option, (query, wanted) in LEGACY_ALGORITHMS.items():
+        try:
+            listed = subprocess.run(
+                [BINARY or "ssh", "-Q", query], capture_output=True, text=True, timeout=10, errors="replace"
+            ).stdout.split()
+        except (OSError, subprocess.SubprocessError):
+            continue
+        known = [name for name in wanted if name in listed]
+        if known:
+            options += ["-o", f"{option}=+{','.join(known)}"]
+    return tuple(options)
+
+
 def before_auth(stderr: str) -> bool:
     """Whether `ssh` gave up before offering any credential (so nothing was spent)."""
     text = (stderr or "").lower()
@@ -221,6 +269,7 @@ def argv_for(
     askpass: bool = False,
     command: str = "",
     method: str = PASSWORD,
+    legacy: bool = False,
 ) -> list[str]:
     """La orden completa, montada aparte para poder mirarla en un test.
 
@@ -270,6 +319,8 @@ def argv_for(
         # claves del usuario, y contra un equipo con pocos intentos permitidos
         # eso agota los intentos sin llegar a probar la que se le ha dado.
         options += ["-i", key_file, "-o", "IdentitiesOnly=yes"]
+    if legacy:
+        options += list(legacy_options())
     if port and port != DEFAULT_PORT:
         options += ["-p", str(port)]
     # Usuario con `-l` y destino detrás de `--`: los dos vienen del servidor o
@@ -331,7 +382,13 @@ def run(
         return Answer(
             connected=False, error="la contraseña contiene un salto de línea y no se puede entregar", unreachable=True
         )
+    legacy = False
     answer, stderr = _attempt(host, username, port, key_file, command, secret, mode, PASSWORD)
+    if not answer.connected and negotiation_failed(stderr) and legacy_options():
+        # Un equipo antiguo: el primer intento no mandó nada (`unreachable`),
+        # y el segundo acepta además lo que ese equipo habla.
+        legacy = True
+        answer, stderr = _attempt(host, username, port, key_file, command, secret, mode, PASSWORD, legacy=True)
     if mode and not answer.connected:
         # Un solo reintento, y solo si el servidor ha dicho que `password` no
         # lo ofrece: entonces el primer intento no llegó a gastar nada, y el
@@ -339,7 +396,9 @@ def run(
         offered = offered_methods(stderr)
         if offered is not None and PASSWORD not in offered:
             if KEYBOARD_INTERACTIVE in offered:
-                answer, _ = _attempt(host, username, port, key_file, command, secret, mode, KEYBOARD_INTERACTIVE)
+                answer, _ = _attempt(
+                    host, username, port, key_file, command, secret, mode, KEYBOARD_INTERACTIVE, legacy=legacy
+                )
             else:
                 # Ni contraseña ni teclado: el secreto no llegó a ofrecerse.
                 answer = Answer(connected=False, error=answer.error, unreachable=True)
@@ -355,7 +414,16 @@ def offered_methods(stderr: str) -> tuple[str, ...] | None:
 
 
 def _attempt(
-    host: str, username: str, port: int, key_file: str, command: str, secret: str, mode: str, method: str
+    host: str,
+    username: str,
+    port: int,
+    key_file: str,
+    command: str,
+    secret: str,
+    mode: str,
+    method: str,
+    *,
+    legacy: bool = False,
 ) -> tuple[Answer, str]:
     """Una ejecución de `ssh`: lo que pasó, y su error estándar entero."""
     argv = argv_for(
@@ -367,6 +435,7 @@ def _attempt(
         askpass=mode == "askpass",
         command=command,
         method=method,
+        legacy=legacy,
     )
     try:
         result = subprocess.run(

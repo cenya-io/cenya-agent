@@ -77,6 +77,8 @@ class PinnedTlsTests(unittest.TestCase):
                 pass
 
         cls.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        # A client that hangs up on purpose (wrong pin) is not an error here.
+        cls.server.handle_error = lambda *args: None  # type: ignore[method-assign]
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         context.load_cert_chain(cert_file, key_file)
         cls.server.socket = context.wrap_socket(cls.server.socket, server_side=True)

@@ -1392,3 +1392,64 @@ class DellAndPrivilegeTests(unittest.TestCase):
 
         self.assertEqual(copies["config"], config)
 
+
+
+class LegacyAlgorithmTests(unittest.TestCase):
+    """A switch from ten years ago (08-10-2026: OpenSSH 5.9 with only SHA-1 key
+    exchange) is retried with the old algorithms added, and only it."""
+
+    NEGOTIATION = (
+        "Unable to negotiate with 172.20.5.21 port 22: no matching key exchange method found. "
+        "Their offer: diffie-hellman-group-exchange-sha1,diffie-hellman-group1-sha1"
+    )
+    LEGACY = ("-o", "KexAlgorithms=+diffie-hellman-group1-sha1")
+
+    def test_argv_adds_the_old_algorithms_only_when_asked(self) -> None:
+        with mock.patch.object(ssh, "legacy_options", return_value=self.LEGACY):
+            modern = ssh.argv_for(host="10.0.0.5", username="root", command="x")
+            legacy = ssh.argv_for(host="10.0.0.5", username="root", command="x", legacy=True)
+
+        self.assertNotIn("KexAlgorithms=+diffie-hellman-group1-sha1", modern)
+        self.assertIn("KexAlgorithms=+diffie-hellman-group1-sha1", legacy)
+
+    def test_a_negotiation_failure_is_retried_with_the_old_algorithms(self) -> None:
+        calls: list[bool] = []
+
+        def attempt(*args, legacy: bool = False, **kwargs):  # noqa: ANN002, ANN003, ANN202
+            calls.append(legacy)
+            if not legacy:
+                return ssh.Answer(connected=False, error=self.NEGOTIATION, unreachable=True), self.NEGOTIATION
+            return ssh.Answer(connected=True, output="ok"), ""
+
+        with mock.patch.object(ssh, "legacy_options", return_value=self.LEGACY), mock.patch.object(
+            ssh, "_attempt", side_effect=attempt
+        ), mock.patch.object(ssh, "password_mode", return_value="askpass"):
+            answer = ssh.run(host="172.20.5.21", username="sistemas", secret="x$y", command="true")
+
+        self.assertTrue(answer.connected)
+        self.assertEqual(calls, [False, True])
+
+    def test_a_wrong_password_is_not_retried(self) -> None:
+        calls: list[bool] = []
+        denied = "sistemas@10.0.0.5: Permission denied (password)."
+
+        def attempt(*args, legacy: bool = False, **kwargs):  # noqa: ANN002, ANN003, ANN202
+            calls.append(legacy)
+            return ssh.Answer(connected=False, error=denied), denied
+
+        with mock.patch.object(ssh, "legacy_options", return_value=self.LEGACY), mock.patch.object(
+            ssh, "_attempt", side_effect=attempt
+        ), mock.patch.object(ssh, "password_mode", return_value="askpass"):
+            ssh.run(host="10.0.0.5", username="sistemas", secret="mal", command="true")
+
+        self.assertEqual(calls, [False], "una contraseña mala no se prueba dos veces")
+
+    def test_the_probe_says_the_password_never_left(self) -> None:
+        from agent import probe
+
+        stuck = ssh.Answer(connected=False, error=self.NEGOTIATION, unreachable=True)
+        denied = ssh.Answer(connected=False, error="Permission denied (password).")
+
+        self.assertEqual(probe._ssh_failed_line([stuck]).code, "no_common_algorithms")
+        self.assertEqual(probe._ssh_failed_line([stuck, denied]).code, "none_worked")
+        self.assertEqual(probe._ssh_failed_line([]).code, "none_worked")
