@@ -525,7 +525,7 @@ inventario, y solo si la identificación no las trajo.
 | Linux | `uname -sr`, `cat /etc/os-release`, `hostname`, `ip -o link`, `ip -o -4 addr`, `cat /sys/class/dmi/id/{sys_vendor,product_name,product_serial}` | | | |
 | Cisco IOS | `show version` | *(las trae `show version`)* | `show running-config` | `show startup-config` |
 | Aruba (AOS-S, AOS-CX, ProCurve) | `show version` | `show stacking` | `show running-config` | `show startup-config` |
-| Dell Networking | `show version` | `show switch` *(solo si `show version` describe una sola unidad)* | `show running-configuration` | `show startup-configuration` |
+| Dell Networking | `show version` | `show switch` *(solo si `show version` describe una sola unidad)* | `show running-config` | `show startup-config` |
 | Juniper JunOS | `show version` | `show virtual-chassis` | `show configuration \| display set` | *(la candidata es un borrador, no se pide)* |
 | Huawei VRP | `display version` | | `display current-configuration` | `display saved-configuration` |
 | HPE / H3C Comware | `display version` | `display irf`, y `display device manuinfo` si hay dos o más miembros | `display current-configuration` | `display saved-configuration` |
@@ -564,9 +564,11 @@ Se edita en la aplicación, **Ajustes → Agentes → Barrido**:
 - **Comunidades SNMP**. Vacío: prueba con `public`.
 - **Credenciales**, una por protocolo: SSH, WinRM, SNMPv3, y los hipervisores — vCenter, Proxmox, Hyper-V y XCP-ng (estos cuatro con su dirección: no se descubren solos).
 
-Todo lo que es un secreto se guarda **cifrado en la base de datos** y se le
-entrega al agente en su latido, por su canal ya autenticado. No vuelve nunca al
-navegador: la pantalla enseña cuántas credenciales hay, no cuáles.
+Todo lo que es un secreto se **sella en el navegador para cada agente** (cifrado
+con la clave pública de ese agente) y el servidor guarda solo el sobre: una fuga
+de su base de datos o de una copia de seguridad no expone ninguna contraseña. El
+sobre se entrega al agente en su latido, por su canal ya autenticado. No vuelve
+nunca al navegador: la pantalla enseña cuántas credenciales hay, no cuáles.
 
 Las credenciales van **separadas por protocolo a propósito**. La contraseña del
 vCenter no es la del Linux, y probar una donde no toca son intentos fallidos de
