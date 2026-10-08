@@ -177,11 +177,16 @@ class VMwareClient:
         self, host: str, username: str, secret: str, *, port: int = 0, ca_file: str = "", tls_pin: str = ""
     ) -> None:
         self.rest = RestClient(f"https://{host}:{port or VMWARE_PORT}", ca_file=ca_file, tls_pin=tls_pin)
+        self.host = host
+        self.port = port or VMWARE_PORT
+        self.ca_file = ca_file
+        self.tls_pin = tls_pin
         self.username = username
         self.secret = secret
         self.prefix = ""
         self.token = ""
         self._cluster_cache: dict[str, str] | None = None
+        self._soap_cache: dict[str, dict[str, Any]] | None = None
 
     def login(self) -> None:
         basic = base64.b64encode(f"{self.username}:{self.secret}".encode()).decode()
@@ -215,21 +220,39 @@ class VMwareClient:
     def hosts(self) -> list[dict[str, Any]]:
         """Los servidores ESXi del vCenter, cada uno con su clúster.
 
-        Fabricante, modelo y serie no los da la API REST (viven en la SOAP,
-        `HostSystem.hardware`): salen vacíos y el servidor los completa por
-        otro camino o cuando llegue el cliente SOAP.
+        Fabricante, modelo, serie y datastores no los da la API REST: salen de
+        la SOAP (`_physical`), y vacíos si esa no contesta.
         """
         clusters = self._clusters_by_host()
+        hosts = _values(self._get("/vcenter/host"))
+        physical = self._physical() if hosts else {}
         return [
             {
                 "name": str(host.get("name") or ""),
                 "power_state": str(host.get("power_state") or ""),
                 "connection_state": str(host.get("connection_state") or ""),
                 "cluster": clusters.get(str(host.get("name") or ""), ""),
+                **physical.get(str(host.get("name") or ""), {}),
             }
-            for host in _values(self._get("/vcenter/host"))
+            for host in hosts
             if host.get("name")
         ]
+
+    def _physical(self) -> dict[str, dict[str, Any]]:
+        """Fabricante, modelo, serie y datastores con su origen, por la API SOAP
+        (`agent.vsphere_soap`), que es donde viven. Si el vCenter no la deja
+        usar (permiso, versión, red), los hosts llegan como antes: sin esto,
+        no sin hosts."""
+        if self._soap_cache is None:
+            from agent import vsphere_soap  # importa este módulo: tarde, a propósito
+
+            try:
+                self._soap_cache = vsphere_soap.inventory(
+                    self.host, self.username, self.secret, port=self.port, ca_file=self.ca_file, tls_pin=self.tls_pin
+                )
+            except HypervisorError:
+                self._soap_cache = {}
+        return self._soap_cache
 
     def _clusters_by_host(self) -> dict[str, str]:
         """En qué clúster está cada ESXi: `{nombre del host: nombre del clúster}`.
