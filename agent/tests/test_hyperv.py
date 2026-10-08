@@ -118,7 +118,17 @@ class HyperVClientTests(unittest.TestCase):
 
         self.assertEqual(
             client.hosts(),
-            [{"name": "SRV-HV01", "power_state": "POWERED_ON", "connection_state": "online"}],
+            [
+                {
+                    "name": "SRV-HV01",
+                    "power_state": "POWERED_ON",
+                    "connection_state": "online",
+                    "cluster": "",
+                    "manufacturer": "",
+                    "model": "",
+                    "serial": "",
+                }
+            ],
         )
         vms = {vm["id"]: vm for vm in client.virtual_machines()}
         encendida = vms["f0e1d2c3-b4a5-4968-8776-655443322110"]
@@ -357,9 +367,59 @@ class HyperVClientTests(unittest.TestCase):
         """Los dos detalles del guion que no se ven en los tests de arriba:
         sin el `@()` la lista de una máquina llega desenvuelta, y sin `vmms` no
         se distingue un Hyper-V vacío de un Windows que nunca lo fue."""
-        self.assertIn("vms        = @($vms)", hyperv.SCRIPT)
+        self.assertIn("vms          = @($vms)", hyperv.SCRIPT)
         self.assertIn("Get-Service -Name 'vmms'", hyperv.SCRIPT)
         self.assertIn("ConvertTo-Json -Depth 4 -Compress", hyperv.SCRIPT)
+
+
+
+class HyperVHardwareTests(unittest.TestCase):
+    """Lo que WMI dice de la caja y el clúster de conmutación por error.
+
+    Fabricante, modelo y serie son lo que hace falta para pedir un recambio y
+    para que el catálogo ponga las fuentes de alimentación del servidor.
+    """
+
+    def _hosts(self, data: dict[str, Any]) -> list[dict[str, Any]]:
+        class Session(_FakeSession):
+            def run_ps(self, script: str) -> _FakeResult:
+                return _FakeResult(0, as_stdout(data))
+
+        client = hyperv.HyperVClient("srv-hv01.acme.local", "ACME\\svc", "s3cr3t")
+        with mock.patch("agent.winrm.AVAILABLE", True), \
+             mock.patch("agent.winrm.pywinrm", fake_pywinrm(Session), create=True):
+            client.login()
+        return client.hosts()
+
+    def test_the_host_carries_its_hardware_and_cluster(self) -> None:
+        data = {
+            **DOS_VMS,
+            "manufacturer": "Dell Inc.",
+            "model": "PowerEdge R650",
+            "serial": "7XK2Q53",
+            "cluster": "CL-HV",
+        }
+
+        host = self._hosts(data)[0]
+
+        self.assertEqual(host["manufacturer"], "Dell Inc.")
+        self.assertEqual(host["model"], "PowerEdge R650")
+        self.assertEqual(host["serial"], "7XK2Q53")
+        self.assertEqual(host["cluster"], "CL-HV")
+
+    def test_a_null_from_convertto_json_is_an_empty_text(self) -> None:
+        host = self._hosts({**DOS_VMS, "manufacturer": None, "cluster": None})[0]
+
+        self.assertEqual(host["manufacturer"], "")
+        self.assertEqual(host["cluster"], "")
+
+    def test_the_script_asks_wmi_and_only_asks_the_cluster_when_it_exists(self) -> None:
+        """`Get-Cluster` solo está con la característica de clúster instalada:
+        sin la comprobación, un Hyper-V suelto escribiría un error en cada
+        barrido."""
+        self.assertIn("Win32_ComputerSystem", hyperv.SCRIPT)
+        self.assertIn("Win32_BIOS", hyperv.SCRIPT)
+        self.assertIn("Get-Command -Name Get-Cluster", hyperv.SCRIPT)
 
 
 if __name__ == "__main__":

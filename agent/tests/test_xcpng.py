@@ -433,8 +433,9 @@ class XcpNgClientTests(unittest.TestCase):
         found = client.virtual_machines()
 
         self.assertEqual(len(found), MAX_DETAILED_VMS)
-        # login + VM + host + VBD + VDI + guest metrics: seis, sea cual sea el pool.
-        self.assertEqual(len(fake.calls), 6)
+        # login + VM + host + pool + VBD + VDI + guest metrics: siete, sea cual
+        # sea el pool.
+        self.assertEqual(len(fake.calls), 7)
 
     def test_every_call_after_login_carries_the_session(self) -> None:
         client, fake = logged_in()
@@ -460,6 +461,58 @@ class XcpNgClientTests(unittest.TestCase):
 
         self.assertEqual(client.hosts(), [])
         self.assertEqual(client.virtual_machines(), [])
+
+
+
+class XcpNgPoolAndHardwareTests(unittest.TestCase):
+    """El pool es el clúster de XCP-ng, y la BIOS dice qué caja es cada host."""
+
+    def test_hosts_and_machines_carry_the_pool_name(self) -> None:
+        client, _ = logged_in(
+            {**XAPI_RESULTS, "pool.get_all_records": {"OpaqueRef:pool": {"name_label": "Pool CPD"}}}
+        )
+
+        self.assertEqual({host["cluster"] for host in client.hosts()}, {"Pool CPD"})
+        self.assertEqual({vm["cluster"] for vm in client.virtual_machines()}, {"Pool CPD"})
+
+    def test_a_pool_without_a_name_is_no_cluster(self) -> None:
+        """Un host suelto también tiene pool, pero sin nombre."""
+        client, _ = logged_in({**XAPI_RESULTS, "pool.get_all_records": {"OpaqueRef:pool": {"name_label": ""}}})
+
+        self.assertEqual({host["cluster"] for host in client.hosts()}, {""})
+
+    def test_a_pool_that_cannot_be_read_does_not_lose_the_hosts(self) -> None:
+        client, _ = logged_in()  # sin `pool.get_all_records`: la llamada falla
+
+        self.assertEqual(len(client.hosts()), 2)
+
+    def test_the_bios_strings_fill_the_hardware(self) -> None:
+        records = {
+            ref: dict(record, bios_strings={
+                "system-manufacturer": "HPE",
+                "system-product-name": "ProLiant DL360 Gen10",
+                "system-serial-number": "CZJ1234567",
+            })
+            for ref, record in HOST_RECORDS.items()
+        }
+        client, _ = logged_in({**XAPI_RESULTS, "host.get_all_records": records})
+
+        host = client.hosts()[0]
+
+        self.assertEqual(host["manufacturer"], "HPE")
+        self.assertEqual(host["model"], "ProLiant DL360 Gen10")
+        self.assertEqual(host["serial"], "CZJ1234567")
+
+    def test_the_placeholders_of_a_lazy_bios_are_left_empty(self) -> None:
+        """«To be filled by O.E.M.» no es un número de serie, y en la ficha
+        parecería uno."""
+        records = {
+            ref: dict(record, bios_strings={"system-serial-number": "To Be Filled By O.E.M."})
+            for ref, record in HOST_RECORDS.items()
+        }
+        client, _ = logged_in({**XAPI_RESULTS, "host.get_all_records": records})
+
+        self.assertEqual(client.hosts()[0]["serial"], "")
 
 
 if __name__ == "__main__":

@@ -232,7 +232,13 @@ def _host_finding(host: dict[str, Any], platform: str, credential: creds.Credent
             "mac": "",
             "description": f"Host de virtualización ({platform})",
             "is_virtualization_host": True,
+            # `cluster` es el servidor al que se pregunta (se mantiene por
+            # compatibilidad); el clúster de verdad va en `cluster_name`.
             "cluster": credential.host,
+            "cluster_name": str(host.get("cluster") or ""),
+            "manufacturer": str(host.get("manufacturer") or ""),
+            "model": str(host.get("model") or ""),
+            "serial": str(host.get("serial") or ""),
             "platform": platform,
             "interfaces": [],
             "seen_by": "hypervisor",
@@ -260,6 +266,7 @@ def _vm_finding(vm: dict[str, Any], platform: str, credential: creds.Credential)
             "operating_system": vm.get("operating_system", ""),
             "host": vm.get("host", ""),
             "cluster": credential.host,
+            "cluster_name": str(vm.get("cluster") or ""),
             "platform": platform,
             "seen_by": "hypervisor",
         },
