@@ -10,6 +10,7 @@ fingerprint, better payload.
 from __future__ import annotations
 
 from agent import credentials as creds
+from agent import profiles
 from agent import snmp
 from agent.collectors import register, tasking
 from agent.collectors.base import Finding
@@ -260,6 +261,12 @@ def _inventory_findings(hosts: list[dict], answers: dict[str, dict]) -> list[Fin
                     ],
                     "management_interface": management_name,
                     "seen_by": "snmp",
+                    # What the device is, through its vendor profile
+                    # (`agent/profiles`): manufacturer, model, serial, os,
+                    # os_version. Only the fields with a value: a device
+                    # nobody recognises carries exactly the payload it
+                    # always did, no empty keys.
+                    **_identity_fields(data),
                     # Solo si contestó a la UPS-MIB. Va dentro del mismo
                     # hallazgo y no en uno aparte: un SAI es un equipo más,
                     # y la huella tiene que seguir siendo una sola fila.
@@ -277,6 +284,15 @@ def _inventory_findings(hosts: list[dict], answers: dict[str, dict]) -> list[Fin
         )
         findings.extend(_links_for(ip, data, device_mac, known))
     return findings
+
+
+def _identity_fields(data: dict) -> dict[str, str]:
+    """The identity's payload fields, or nothing when the inventory brought
+    no `Identity` (an older answer shape, or a test double without one)."""
+    identity = data.get("identity")
+    if not isinstance(identity, profiles.Identity):
+        return {}
+    return identity.payload_fields()
 
 
 def _arp_ips(answers: dict[str, dict]) -> dict[str, set[str]]:

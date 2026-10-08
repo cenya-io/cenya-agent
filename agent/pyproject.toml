@@ -111,6 +111,6 @@ package-dir = { "agent" = ".", "agent.collectors" = "collectors", "agent.app" = 
 [tool.setuptools.package-data]
 # Los catálogos del icono de bandeja, tal cual: agent/i18n.py los compila en
 # memoria al arrancar, así que no hay .mo que generar ni que se quede viejo.
-agent = ["translations/*/LC_MESSAGES/cenya-agent.po"]
+agent = ["translations/*/LC_MESSAGES/cenya-agent.po", "NOTICE"]
 # La página de la ventana: se lee de disco y se entrega a WebView2 en una cadena.
 "agent.app" = ["ui/*.html", "ui/*.css", "ui/*.js", "ui/*.txt"]

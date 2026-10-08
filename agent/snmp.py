@@ -23,6 +23,7 @@ import re
 from typing import Any, Callable
 
 from agent import credentials as creds
+from agent import profiles
 from agent import stacks
 
 try:
@@ -114,7 +115,9 @@ MAX_ARP_ENTRIES = 4096
 # ENTITY-MIB entPhysicalTable: the units of a stack, one chassis row each.
 ENTITY_CLASS_OID = "1.3.6.1.2.1.47.1.1.1.1.5"  # entPhysicalClass, 3 = chassis
 ENTITY_POSITION_OID = "1.3.6.1.2.1.47.1.1.1.1.6"  # entPhysicalParentRelPos
+ENTITY_SOFTWARE_OID = "1.3.6.1.2.1.47.1.1.1.1.10"  # entPhysicalSoftwareRev
 ENTITY_SERIAL_OID = "1.3.6.1.2.1.47.1.1.1.1.11"  # entPhysicalSerialNum
+ENTITY_MFG_OID = "1.3.6.1.2.1.47.1.1.1.1.12"  # entPhysicalMfgName
 ENTITY_MODEL_OID = "1.3.6.1.2.1.47.1.1.1.1.13"  # entPhysicalModelName
 
 CISCO_ENTERPRISE_PREFIX = "1.3.6.1.4.1.9"
@@ -124,8 +127,19 @@ MAX_CISCO_VLANS = 32
 _MAC_RE = re.compile(r"^(?:[0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2}$")
 
 
+#: pysnmp's placeholders for an OID the device does not have. In v2c/v3 a
+#: `get` of a missing OID is not an error: the bind comes back with one of
+#: these, whose prettyPrint() is the sentence "No Such Object currently
+#: exists at this OID" -- which must never end up as a serial number.
+_NO_VALUE_TYPES = ("NoSuchObject", "NoSuchInstance", "EndOfMibView")
+
+
 def _text(value: Any) -> str:
-    return value.prettyPrint().strip() if not isinstance(value, str) else value.strip()
+    if isinstance(value, str):
+        return value.strip()
+    if type(value).__name__ in _NO_VALUE_TYPES:
+        return ""
+    return value.prettyPrint().strip()
 
 
 def _mac(value: Any) -> str:
@@ -328,13 +342,78 @@ async def _query_neighbors(engine, host: str, auth: Auth) -> list[dict[str, str]
     return neighbors
 
 
-async def _query_members(engine, host: str, auth: Auth) -> list[dict[str, Any]]:
+async def _entity_classes(engine, host: str, auth: Auth) -> dict[str, str]:
+    """entPhysicalClass, the one ENTITY-MIB column everyone walks: the
+    identity (which row is the chassis) and the stack (how many chassis)
+    both read it, so it is walked once per host and handed around."""
+    return {index: _text(value) for index, value in (await _walk(engine, host, auth, ENTITY_CLASS_OID)).items()}
+
+
+async def _query_identity(
+    engine, host: str, auth: Auth, system: dict[str, str], classes: dict[str, str] | None
+) -> profiles.Identity:
+    """What the device is, through its vendor profile (see ``agent/profiles``).
+
+    One `get` for the profile's leaf OIDs; then, only if model or serial are
+    still missing and the profile allows it, the chassis row of ENTITY-MIB --
+    four leaf instances of the row the class column marks as chassis, never
+    a walk of the four columns. Every step degrades to empty: identifying a
+    device must never cost it its inventory.
+    """
+    object_id = system.get("object_id", "")
+    description = system.get("description", "")
+    profile = profiles.resolve(object_id, description)
+    extra: dict[str, str] = {}
+    oids = profiles.extra_oids(profile)
+    if oids:
+        try:
+            extra = await _get(engine, host, auth, oids) or {}
+        except Exception:  # noqa: BLE001 - a profile OID that does not answer is not an error
+            extra = {}
+    identity = profiles.identify(profile, description, extra, {})
+    if not profiles.needs_entity(profile, identity) or not classes:
+        return identity
+    entity = await _entity_chassis(engine, host, auth, classes)
+    return profiles.identify(profile, description, extra, entity) if entity else identity
+
+
+async def _entity_chassis(engine, host: str, auth: Auth, classes: dict[str, str]) -> dict[str, str]:
+    """The chassis row of entPhysicalTable: model, serial, software revision
+    and manufacturer of the first row of class chassis, by one `get` of its
+    four leaf instances (`column.index`)."""
+    index = profiles.chassis_index(classes)
+    if not index:
+        return {}
+    columns = {
+        "model": ENTITY_MODEL_OID,
+        "serial": ENTITY_SERIAL_OID,
+        "version": ENTITY_SOFTWARE_OID,
+        "manufacturer": ENTITY_MFG_OID,
+    }
+    try:
+        row = await _get(engine, host, auth, {name: f"{oid}.{index}" for name, oid in columns.items()}) or {}
+    except Exception:  # noqa: BLE001 - no row, no fallback; the device keeps what it had
+        return {}
+    return profiles.chassis_from_entity(
+        {index: stacks.ENTITY_CLASS_CHASSIS},
+        {index: row.get("model", "")},
+        {index: row.get("serial", "")},
+        {index: row.get("version", "")},
+        {index: row.get("manufacturer", "")},
+    )
+
+
+async def _query_members(
+    engine, host: str, auth: Auth, classes: dict[str, str] | None = None
+) -> list[dict[str, Any]]:
     """The units of a stack from ENTITY-MIB, or [] for a single unit.
 
     The class column goes first and alone: on a lone switch -- the usual
     case -- one chassis row means the other three columns are never asked.
+    ``classes`` is that column when the caller already walked it.
     """
-    classes = {index: _text(value) for index, value in (await _walk(engine, host, auth, ENTITY_CLASS_OID)).items()}
+    if classes is None:
+        classes = await _entity_classes(engine, host, auth)
     if sum(1 for value in classes.values() if value == stacks.ENTITY_CLASS_CHASSIS) < 2:
         return []
     columns: dict[str, dict[str, str]] = {}
@@ -465,8 +544,9 @@ async def _query_ups_host(host: str, auths: list[Auth]) -> tuple[int, dict[str, 
 
 
 async def _inventory(engine, host: str, auth: Auth, system: dict[str, str]) -> dict[str, Any]:
-    """Everything after the identity answered: interfaces, addresses,
-    neighbours, forwarding table and -- if it is one -- the UPS reading."""
+    """Everything after sysDescr answered: interfaces, addresses, neighbours,
+    forwarding table, what the device is (vendor profile + ENTITY-MIB), the
+    units of a stack and -- if it is one -- the UPS reading."""
     columns: dict[str, dict[str, Any]] = {}
     for key, oid in IF_OIDS.items():
         try:
@@ -508,16 +588,28 @@ async def _inventory(engine, host: str, auth: Auth, system: dict[str, str]) -> d
         ups = await _get(engine, host, auth, UPS_OIDS) or {}
     except Exception:  # noqa: BLE001
         ups = {}
-    # The units of a stack, opportunistic too: a device without ENTITY-MIB
-    # is simply one without `members`.
+    # ENTITY-MIB, opportunistic too: a device without it is simply one
+    # without `members` and without a chassis to borrow model or serial from.
+    # The class column is walked once and shared by identity and stack.
     try:
-        members = await _query_members(engine, host, auth)
+        classes: dict[str, str] = await _entity_classes(engine, host, auth)
+    except Exception:  # noqa: BLE001
+        classes = {}
+    # What the device is, through its vendor profile. Never fatal: a device
+    # nobody recognises is inventoried exactly as before, just without identity.
+    try:
+        identity = await _query_identity(engine, host, auth, system, classes)
+    except Exception:  # noqa: BLE001
+        identity = profiles.Identity()
+    try:
+        members = await _query_members(engine, host, auth, classes)
     except Exception:  # noqa: BLE001
         members = []
     return {
         "name": system.get("name", ""),
         "description": system.get("description", ""),
         "object_id": system.get("object_id", ""),
+        "identity": identity,
         "interfaces": interfaces,
         # ipAdEntIfIndex: the suffix is the IP, the value the ifIndex.
         "addresses": {ip: _text(ifindex) for ip, ifindex in ip_to_ifindex.items()},
