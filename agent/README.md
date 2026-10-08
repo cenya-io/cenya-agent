@@ -472,11 +472,14 @@ barrido deja los hosts vivos y los demás solo llaman a esas puertas.
   Linux, y si el equipo no entiende `uname`, las CLI de red -- Cisco, Aruba,
   Dell y Juniper comparten `show version` (una conexión y la firma del texto
   decide), Huawei y HPE/Comware comparten `display version`, y MikroTik,
-  Fortinet, CheckPoint Gaia y ESXi tienen el suyo. Con la primera credencial
+  Fortinet, CheckPoint Gaia y ESXi tienen el suyo (Extreme EXOS, Ruckus
+  ICX, Allied Telesis AlliedWare Plus y Ubiquiti EdgeOS comparten `show
+  version`; un EdgeRouter por exec es un Linux y se distingue en el análisis
+  de Linux). Con la primera credencial
   que entra deja de probar. Si la familia que responde es un
-  equipo de red, además **guarda su configuración** (nueve familias: Cisco,
-  MikroTik, Aruba, Juniper, Dell, Huawei, HPE/Comware, Fortinet y CheckPoint
-  Gaia; ESXi se identifica pero no se captura) y la empuja aparte: el servidor la
+  equipo de red, además **guarda su configuración** (trece familias: Cisco,
+  MikroTik, Aruba, Juniper, Dell, Huawei, HPE/Comware, Fortinet, CheckPoint
+  Gaia, Extreme EXOS, Ruckus ICX, Allied Telesis AW+ y Ubiquiti EdgeOS; ESXi se identifica pero no se captura) y la empuja aparte: el servidor la
   convierte en copia de configuración del equipo, solo si ya existe en el
   inventario y solo si cambió respecto a la última. En las familias que
   distinguen la configuración **en marcha** de la **guardada** (la que carga
@@ -529,6 +532,10 @@ inventario, y solo si la identificación no las trajo.
 | MikroTik RouterOS | `/system resource print`, `/system identity print`, `/system routerboard print` | | `/export` | *(guarda al aplicar)* |
 | Fortinet FortiOS | `get system status` | | `show full-configuration` | *(guarda al aplicar)* |
 | Check Point Gaia | `show version all` | | `show configuration` | *(guarda al aplicar)* |
+| Extreme EXOS | `show version` | | `show configuration` | *(guarda con `save`; no se pide)* |
+| Ruckus ICX / Brocade FastIron | `show version` | | `show running-config` | |
+| Allied Telesis AlliedWare Plus | `show version` | | `show running-config` | |
+| Ubiquiti EdgeOS | `show version`, o el análisis de Linux (`test -x /opt/vyatta/bin/vyatta-op-cmd-wrapper`, `cat /etc/version`) | | `/opt/vyatta/bin/vyatta-op-cmd-wrapper show configuration` | *(guarda al hacer `commit`/`save`)* |
 | VMware ESXi | `vmware -v` | | *(no se captura: no es un volcado de texto)* | |
 
 La lista vive en `agent/collectors/ssh.py` (`FAMILIES`, `STACK_COMMANDS`,
