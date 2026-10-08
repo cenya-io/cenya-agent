@@ -126,6 +126,25 @@ LLDP_LOCAL_PORT_OID = "1.0.8802.1.1.2.1.3.7.1.3"  # lldpLocPortId, index = local
 LLDP_REM_CHASSIS_OID = "1.0.8802.1.1.2.1.4.1.1.5"  # lldpRemChassisId (usually the MAC)
 LLDP_REM_PORT_OID = "1.0.8802.1.1.2.1.4.1.1.7"  # lldpRemPortId
 LLDP_REM_NAME_OID = "1.0.8802.1.1.2.1.4.1.1.9"  # lldpRemSysName
+LLDP_REM_SYS_DESC_OID = "1.0.8802.1.1.2.1.4.1.1.10"  # lldpRemSysDesc
+LLDP_REM_CAPS_ENABLED_OID = "1.0.8802.1.1.2.1.4.1.1.12"  # lldpRemSysCapEnabled (BITS)
+#: LLDP-MED lldpXMedRemInventoryTable, same index as the lldpRem table
+#: (timeMark.localPortNum.remIndex). Phones, APs and cameras announce their
+#: serial, manufacturer and model here even when nothing answers SNMP.
+LLDP_MED_REM_SERIAL_OID = "1.0.8802.1.1.2.1.5.4795.1.3.3.1.4"  # lldpXMedRemSerialNum
+LLDP_MED_REM_MFG_OID = "1.0.8802.1.1.2.1.5.4795.1.3.3.1.5"  # lldpXMedRemMfgName
+LLDP_MED_REM_MODEL_OID = "1.0.8802.1.1.2.1.5.4795.1.3.3.1.6"  # lldpXMedRemModelName
+#: lldpRemSysCapEnabled bit positions, MSB first (bit 0 = 0x80 of octet 0).
+LLDP_CAPABILITY_BITS = (
+    "other",
+    "repeater",
+    "bridge",
+    "wlanAccessPoint",
+    "router",
+    "telephone",
+    "docsisCableDevice",
+    "stationOnly",
+)
 #: lldpRemManAddrIfSubtype: the column is a nothing, the **index** is the
 #: prize: ``timeMark.localPortNum.remIndex.addrSubtype.addrLen.octets`` -- the
 #: management address the neighbour advertises, which is how a neighbour in
@@ -134,6 +153,7 @@ LLDP_REM_MAN_ADDR_OID = "1.0.8802.1.1.2.1.4.2.1.3"
 CDP_IFINDEX_OID = "1.3.6.1.4.1.9.9.23.1.2.1.1.2"  # cdpCacheIfIndex (redundant: it is the index)
 CDP_DEVICE_OID = "1.3.6.1.4.1.9.9.23.1.2.1.1.6"  # cdpCacheDeviceId
 CDP_PORT_OID = "1.3.6.1.4.1.9.9.23.1.2.1.1.7"  # cdpCacheDevicePort
+CDP_PLATFORM_OID = "1.3.6.1.4.1.9.9.23.1.2.1.1.8"  # cdpCachePlatform
 CDP_ADDRESS_TYPE_OID = "1.3.6.1.4.1.9.9.23.1.2.1.1.3"  # cdpCacheAddressType: 1 = ip
 CDP_ADDRESS_OID = "1.3.6.1.4.1.9.9.23.1.2.1.1.4"  # cdpCacheAddress: the raw octets
 
@@ -368,6 +388,34 @@ def _ip_from_value(value: Any) -> str:
     return str(ipaddress.ip_address(raw)) if len(raw) in (4, 16) else ""
 
 
+def lldp_capabilities(value: Any) -> list[str]:
+    """Decode an lldpRemSysCapEnabled BITS value into capability names, in
+    bit order. Anything that is not an octet string decodes to nothing."""
+    try:
+        raw = value.asOctets()
+    except Exception:  # noqa: BLE001 - not an OctetString
+        raw = bytes(value) if isinstance(value, (bytes, bytearray)) else b""
+    if not raw:
+        return []
+    return [name for bit, name in enumerate(LLDP_CAPABILITY_BITS) if raw[0] & (0x80 >> bit)]
+
+
+async def _optional_walk(engine, host: str, auth: Auth, oid: str) -> dict[str, Any]:
+    """A column many devices simply do not have: failing is not an error."""
+    try:
+        return await _walk(engine, host, auth, oid)
+    except Exception:  # noqa: BLE001 - no table, no extra detail
+        return {}
+
+
+def _announced(entry: dict[str, Any], **columns: Any) -> None:
+    """Add to `entry` only what the neighbour actually announced: the keys
+    are additive in the protocol and never empty."""
+    for key, value in columns.items():
+        if value:
+            entry[key] = value
+
+
 async def _query_neighbors(engine, host: str, auth: Auth) -> list[dict[str, str]]:
     """LLDP neighbours first, CDP where there is no LLDP. Every entry: which
     of my ports touches what of theirs."""
@@ -388,20 +436,33 @@ async def _query_neighbors(engine, host: str, auth: Auth) -> list[dict[str, str]
                     addresses[rem_suffix] = ip
         except Exception:  # noqa: BLE001 - no table, no addresses
             addresses = {}
+        # What the neighbour says about itself; every table is optional.
+        sys_descr = await _optional_walk(engine, host, auth, LLDP_REM_SYS_DESC_OID)
+        capabilities = await _optional_walk(engine, host, auth, LLDP_REM_CAPS_ENABLED_OID)
+        med_serial = await _optional_walk(engine, host, auth, LLDP_MED_REM_SERIAL_OID)
+        med_mfg = await _optional_walk(engine, host, auth, LLDP_MED_REM_MFG_OID)
+        med_model = await _optional_walk(engine, host, auth, LLDP_MED_REM_MODEL_OID)
         for suffix, name in names.items() or ports.items():
             local_num = lldp_local_port_from_suffix(suffix)
             if not local_num:
                 continue
-            neighbors.append(
-                {
-                    "protocol": "lldp",
-                    "local_port": _text(local_ports.get(local_num, "")),
-                    "remote_mac": _mac(chassis.get(suffix, "")),
-                    "remote_port": _text(ports.get(suffix, "")),
-                    "remote_name": _text(names.get(suffix, "")),
-                    "remote_ip": addresses.get(suffix, ""),
-                }
+            entry = {
+                "protocol": "lldp",
+                "local_port": _text(local_ports.get(local_num, "")),
+                "remote_mac": _mac(chassis.get(suffix, "")),
+                "remote_port": _text(ports.get(suffix, "")),
+                "remote_name": _text(names.get(suffix, "")),
+                "remote_ip": addresses.get(suffix, ""),
+            }
+            _announced(
+                entry,
+                remote_sys_descr=_text(sys_descr.get(suffix, "")),
+                remote_capabilities=lldp_capabilities(capabilities.get(suffix)),
+                remote_model=_text(med_model.get(suffix, "")),
+                remote_serial=_text(med_serial.get(suffix, "")),
+                remote_manufacturer=_text(med_mfg.get(suffix, "")),
             )
+            neighbors.append(entry)
         if neighbors:
             return neighbors
     except Exception:  # noqa: BLE001 - no LLDP table is normal, not an error
@@ -416,21 +477,22 @@ async def _query_neighbors(engine, host: str, auth: Auth) -> list[dict[str, str]
             raw_addresses = await _walk(engine, host, auth, CDP_ADDRESS_OID)
         except Exception:  # noqa: BLE001 - no addresses, no harm
             kinds, raw_addresses = {}, {}
+        platforms = await _optional_walk(engine, host, auth, CDP_PLATFORM_OID)
         for suffix, device in devices.items():
             ifindex = _text(ifindexes.get(suffix, ""))
             # cdpCacheAddressType 1 is "ip"; anything else (CLNS, DECnet...)
             # is not an address the agent could reach.
             remote_ip = _ip_from_value(raw_addresses.get(suffix, "")) if _text(kinds.get(suffix, "1")) == "1" else ""
-            neighbors.append(
-                {
-                    "protocol": "cdp",
-                    "local_port": _text(ifindex_names.get(ifindex, "")),
-                    "remote_mac": "",
-                    "remote_port": _text(ports.get(suffix, "")),
-                    "remote_name": _text(device),
-                    "remote_ip": remote_ip,
-                }
-            )
+            entry = {
+                "protocol": "cdp",
+                "local_port": _text(ifindex_names.get(ifindex, "")),
+                "remote_mac": "",
+                "remote_port": _text(ports.get(suffix, "")),
+                "remote_name": _text(device),
+                "remote_ip": remote_ip,
+            }
+            _announced(entry, remote_platform=_text(platforms.get(suffix, "")))
+            neighbors.append(entry)
     except Exception:  # noqa: BLE001
         pass
     return neighbors
