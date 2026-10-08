@@ -879,6 +879,63 @@ async def _query_ups_host(host: str, auths: list[Auth]) -> tuple[int, dict[str, 
     return None
 
 
+async def _query_stamp_host(
+    host: str, auths: list[Auth], oids: dict[str, str], fast: bool
+) -> tuple[int, dict[str, str]] | None:
+    """One ``get`` with sysUpTime and the "configuration last changed" leaves.
+
+    A SNMPv2c ``get`` answers per variable: a device that does not publish one
+    of the OIDs says ``noSuchObject`` for it (``_text`` turns that into ``""``)
+    and still gives the rest, so asking is harmless. It only counts as an
+    answer when sysUpTime came back, the same rule as ``_answered``.
+    ``fast`` is the short-timeout pass for devices that already answered once.
+    """
+    engine = SnmpEngine()
+    wanted = {"uptime": SYSTEM_OIDS["uptime"], **oids}
+    for index, auth in enumerate(auths):
+        try:
+            raw = await _get(engine, host, auth, wanted, fast=fast)
+        except Exception:  # noqa: BLE001 - timeout, refused, garbage: next auth
+            continue
+        if raw is None or not raw.get("uptime"):
+            continue
+        return index, raw
+    return None
+
+
+async def _query_stamps(
+    plan: dict[str, tuple[list[Auth], dict[str, str]]], concurrency: int, known: frozenset[str]
+) -> dict[str, tuple[int, dict[str, str]]]:
+    semaphore = asyncio.Semaphore(max(1, concurrency))
+
+    async def bounded(host: str, auths: list[Auth], oids: dict[str, str]):
+        async with semaphore:
+            try:
+                return host, await _query_stamp_host(host, auths, oids, fast=host in known)
+            except Exception:  # noqa: BLE001 - un equipo raro no tumba el lote
+                return host, None
+
+    answers = await asyncio.gather(*(bounded(host, auths, oids) for host, (auths, oids) in plan.items() if auths))
+    return {host: found for host, found in answers if found is not None}
+
+
+def query_stamps(
+    plan: dict[str, tuple[list[Auth], dict[str, str]]],
+    *,
+    concurrency: int = CONCURRENCY,
+    known: Iterable[str] = (),
+) -> dict[str, tuple[int, dict[str, str]]]:
+    """For ``agent.confwatch``: {host: (auth index, {"uptime": ..., <name>: ...})}.
+
+    ``plan`` gives every host its own auths (in the memory's order) and its own
+    named OIDs; only the hosts that answered appear in the result. ``known``
+    are the hosts that already answered SNMP some day: fast pass only.
+    """
+    if not AVAILABLE or not plan:
+        return {}
+    return asyncio.run(_query_stamps(plan, concurrency, frozenset(known)))
+
+
 async def _inventory(engine, host: str, auth: Auth, system: dict[str, str]) -> dict[str, Any]:
     """Everything after sysDescr answered: interfaces, addresses, neighbours,
     forwarding table, what the device is (vendor profile + ENTITY-MIB), the

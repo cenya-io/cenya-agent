@@ -114,6 +114,7 @@ def _blank() -> dict[str, Any]:
         "ups": False,
         "identity_mac": "",
         "config_family": "",
+        "confwatch": {},
         "creds": {},
     }
 
@@ -133,6 +134,7 @@ def _clean_entry(raw: Any) -> dict[str, Any] | None:
     entry["ups"] = raw.get("ups") is True
     entry["identity_mac"] = _mac(_text(raw.get("identity_mac")))
     entry["config_family"] = _text(raw.get("config_family"))
+    entry["confwatch"] = _clean_confwatch(raw.get("confwatch"))
     creds = raw.get("creds")
     if isinstance(creds, dict):
         for protocol, record in creds.items():
@@ -143,6 +145,29 @@ def _clean_entry(raw: Any) -> dict[str, Any] | None:
                     "failed_at": _text(record.get("failed_at")),
                 }
     return entry
+
+
+def _clean_confwatch(raw: Any) -> dict[str, Any]:
+    """The "last configuration change" stamp seen on a device (``agent.confwatch``).
+
+    ``stamp`` is a list of strings (one per watched OID), ``uptime`` the
+    sysUpTime read together with it (``None`` when the device did not give a
+    number) and the two dates when it was last polled and last copied. Anything
+    that does not have this shape is dropped: the worst that costs is one
+    configuration copy more.
+    """
+    if not isinstance(raw, dict):
+        return {}
+    stamp = raw.get("stamp")
+    if not isinstance(stamp, list) or not stamp or not all(isinstance(item, str) for item in stamp):
+        return {}
+    uptime = raw.get("uptime")
+    return {
+        "stamp": list(stamp),
+        "uptime": uptime if isinstance(uptime, int) and not isinstance(uptime, bool) and uptime >= 0 else None,
+        "polled_at": _text(raw.get("polled_at")) if _parse(raw.get("polled_at")) else "",
+        "captured_at": _text(raw.get("captured_at")) if _parse(raw.get("captured_at")) else "",
+    }
 
 
 def _blank_credential() -> dict[str, Any]:
@@ -401,6 +426,20 @@ class Memory:
                 for entry in self._hosts.values()
                 if entry["config_family"] and entry["ip"]
             ]
+
+    def confwatch_state(self, host_key: str) -> dict[str, Any]:
+        """What ``agent.confwatch`` saw last on that device, or ``{}``."""
+        with self._lock:
+            entry = self._hosts.get(host_key)
+            return json.loads(json.dumps(entry["confwatch"])) if entry and entry["confwatch"] else {}
+
+    def set_confwatch(self, host_key: str, state: dict[str, Any]) -> None:
+        """Keep the stamp seen on a device. A shape that does not fit is ignored."""
+        cleaned = _clean_confwatch(state)
+        if not host_key or not cleaned:
+            return
+        with self._lock:
+            self._entry(host_key)["confwatch"] = cleaned
 
     # --- credenciales -------------------------------------------------------------
 
