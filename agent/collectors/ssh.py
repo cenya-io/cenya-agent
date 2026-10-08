@@ -19,6 +19,7 @@ vez de una segunda fila en la bandeja *enriquece* la que ya existe.
 from __future__ import annotations
 
 import re
+from collections.abc import Collection
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -1280,7 +1281,23 @@ class SshCollector:
             )
         return findings
 
-    def _configs(self, ctx: dict, credentials: list[creds.Credential]) -> list[Finding]:
+    def capture(self, ctx: dict, only: Collection[str]) -> list[Finding]:
+        """Las copias de **esos** equipos, por el mismo camino que la tarea `configs`.
+
+        Es lo que usa `agent.confwatch` cuando un equipo avisa de que su
+        configuración cambió: la misma credencial recordada, las mismas
+        órdenes y el mismo hallazgo `config`, sin esperar a la copia nocturna
+        y sin tocar al resto. Sin credenciales SSH no hace nada ni lo anota:
+        ya lo anota la tarea que las necesita.
+        """
+        credentials = creds.for_kind(ctx, creds.SSH)
+        if not credentials or not only:
+            return []
+        return self._configs(ctx, credentials, only=only)
+
+    def _configs(
+        self, ctx: dict, credentials: list[creds.Credential], only: Collection[str] | None = None
+    ) -> list[Finding]:
         """La tarea `configs`: solo la copia, solo donde ya se entró.
 
         Sobre los equipos de red que la memoria apuntó en el inventario y que
@@ -1296,7 +1313,7 @@ class SshCollector:
         jobs: list[tuple[str, str, dict, creds.Credential, str]] = []
         for ip, mac, entry in tasking.alive_from_memory(ctx, mem.config_hosts()):
             family = str(entry.get("family") or "")
-            if family not in CAPTURE_COMMANDS:
+            if family not in CAPTURE_COMMANDS or (only is not None and ip not in only):
                 continue
             ident = mem.remembered(tasking.host_key(ctx, ip, mac), "ssh")
             credential = next(

@@ -15,6 +15,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+from agent import confwatch
 from agent import credentials as creds
 from agent.collectors import all_collectors, tasking
 from agent.notes import Note, collector_note
@@ -97,11 +98,17 @@ def run_task(name: str, ctx: dict) -> tuple[list[dict[str, Any]], list[Note | st
             ctx["errors"].append(
                 collector_note(collector.name, "crashed", str(exc), detail=f"{type(exc).__name__}: {exc}")
             )
+    if name == PRESENCE:
+        # A step of presence, not a task of its own: see `agent.confwatch`.
+        # It never raises, and a failure there is a note, not a crashed run.
+        items.extend(finding.as_json() for finding in confwatch.run(ctx))
     progress("", len(collectors), len(collectors))
     sealed_note(ctx)
     stats: dict[str, Any] = {"collectors": len(collectors), "items": len(items), "crashed": crashed}
     if name == PRESENCE:
         stats["hosts_alive"] = len(ctx.get("hosts") or [])
+        if ctx.get("confwatch_copies"):
+            stats["config_changes"] = ctx["confwatch_copies"]
     worked = tasking.credentials_ok(ctx)
     if worked:
         stats["credentials_ok"] = worked

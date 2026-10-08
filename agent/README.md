@@ -488,6 +488,7 @@ barrido deja los hosts vivos y los demás solo llaman a esas puertas.
   los cambios que un reinicio perdería; si esa segunda orden falla, la copia
   sale igual, sin ella. Se apaga desde Ajustes → Agentes o con
   `CENYA_CAPTURE_CONFIGS=0`: un solo interruptor para las dos.
+- **vigilancia de cambios de configuración**: en cada presencia (cada cinco minutos), a los equipos Cisco, Juniper, Huawei y H3C/Comware que ya tienen copia les pregunta por SNMP, en una sola lectura, cuándo cambió por última vez su configuración; si ha cambiado desde la vez anterior pide la copia de ese equipo al momento, sin esperar a la nocturna y sin abrir ningún puerto de escucha. El resto de familias siguen con la copia diaria. Se apaga con el mismo interruptor de copias.
 - **winrm** (L4): lo mismo para Windows, por PowerShell remoto: nombre,
   dominio, fabricante, modelo, serie e interfaces.
 - **hypervisors** (L5): pregunta a los hipervisores que estén configurados:
