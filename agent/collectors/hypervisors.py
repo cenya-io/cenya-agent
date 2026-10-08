@@ -21,7 +21,7 @@ from __future__ import annotations
 from typing import Any
 
 from agent import credentials as creds
-from agent import hyperv, hypervisor, net, xcpng
+from agent import hyperv, hypervisor, net, storage_arrays, xcpng
 from agent.collectors import register, tasking
 from agent.collectors.base import Finding
 from agent.notes import collector_note
@@ -34,6 +34,10 @@ CLIENTS = {
     creds.PROXMOX: hypervisor.ProxmoxClient,
     creds.HYPERV: hyperv.HyperVClient,
     creds.XCPNG: xcpng.XcpNgClient,
+    # Las cabinas cumplen el mismo contrato: su `hosts()` es la propia
+    # cabina con sus volúmenes, y no tienen máquinas virtuales.
+    creds.SYNOLOGY: storage_arrays.SynologyClient,
+    creds.TRUENAS: storage_arrays.TrueNASClient,
 }
 
 KIND_LABELS = {
@@ -41,6 +45,8 @@ KIND_LABELS = {
     creds.PROXMOX: "proxmox",
     creds.HYPERV: "hyperv",
     creds.XCPNG: "xcpng",
+    creds.SYNOLOGY: "synology",
+    creds.TRUENAS: "truenas",
 }
 
 
@@ -221,7 +227,7 @@ def _host_finding(host: dict[str, Any], platform: str, credential: creds.Credent
     sean una fila y no dos. Un ESXi contesta al ping como cualquier otro.
     """
     name = host["name"]
-    ip = net.resolve(name)
+    ip = str(host.get("ip") or "") or net.resolve(name)
     identity = {"ip": ip} if ip else {"hostname": name}
     return Finding(
         kind="host",
@@ -230,8 +236,11 @@ def _host_finding(host: dict[str, Any], platform: str, credential: creds.Credent
             "hostname": name,
             "ip": ip,
             "mac": "",
-            "description": f"Host de virtualización ({platform})",
-            "is_virtualization_host": True,
+            "description": str(host.get("description") or f"Host de virtualización ({platform})"),
+            # Una cabina pasa por aquí también (`agent.storage_arrays`) y no es
+            # un host de virtualización: lo dice ella.
+            "is_virtualization_host": bool(host.get("is_virtualization_host", True)),
+            "os": str(host.get("os") or ""),
             # `cluster` es el servidor al que se pregunta (se mantiene por
             # compatibilidad); el clúster de verdad va en `cluster_name`.
             "cluster": credential.host,
@@ -242,6 +251,10 @@ def _host_finding(host: dict[str, Any], platform: str, credential: creds.Credent
             # Dónde viven los discos de sus máquinas y de dónde viene cada
             # sitio: lo que convierte el servidor en volúmenes y cabinas.
             "datastores": host.get("datastores") if isinstance(host.get("datastores"), list) else [],
+            # Lo que una cabina dice de sus volúmenes y sus direcciones
+            # (`core/storage_discovery.py`, `sync_array`).
+            "storage_volumes": host.get("storage_volumes") if isinstance(host.get("storage_volumes"), list) else [],
+            "addresses": host.get("addresses") if isinstance(host.get("addresses"), list) else [],
             "platform": platform,
             "interfaces": [],
             "seen_by": "hypervisor",

@@ -35,6 +35,9 @@ PROXMOX = "proxmox"
 SNMPV3 = "snmpv3"
 HYPERV = "hyperv"
 XCPNG = "xcpng"
+#: Cabinas con API (`agent.storage_arrays`). TrueNAS entra con una clave y sin usuario.
+SYNOLOGY = "synology"
+TRUENAS = "truenas"
 #: Una comunidad SNMP v2c vista como credencial. No llega así del servidor --las
 #: comunidades viajan como lista de textos en `config["communities"]`--: la
 #: fabrica el colector SNMP para que la memoria las trate igual que a un
@@ -204,7 +207,7 @@ def _one(raw: Any, position: int = 0, secrets: Mapping[str, Any] | None = None) 
     kind = _kind(raw)
     username = str(raw.get("username") or "").strip()
     # Una comunidad v2c no tiene usuario: es la única clase a la que no se le pide.
-    if not kind or (not username and kind != SNMP):
+    if not kind or (not username and kind not in (SNMP, TRUENAS)):
         return None
     host = str(raw.get("host") or "").strip()
     # Van a la línea de órdenes de `ssh` y otros: nada que empiece por «-» (se
