@@ -23,7 +23,7 @@ from agent.scheduler import CONFIGS, HYPERVISORS, INVENTORY, PRESENCE, UPS
 #: Tarea → colectores (spec 2.1). El orden lo sigue mandando `RUN_ORDER`.
 TASK_COLLECTORS: dict[str, tuple[str, ...]] = {
     PRESENCE: ("local", "sweep"),
-    INVENTORY: ("fingerprint", "snmp", "ssh", "winrm"),
+    INVENTORY: ("fingerprint", "directory", "snmp", "ssh", "winrm"),
     CONFIGS: ("ssh",),
     UPS: ("snmp",),
     HYPERVISORS: ("hypervisors",),

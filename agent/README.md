@@ -466,6 +466,21 @@ barrido deja los hosts vivos y los demás solo llaman a esas puertas.
   usuarios SNMPv3 (credencial `snmpv3` en Ajustes, con sus protocolos de
   autenticación y cifrado) se prueban antes que las comunidades, porque un
   equipo configurado con v3 suele tener v2c apagado.
+- **directory** (Directorio Activo): solo en un agente **Windows unido a un
+  dominio**. Pregunta al directorio, por PowerShell/ADSI y **sin
+  credenciales**: el servicio corre como LocalSystem, que en la red se
+  autentica con la cuenta de equipo, y cualquier cuenta del dominio puede leer
+  los objetos de equipo. Es una sola búsqueda LDAP de solo lectura; no escribe
+  nada. De cada equipo habilitado y visto en los últimos 60 días lee el sistema
+  operativo exacto («Windows Server 2022 Standard»), su versión, su nombre DNS,
+  su último inicio de sesión y, por sus SPN, si es controlador de dominio, SQL
+  Server, Exchange o Hyper-V. El directorio no da IP: se resuelve el nombre y
+  **solo se informa de los equipos que están vivos en el barrido**, así que los
+  retirados que siguen en el directorio no llenan la bandeja. Viajan
+  `hostname`, `os` y un bloque `directory` (`dns_name`, `os_version`,
+  `last_logon`, `roles`); no viaja ninguna credencial ni ningún otro atributo.
+  En una máquina que no es Windows, sin PowerShell o fuera de un dominio no
+  hace nada y no avisa de nada.
 - **ssh** (L3): entra en los que tengan el puerto abierto y saca sistema
   operativo, hostname real, interfaces y --si el permiso da-- fabricante,
   modelo y número de serie. Prueba una familia de comandos tras otra: primero
