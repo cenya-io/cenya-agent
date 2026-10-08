@@ -300,6 +300,7 @@ class RestClientTests(unittest.TestCase):
 class VMwareTests(unittest.TestCase):
     def _client(self, routes: dict[str, Any]) -> tuple[VMwareClient, _Rest]:
         client = VMwareClient("vc.acme.local", "lector@vsphere.local", "s3cr3t")
+        client._soap_cache = {}  # sin red: la parte SOAP va en test_vsphere_soap
         rest = _Rest(routes)
         client.rest = rest  # type: ignore[assignment]
         return client, rest
@@ -882,6 +883,7 @@ class VMwareClusterTests(unittest.TestCase):
 
     def _logged_in(self, extra: dict[str, Any]) -> tuple[VMwareClient, _Rest]:
         client = VMwareClient("vc.acme.local", "lector@vsphere.local", "s3cr3t")
+        client._soap_cache = {}  # sin red: la parte SOAP va en test_vsphere_soap
         rest = _Rest({"/api/session": VMWARE_TOKEN, **extra})
         client.rest = rest  # type: ignore[assignment]
         client.login()
@@ -1062,6 +1064,7 @@ class VMwareNetworkAndDisksTests(unittest.TestCase):
 
     def _logged_in(self, extra: dict[str, Any]) -> tuple[VMwareClient, _Rest]:
         client = VMwareClient("vc.acme.local", "lector@vsphere.local", "s3cr3t")
+        client._soap_cache = {}  # sin red: la parte SOAP va en test_vsphere_soap
         rest = _Rest({"/api/session": VMWARE_TOKEN, **extra})
         client.rest = rest  # type: ignore[assignment]
         client.login()
