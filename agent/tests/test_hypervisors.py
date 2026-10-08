@@ -876,5 +876,183 @@ class RegistrationTests(unittest.TestCase):
         )
 
 
+
+class VMwareClusterTests(unittest.TestCase):
+    """El clúster de cada ESXi, preguntado clúster por clúster."""
+
+    def _logged_in(self, extra: dict[str, Any]) -> tuple[VMwareClient, _Rest]:
+        client = VMwareClient("vc.acme.local", "lector@vsphere.local", "s3cr3t")
+        rest = _Rest({"/api/session": VMWARE_TOKEN, **extra})
+        client.rest = rest  # type: ignore[assignment]
+        client.login()
+        return client, rest
+
+    CLUSTERS = [{"cluster": "domain-c7", "name": "Producción"}, {"cluster": "domain-c9", "name": "Laboratorio"}]
+
+    def test_each_esxi_comes_out_with_its_cluster(self) -> None:
+        client, _ = self._logged_in(
+            {
+                "/api/vcenter/host": VMWARE_HOSTS,
+                "/api/vcenter/cluster": self.CLUSTERS,
+                "/api/vcenter/host?filter.clusters=domain-c7": [VMWARE_HOSTS[0]],
+                "/api/vcenter/host?filter.clusters=domain-c9": [VMWARE_HOSTS[1]],
+            }
+        )
+
+        hosts = {host["name"]: host["cluster"] for host in client.hosts()}
+
+        self.assertEqual(hosts, {"esxi01.acme.local": "Producción", "esxi02.acme.local": "Laboratorio"})
+
+    def test_a_machine_takes_the_cluster_of_its_esxi(self) -> None:
+        client, _ = self._logged_in(
+            {
+                "/api/vcenter/host": VMWARE_HOSTS,
+                "/api/vcenter/vm": VMWARE_VMS,
+                "/api/vcenter/vm?filter.hosts=host-16": [{"vm": "vm-101"}],
+                "/api/vcenter/vm?filter.hosts=host-22": [{"vm": "vm-102"}],
+                "/api/vcenter/cluster": self.CLUSTERS[:1],
+                "/api/vcenter/host?filter.clusters=domain-c7": VMWARE_HOSTS,
+            }
+        )
+
+        machines = {vm["name"]: vm["cluster"] for vm in client.virtual_machines()}
+
+        self.assertEqual(set(machines.values()), {"Producción"})
+
+    def test_standalone_esxi_have_no_cluster(self) -> None:
+        """Lo normal en una pyme: un ESXi suelto. Sin clústeres, nada que pedir."""
+        client, rest = self._logged_in({"/api/vcenter/host": VMWARE_HOSTS, "/api/vcenter/cluster": []})
+
+        self.assertEqual({host["cluster"] for host in client.hosts()}, {""})
+        self.assertFalse(any("filter.clusters" in call[1] for call in rest.calls))
+
+    def test_a_filter_the_vcenter_ignored_puts_nobody_in_the_wrong_cluster(self) -> None:
+        """Dos clústeres que contestan con la misma lista entera no son dos
+        clústeres con los mismos hosts: es un filtro que no se ha aplicado."""
+        client, _ = self._logged_in(
+            {
+                "/api/vcenter/host": VMWARE_HOSTS,
+                "/api/vcenter/cluster": self.CLUSTERS,
+                "/api/vcenter/host?filter.clusters=domain-c7": VMWARE_HOSTS,
+                "/api/vcenter/host?filter.clusters=domain-c9": VMWARE_HOSTS,
+            }
+        )
+
+        self.assertEqual({host["cluster"] for host in client.hosts()}, {""})
+
+    def test_a_host_filter_the_vcenter_ignored_puts_no_machine_on_the_wrong_host(self) -> None:
+        client, _ = self._logged_in(
+            {
+                "/api/vcenter/host": VMWARE_HOSTS,
+                "/api/vcenter/vm": VMWARE_VMS,
+                "/api/vcenter/vm?filter.hosts=host-16": VMWARE_VMS,
+                "/api/vcenter/vm?filter.hosts=host-22": VMWARE_VMS,
+            }
+        )
+
+        self.assertEqual({vm["host"] for vm in client.virtual_machines()}, {""})
+
+    def test_the_clusters_are_asked_once_for_hosts_and_machines(self) -> None:
+        client, rest = self._logged_in(
+            {"/api/vcenter/host": VMWARE_HOSTS, "/api/vcenter/vm": [], "/api/vcenter/cluster": []}
+        )
+
+        client.hosts()
+        client.virtual_machines()
+
+        self.assertEqual(sum(1 for call in rest.calls if call[1] == "/api/vcenter/cluster"), 1)
+
+
+class ProxmoxClusterTests(unittest.TestCase):
+    def _client(self, routes: dict[str, Any]) -> ProxmoxClient:
+        client = ProxmoxClient("pve.acme.local", "lector@pve", "s3cr3t")
+        client.rest = _Rest({"/api2/json/access/ticket": PROXMOX_TICKET, **routes})  # type: ignore[assignment]
+        client.login()
+        return client
+
+    def test_nodes_and_machines_carry_the_cluster_name(self) -> None:
+        client = self._client(
+            {
+                "/api2/json/nodes": PROXMOX_NODES,
+                "/api2/json/cluster/resources?type=vm": {"data": [{"vmid": 100, "name": "srv", "node": "pve01"}]},
+                "/api2/json/cluster/status": {
+                    "data": [{"type": "cluster", "name": "pve-cpd"}, {"type": "node", "name": "pve01"}]
+                },
+            }
+        )
+
+        self.assertEqual({host["cluster"] for host in client.hosts()}, {"pve-cpd"})
+        self.assertEqual(client.virtual_machines()[0]["cluster"], "pve-cpd")
+
+    def test_a_single_node_has_no_cluster(self) -> None:
+        """Lo normal en una pyme, y no es un error."""
+        client = self._client(
+            {
+                "/api2/json/nodes": PROXMOX_NODES,
+                "/api2/json/cluster/status": {"data": [{"type": "node", "name": "pve01"}]},
+            }
+        )
+
+        self.assertEqual({host["cluster"] for host in client.hosts()}, {""})
+
+    def test_a_status_that_cannot_be_read_does_not_lose_the_nodes(self) -> None:
+        client = self._client({"/api2/json/nodes": PROXMOX_NODES})
+
+        self.assertTrue(client.hosts())
+
+
+class HypervisorFindingClusterTests(unittest.TestCase):
+    """Lo que viaja al servidor: el clúster de verdad en `cluster_name`, y en
+    `cluster` la dirección de siempre, que los servidores de antes esperan."""
+
+    def _collect(self, hosts: list[dict[str, Any]], vms: list[dict[str, Any]]):
+        build = client_factory(hosts={"vc.acme.local": hosts}, vms={"vc.acme.local": vms})
+        ctx = {
+            "config": {
+                "credentials": [
+                    {"kind": "vmware", "username": "u", "secret": "s", "host": "vc.acme.local"}
+                ]
+            },
+            "env": None,
+        }
+        with mock.patch.dict("agent.collectors.hypervisors.CLIENTS", {"vmware": build}, clear=True), \
+             mock.patch("agent.collectors.hypervisors.net.resolve", lambda name: ""):
+            return HypervisorCollector().collect(ctx)
+
+    def test_the_host_finding_carries_cluster_and_hardware(self) -> None:
+        found = self._collect(
+            [
+                {
+                    "name": "esxi01",
+                    "cluster": "Producción",
+                    "manufacturer": "Dell Inc.",
+                    "model": "PowerEdge R650",
+                    "serial": "7XK2Q53",
+                }
+            ],
+            [],
+        )
+
+        payload = found[0].payload
+        self.assertEqual(payload["cluster_name"], "Producción")
+        self.assertEqual(payload["cluster"], "vc.acme.local")
+        self.assertEqual(payload["manufacturer"], "Dell Inc.")
+        self.assertEqual(payload["model"], "PowerEdge R650")
+        self.assertEqual(payload["serial"], "7XK2Q53")
+
+    def test_the_machine_finding_carries_its_cluster(self) -> None:
+        found = self._collect([], [{"id": "vm-1", "name": "srv", "host": "esxi01", "cluster": "Producción"}])
+
+        self.assertEqual(found[0].payload["cluster_name"], "Producción")
+
+    def test_a_client_that_says_nothing_sends_empty_fields(self) -> None:
+        """Un cliente de los de antes, sin claves nuevas, no rompe el hallazgo."""
+        found = self._collect([{"name": "esxi01"}], [{"id": "vm-1", "name": "srv"}])
+
+        self.assertEqual(found[0].payload["cluster_name"], "")
+        self.assertEqual(found[0].payload["serial"], "")
+        self.assertEqual(found[1].payload["cluster_name"], "")
+
+
 if __name__ == "__main__":
     unittest.main()

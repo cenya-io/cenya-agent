@@ -136,19 +136,41 @@ class XcpNgClient:
         alimentación y desconectado.
         """
         found: list[dict[str, Any]] = []
+        pool = self._pool_name()
         for record in _records(self._call("host.get_all_records", [self.session])).values():
             name = str(record.get("hostname") or record.get("name_label") or "")
             if not name:
                 continue
             enabled = bool(record.get("enabled"))
+            bios = record.get("bios_strings") if isinstance(record.get("bios_strings"), dict) else {}
             found.append(
                 {
                     "name": name,
                     "power_state": "POWERED_ON" if enabled else "",
                     "connection_state": "online" if enabled else "offline",
+                    "cluster": pool,
+                    # Lo que la BIOS dice de la caja: con ello la ficha sirve
+                    # para pedir un recambio y el catálogo pone las fuentes.
+                    "manufacturer": _bios(bios, "system-manufacturer"),
+                    "model": _bios(bios, "system-product-name"),
+                    "serial": _bios(bios, "system-serial-number"),
                 }
             )
         return found
+
+    def _pool_name(self) -> str:
+        """El nombre del pool, que es el clúster de XCP-ng.
+
+        Un host suelto también tiene pool, pero sin nombre: "" es la respuesta
+        honesta, y el servidor no crea un clúster vacío.
+        """
+        if getattr(self, "_pool", None) is None:
+            try:
+                pools = _records(self._call("pool.get_all_records", [self.session]))
+            except HypervisorError:
+                pools = {}
+            self._pool = next((str(p.get("name_label") or "").strip() for p in pools.values()), "")
+        return self._pool
 
     def virtual_machines(self) -> list[dict[str, Any]]:
         """Las máquinas de verdad, con lo que hace falta para darlas de alta.
@@ -168,6 +190,7 @@ class XcpNgClient:
             )
         ][:MAX_DETAILED_VMS]
         host_names = self._host_names()
+        pool = self._pool_name()
         disk_gb = self._disk_gb_by_vm()
         os_names = self._os_by_guest_metrics()
         found: list[dict[str, Any]] = []
@@ -184,6 +207,7 @@ class XcpNgClient:
                     # Una VM apagada no reside en ningún host: `resident_on`
                     # vale `OpaqueRef:NULL` y no está en el cruce, así que "".
                     "host": host_names.get(str(vm.get("resident_on") or ""), ""),
+                    "cluster": pool,
                     "operating_system": os_names.get(str(vm.get("guest_metrics") or ""), ""),
                 }
             )
@@ -269,6 +293,17 @@ def _error_text(error: Any) -> str:
         if error.get("message"):
             return str(error["message"])
     return "error de XAPI"
+
+
+#: Lo que algunos fabricantes ponen en la BIOS cuando no han rellenado el campo.
+_BIOS_PLACEHOLDERS = frozenset(
+    {"", "to be filled by o.e.m.", "default string", "system serial number", "not specified", "none", "0"}
+)
+
+
+def _bios(bios: dict[str, Any], key: str) -> str:
+    value = str(bios.get(key) or "").strip()
+    return "" if value.casefold() in _BIOS_PLACEHOLDERS else value[:200]
 
 
 def _records(answer: Any) -> dict[str, dict[str, Any]]:

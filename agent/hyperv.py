@@ -54,13 +54,28 @@ if ($vmms) {
     }
   }
 }
+$cs = Get-CimInstance -ClassName Win32_ComputerSystem -ErrorAction SilentlyContinue
+$bios = Get-CimInstance -ClassName Win32_BIOS -ErrorAction SilentlyContinue
+$cluster = ''
+if (Get-Command -Name Get-Cluster -ErrorAction SilentlyContinue) {
+  $cluster = [string](Get-Cluster -ErrorAction SilentlyContinue).Name
+}
 $result = @{
-  hostname   = [string]$env:COMPUTERNAME
-  has_hyperv = [bool]$vmms
-  vms        = @($vms)
+  hostname     = [string]$env:COMPUTERNAME
+  has_hyperv   = [bool]$vmms
+  vms          = @($vms)
+  manufacturer = [string]$cs.Manufacturer
+  model        = [string]$cs.Model
+  serial       = [string]$bios.SerialNumber
+  cluster      = $cluster
 }
 $result | ConvertTo-Json -Depth 4 -Compress
 """
+
+def _text(value: Any) -> str:
+    """Un texto del guion, recortado. `ConvertTo-Json` puede mandar `null`."""
+    return str(value or "").strip()[:200]
+
 
 #: El estado de Hyper-V al vocabulario del producto. `Saved` es una suspensión
 #: a disco, así que se cuenta como suspendida. Lo desconocido cae en `running`
@@ -162,6 +177,12 @@ class HyperVClient:
                 "name": str(self._data.get("hostname") or self.host),
                 "power_state": "POWERED_ON",
                 "connection_state": "online",
+                # Clúster de conmutación por error, si lo hay; fabricante,
+                # modelo y serie de WMI, como los de cualquier Windows.
+                "cluster": _text(self._data.get("cluster")),
+                "manufacturer": _text(self._data.get("manufacturer")),
+                "model": _text(self._data.get("model")),
+                "serial": _text(self._data.get("serial")),
             }
         ]
 

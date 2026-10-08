@@ -175,6 +175,7 @@ class VMwareClient:
         self.secret = secret
         self.prefix = ""
         self.token = ""
+        self._cluster_cache: dict[str, str] | None = None
 
     def login(self) -> None:
         basic = base64.b64encode(f"{self.username}:{self.secret}".encode()).decode()
@@ -206,16 +207,62 @@ class VMwareClient:
         return self.rest.request("GET", f"{self.prefix}{path}", headers={"vmware-api-session-id": self.token})
 
     def hosts(self) -> list[dict[str, Any]]:
-        """Los servidores ESXi del vCenter."""
+        """Los servidores ESXi del vCenter, cada uno con su clúster.
+
+        Fabricante, modelo y serie no los da la API REST (viven en la SOAP,
+        `HostSystem.hardware`): salen vacíos y el servidor los completa por
+        otro camino o cuando llegue el cliente SOAP.
+        """
+        clusters = self._clusters_by_host()
         return [
             {
                 "name": str(host.get("name") or ""),
                 "power_state": str(host.get("power_state") or ""),
                 "connection_state": str(host.get("connection_state") or ""),
+                "cluster": clusters.get(str(host.get("name") or ""), ""),
             }
             for host in _values(self._get("/vcenter/host"))
             if host.get("name")
         ]
+
+    def _clusters_by_host(self) -> dict[str, str]:
+        """En qué clúster está cada ESXi: `{nombre del host: nombre del clúster}`.
+
+        `/vcenter/host` no lo dice, igual que `/vcenter/vm` no dice el host:
+        se pregunta clúster por clúster, que en una pyme son uno o dos. Se
+        guarda la respuesta porque `hosts()` y `virtual_machines()` la
+        necesitan las dos. Un clúster que no contesta deja a sus hosts sin
+        clúster; los demás ni se enteran.
+        """
+        if self._cluster_cache is not None:
+            return self._cluster_cache
+        by_host: dict[str, str] = {}
+        try:
+            clusters = _values(self._get("/vcenter/cluster"))
+        except HypervisorError:
+            clusters = []
+        answers: list[tuple[str, frozenset[str]]] = []
+        for cluster in clusters[:MAX_HOSTS_CROSSED]:
+            identifier = str(cluster.get("cluster") or "")
+            name = str(cluster.get("name") or "")
+            if not identifier or not name:
+                continue
+            try:
+                members = _values(
+                    self._get(f"/vcenter/host?filter.clusters={urllib.parse.quote(identifier)}")
+                )
+            except HypervisorError:
+                continue
+            answers.append((name, frozenset(str(m.get("name") or "") for m in members if m.get("name"))))
+        if _filter_ignored([hosts for _name, hosts in answers]):
+            # El vCenter no ha entendido el filtro y ha contestado con todos:
+            # cada host saldría en el último clúster preguntado. Mejor ninguno.
+            answers = []
+        for name, hosts in answers:
+            for host in hosts:
+                by_host[host] = name
+        self._cluster_cache = by_host
+        return by_host
 
     def _hosts_by_vm(self) -> dict[str, str]:
         """En qué ESXi vive cada máquina: `{id de la VM: nombre del host}`.
@@ -236,6 +283,7 @@ class VMwareClient:
             hosts = _values(self._get("/vcenter/host"))
         except HypervisorError:
             return by_vm
+        answers: list[tuple[str, frozenset[str]]] = []
         for host in hosts[:MAX_HOSTS_CROSSED]:
             identifier = str(host.get("host") or "")
             name = str(host.get("name") or "")
@@ -247,16 +295,22 @@ class VMwareClient:
                 )
             except HypervisorError:
                 continue
-            for machine in machines:
-                machine_id = str(machine.get("vm") or "")
-                if machine_id:
-                    by_vm[machine_id] = name
+            answers.append((name, frozenset(str(m.get("vm") or "") for m in machines if m.get("vm"))))
+        if _filter_ignored([machines for _name, machines in answers]):
+            # Un filtro que no se ha entendido devuelve todas las máquinas
+            # para cada host, y todas acabarían en el último. Sin host es
+            # verdad; en el host equivocado, no.
+            return by_vm
+        for name, machines in answers:
+            for machine_id in machines:
+                by_vm[machine_id] = name
         return by_vm
 
     def virtual_machines(self) -> list[dict[str, Any]]:
         """Las máquinas virtuales, con lo que hace falta para darlas de alta."""
         found: list[dict[str, Any]] = []
         hosts_by_vm = self._hosts_by_vm()
+        clusters = self._clusters_by_host()
         for vm in _values(self._get("/vcenter/vm"))[:MAX_DETAILED_VMS]:
             identifier = str(vm.get("vm") or "")
             if not identifier:
@@ -270,6 +324,7 @@ class VMwareClient:
                     "id": identifier,
                     "name": str(vm.get("name") or identifier),
                     "host": hosts_by_vm.get(identifier, ""),
+                    "cluster": clusters.get(hosts_by_vm.get(identifier, ""), ""),
                     "status": _vmware_status(str(vm.get("power_state") or "")),
                     "vcpus": int(
                         _number(vm.get("cpu_count")) or _number((detail.get("cpu") or {}).get("count"))
@@ -293,6 +348,18 @@ class VMwareClient:
             value = answer.get("value")
             return value if isinstance(value, dict) else answer
         return {}
+
+
+def _filter_ignored(answers: list[frozenset[str]]) -> bool:
+    """Si un filtro de la API se ha quedado sin aplicar.
+
+    Varias preguntas distintas («las máquinas del host 16», «las del 22») que
+    contestan exactamente lo mismo, y no vacío, no son dos hosts gemelos: es
+    un vCenter que no ha entendido el parámetro y ha devuelto la lista
+    entera. Con una sola pregunta no se puede saber, y se da por buena.
+    """
+    filled = [answer for answer in answers if answer]
+    return len(filled) > 1 and len(set(filled)) == 1
 
 
 def _vmware_status(power_state: str) -> str:
@@ -379,15 +446,34 @@ class ProxmoxClient:
         return [item for item in data if isinstance(item, dict)]
 
     def hosts(self) -> list[dict[str, Any]]:
+        cluster = self._cluster_name()
         return [
             {
                 "name": str(node.get("node") or ""),
                 "power_state": "POWERED_ON" if node.get("status") == "online" else "",
                 "connection_state": str(node.get("status") or ""),
+                "cluster": cluster,
             }
             for node in self._get("/api2/json/nodes")
             if node.get("node")
         ]
+
+    def _cluster_name(self) -> str:
+        """El nombre del clúster de Proxmox, o "" si el nodo va suelto.
+
+        `/cluster/status` trae una entrada `type: cluster` solo cuando hay
+        clúster; un Proxmox de un nodo --lo normal en una pyme-- no la tiene,
+        y eso es la respuesta correcta, no un error.
+        """
+        if getattr(self, "_cluster", None) is None:
+            try:
+                entries = self._get("/api2/json/cluster/status")
+            except HypervisorError:
+                entries = []
+            self._cluster = next(
+                (str(e.get("name") or "") for e in entries if e.get("type") == "cluster"), ""
+            )
+        return self._cluster
 
     def virtual_machines(self) -> list[dict[str, Any]]:
         """Máquinas y contenedores en una sola consulta al clúster.
@@ -396,6 +482,7 @@ class ProxmoxClient:
         nodo, así que no hace falta recorrer nodo por nodo.
         """
         found: list[dict[str, Any]] = []
+        cluster = self._cluster_name()
         for resource in self._get("/api2/json/cluster/resources?type=vm")[:MAX_DETAILED_VMS]:
             identifier = str(resource.get("vmid") or "")
             if not identifier:
@@ -414,6 +501,7 @@ class ProxmoxClient:
                     # contenedor sí, y decir «contenedor LXC» ya orienta.
                     "operating_system": "Contenedor LXC" if resource.get("type") == "lxc" else "",
                     "host": str(resource.get("node") or ""),
+                    "cluster": cluster,
                 }
             )
         return found
