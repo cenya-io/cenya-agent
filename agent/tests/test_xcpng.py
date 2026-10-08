@@ -554,5 +554,51 @@ class XcpNgNetworkAndDisksTests(unittest.TestCase):
         self.assertEqual({len(vm["interfaces"]) for vm in machines}, {0})
 
 
+class XcpNgDatastoreTests(unittest.TestCase):
+    def test_each_host_carries_the_srs_it_has_plugged(self) -> None:
+        results = {
+            **XAPI_RESULTS,
+            "SR.get_all_records": {
+                "OpaqueRef:sr-iscsi": {"name_label": "SAN iSCSI", "type": "lvmoiscsi", "shared": True, "physical_size": str(1024**4)},
+                "OpaqueRef:sr-iso": {"name_label": "ISOs", "type": "iso", "content_type": "iso"},
+                "OpaqueRef:sr-local": {"name_label": "Local storage", "type": "lvm", "shared": False},
+            },
+            "PBD.get_all_records": {
+                "OpaqueRef:pbd-1": {
+                    "host": "OpaqueRef:host-1",
+                    "SR": "OpaqueRef:sr-iscsi",
+                    "device_config": {"target": "10.0.30.5,10.0.31.5", "targetIQN": "iqn.2004-04.com.qnap:ts-873:iscsi.vm"},
+                    "other_config": {"multipathed": "true"},
+                },
+                "OpaqueRef:pbd-2": {"host": "OpaqueRef:host-1", "SR": "OpaqueRef:sr-iso", "device_config": {}},
+                "OpaqueRef:pbd-3": {"host": "OpaqueRef:host-2", "SR": "OpaqueRef:sr-local", "device_config": {"device": "/dev/sda3"}},
+            },
+        }
+        client, _ = logged_in(results)
+
+        hosts = {h["name"]: h["datastores"] for h in client.hosts()}
+
+        self.assertEqual(
+            hosts["xcp01.acme.local"],
+            [
+                {
+                    "name": "SAN iSCSI",
+                    "type": "lvmoiscsi",
+                    "gb": 1024,
+                    "local": False,
+                    "portal": "10.0.30.5",
+                    "target_iqn": "iqn.2004-04.com.qnap:ts-873:iscsi.vm",
+                    "multipath": True,
+                }
+            ],
+        )
+        self.assertEqual(hosts["xcp02.acme.local"], [{"name": "Local storage", "type": "lvm", "local": True}])
+
+    def test_without_the_sr_table_hosts_still_arrive(self) -> None:
+        client, _ = logged_in()
+
+        self.assertEqual({len(h["datastores"]) for h in client.hosts()}, {0})
+
+
 if __name__ == "__main__":
     unittest.main()

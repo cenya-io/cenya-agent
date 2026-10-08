@@ -239,6 +239,9 @@ def _host_finding(host: dict[str, Any], platform: str, credential: creds.Credent
             "manufacturer": str(host.get("manufacturer") or ""),
             "model": str(host.get("model") or ""),
             "serial": str(host.get("serial") or ""),
+            # Dónde viven los discos de sus máquinas y de dónde viene cada
+            # sitio: lo que convierte el servidor en volúmenes y cabinas.
+            "datastores": host.get("datastores") if isinstance(host.get("datastores"), list) else [],
             "platform": platform,
             "interfaces": [],
             "seen_by": "hypervisor",

@@ -71,6 +71,38 @@ if ($vmms) {
     }
   }
 }
+$iscsi = @()
+if (Get-Command -Name Get-IscsiSession -ErrorAction SilentlyContinue) {
+  foreach ($s in @(Get-IscsiSession -ErrorAction SilentlyContinue)) {
+    $paths = @()
+    $bytes = [long]0
+    foreach ($d in @($s | Get-Disk -ErrorAction SilentlyContinue)) {
+      $bytes += [long]$d.Size
+      foreach ($p in @($d | Get-Partition -ErrorAction SilentlyContinue)) {
+        $paths += @($p.AccessPaths | ForEach-Object { [string]$_ })
+      }
+    }
+    $iscsi += @{
+      target    = [string]$s.TargetNodeAddress
+      initiator = [string]$s.InitiatorNodeAddress
+      portals   = @(Get-IscsiConnection -IscsiSession $s -ErrorAction SilentlyContinue |
+                    ForEach-Object { [string]$_.TargetAddress })
+      paths     = $paths
+      bytes     = $bytes
+    }
+  }
+}
+$csvs = @()
+if (Get-Command -Name Get-ClusterSharedVolume -ErrorAction SilentlyContinue) {
+  foreach ($v in @(Get-ClusterSharedVolume -ErrorAction SilentlyContinue)) {
+    $info = $v.SharedVolumeInfo
+    $csvs += @{
+      path   = [string]$info.FriendlyVolumeName
+      volume = [string]$info.Partition.Name
+      bytes  = [long]$info.Partition.Size
+    }
+  }
+}
 $cs = Get-CimInstance -ClassName Win32_ComputerSystem -ErrorAction SilentlyContinue
 $bios = Get-CimInstance -ClassName Win32_BIOS -ErrorAction SilentlyContinue
 $cluster = ''
@@ -85,6 +117,8 @@ $result = @{
   model        = [string]$cs.Model
   serial       = [string]$bios.SerialNumber
   cluster      = $cluster
+  iscsi        = @($iscsi)
+  csvs         = @($csvs)
 }
 $result | ConvertTo-Json -Depth 6 -Compress
 """
@@ -97,6 +131,12 @@ def _as_list(value: Any) -> list[Any]:
     if value is None or value == "":
         return []
     return [value]
+
+
+def _norm_path(value: Any) -> str:
+    """Una ruta de acceso de Windows comparable: sin la barra final y sin
+    mayúsculas. `E:\\` y `e:` son la misma unidad."""
+    return str(value or "").strip().rstrip("\\").casefold()
 
 
 def _text(value: Any) -> str:
@@ -210,8 +250,68 @@ class HyperVClient:
                 "manufacturer": _text(self._data.get("manufacturer")),
                 "model": _text(self._data.get("model")),
                 "serial": _text(self._data.get("serial")),
+                "datastores": self._datastores(),
             }
         ]
+
+    def _datastores(self) -> list[dict[str, Any]]:
+        """Dónde viven los discos de las máquinas de este host, y de dónde viene.
+
+        Los volúmenes compartidos del clúster (CSV) van siempre; las unidades y
+        los recursos SMB, los que usa alguna máquina. Un CSV o una unidad se
+        reconocen como iSCSI cuando una sesión iSCSI tiene ese volumen entre
+        sus rutas de acceso (el CSV, por la ruta de su volumen, `Volume{…}`). Lo que no
+        se sabe de dónde viene viaja como `csv` y el servidor no lo escribe.
+        """
+        sessions = [s for s in _as_list(self._data.get("iscsi")) if isinstance(s, dict)]
+
+        def session_for(*paths: str) -> dict[str, Any] | None:
+            wanted = {_norm_path(p) for p in paths if p}
+            for session in sessions:
+                if wanted & {_norm_path(p) for p in _as_list(session.get("paths"))}:
+                    return session
+            return None
+
+        def from_session(name: str, session: dict[str, Any], size: Any) -> dict[str, Any] | None:
+            portals = [str(p) for p in _as_list(session.get("portals")) if p]
+            return vmnet.datastore(
+                name,
+                "iscsi",
+                gb=vmnet.gb(size or session.get("bytes")),
+                target_iqn=_text(session.get("target")),
+                initiator_iqn=_text(session.get("initiator")),
+                portal=portals[0] if portals else "",
+                paths=len(set(portals)) or None,
+            )
+
+        found: dict[str, dict[str, Any] | None] = {}
+        for csv in _as_list(self._data.get("csvs")):
+            if not isinstance(csv, dict) or not csv.get("path"):
+                continue
+            name = vmnet.windows_datastore(str(csv["path"]) + "\\")
+            session = session_for(str(csv.get("volume") or ""))
+            found[name.casefold()] = (
+                from_session(name, session, csv.get("bytes"))
+                if session
+                else vmnet.datastore(name, "csv", gb=vmnet.gb(csv.get("bytes")))
+            )
+        used = {
+            vmnet.windows_datastore(drive.get("path"))
+            for vm in _as_list(self._data.get("vms"))
+            if isinstance(vm, dict)
+            for drive in _as_list(vm.get("drives"))
+            if isinstance(drive, dict)
+        }
+        for name in sorted(n for n in used if n and n.casefold() not in found):
+            if name.startswith("\\\\"):
+                server, _, share = name[2:].partition("\\")
+                found[name.casefold()] = vmnet.datastore(name, "smb", server=server, export=share)
+            elif len(name) == 2 and name[1] == ":":
+                session = session_for(name + "\\")
+                found[name.casefold()] = (
+                    from_session(name, session, None) if session else vmnet.datastore(name, "local", local=True)
+                )
+        return [item for item in found.values() if item][: vmnet.MAX_PER_MACHINE]
 
     def virtual_machines(self) -> list[dict[str, Any]]:
         """Las máquinas del host, con lo que hace falta para darlas de alta.

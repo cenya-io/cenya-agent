@@ -137,7 +137,8 @@ class XcpNgClient:
         """
         found: list[dict[str, Any]] = []
         pool = self._pool_name()
-        for record in _records(self._call("host.get_all_records", [self.session])).values():
+        stores = self._datastores_by_host()
+        for ref, record in _records(self._call("host.get_all_records", [self.session])).items():
             name = str(record.get("hostname") or record.get("name_label") or "")
             if not name:
                 continue
@@ -154,9 +155,50 @@ class XcpNgClient:
                     "manufacturer": _bios(bios, "system-manufacturer"),
                     "model": _bios(bios, "system-product-name"),
                     "serial": _bios(bios, "system-serial-number"),
+                    "datastores": stores.get(ref, []),
                 }
             )
         return found
+
+    def _datastores_by_host(self) -> dict[str, list[dict[str, Any]]]:
+        """`{referencia del host: [datastores]}`: los SR que tiene enchufados
+        (sus PBD), con lo que dice su `device_config` de dónde vienen.
+
+        Las bibliotecas de ISO y los dispositivos extraíbles (`udev`) no son
+        sitios donde vivan discos de máquinas: no viajan.
+        """
+        srs, pbds = self._table("SR"), self._table("PBD")
+        if srs is None or pbds is None:
+            return {}
+        by_host: dict[str, list[dict[str, Any]]] = {}
+        for pbd in pbds.values():
+            sr = srs.get(str(pbd.get("SR") or ""))
+            if not isinstance(sr, dict):
+                continue
+            kind = str(sr.get("type") or "")
+            if kind in ("iso", "udev") or sr.get("content_type") == "iso":
+                continue
+            config = pbd.get("device_config") if isinstance(pbd.get("device_config"), dict) else {}
+            other = pbd.get("other_config") if isinstance(pbd.get("other_config"), dict) else {}
+            server = str(config.get("server") or "")
+            export = str(config.get("serverpath") or "")
+            if kind in ("smb", "cifs") and server.startswith("//"):
+                # `//nas01/vms`: el servidor y el recurso van juntos.
+                server, _, export = server[2:].partition("/")
+            item = vmnet.datastore(
+                sr.get("name_label"),
+                kind,
+                gb=vmnet.gb(sr.get("physical_size")),
+                local=not bool(sr.get("shared")),
+                portal=str(config.get("target") or "").split(",")[0],
+                target_iqn=str(config.get("targetIQN") or ""),
+                server=server,
+                export=export,
+                multipath=True if str(other.get("multipathed") or "").lower() == "true" else None,
+            )
+            if item:
+                by_host.setdefault(str(pbd.get("host") or ""), []).append(item)
+        return by_host
 
     def _pool_name(self) -> str:
         """El nombre del pool, que es el clúster de XCP-ng.
@@ -189,7 +231,6 @@ class XcpNgClient:
                 or vm.get("is_control_domain")
             )
         ][:MAX_DETAILED_VMS]
-        self._tables: dict[str, dict[str, dict[str, Any]] | None] = {}
         host_names = self._host_names()
         pool = self._pool_name()
         disk_gb = self._disk_gb_by_vm()

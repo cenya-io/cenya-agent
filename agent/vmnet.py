@@ -236,3 +236,31 @@ def windows_datastore(path: Any) -> str:
     if len(text) >= 2 and text[1] == ":":
         return text[:2].upper()
     return ""
+
+
+# --- Datastores de un host ----------------------------------------------------------
+
+
+def datastore(name: Any, kind: Any, **fields: Any) -> dict[str, Any] | None:
+    """Un datastore en la forma que espera el servidor (`core/storage_discovery.py`).
+
+    `kind` es la palabra del hipervisor (`nfs`, `lvmoiscsi`, `zfspool`…): el
+    servidor la traduce. Los campos vacíos no viajan.
+    """
+    label = str(name or "").strip()[:200]
+    if not label:
+        return None
+    found: dict[str, Any] = {"name": label, "type": str(kind or "").strip().lower()[:32]}
+    for key, value in fields.items():
+        if value in (None, "", [], {}) or (key == "gb" and not value):
+            continue
+        found[key] = value.strip()[:255] if isinstance(value, str) else value
+    return found
+
+
+def gb(size_bytes: Any) -> int:
+    try:
+        size = float(size_bytes or 0)
+    except (TypeError, ValueError):
+        return 0
+    return round(size / (1024**3)) if size > 0 else 0
