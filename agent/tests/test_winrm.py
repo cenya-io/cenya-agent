@@ -382,7 +382,9 @@ class WinrmCollectorTests(unittest.TestCase):
                 asked.append((host, port))
             return replies.get(host, winrm.Answer(False, None, "no se pudo conectar"))
 
+        # DCOM has its own tests (test_dcom); here only WinRM is under test.
         with mock.patch("agent.collectors.winrm.winrm.AVAILABLE", True), \
+             mock.patch("agent.collectors.winrm.dcom.available", return_value=False), \
              mock.patch("agent.collectors.winrm.net.hosts_listening", fake_listening), \
              mock.patch("agent.collectors.winrm.winrm.query", fake_query):
             return WinrmCollector().collect(ctx)
