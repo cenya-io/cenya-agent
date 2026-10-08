@@ -165,6 +165,9 @@ _CISCO_HOSTNAME_RE = re.compile(r"^(\S+)\s+uptime is", re.MULTILINE)
 _CISCO_SERIAL_RE = re.compile(r"system serial number\s*:\s*(\S+)", re.IGNORECASE)
 _CISCO_MODEL_RE = re.compile(r"model number\s*:\s*(\S+)", re.IGNORECASE)
 _CISCO_BANNER_RE = re.compile(r"^(Cisco IOS.*|.*Software.*Version.*)$", re.MULTILINE)
+#: «IOS» as a whole word: a Huawei prints «BIOS Version» and was signed as a
+#: Cisco by the plain substring (08-10-2026).
+_CISCO_MARK_RE = re.compile(r"\bCisco\b|\bIOS\b")
 
 
 def parse_cisco(output: str) -> dict[str, Any]:
@@ -174,7 +177,7 @@ def parse_cisco(output: str) -> dict[str, Any]:
     eso ya lo da SNMP mejor, que además no necesita entrar. Aquí interesan el
     nombre, la versión y el número de serie, que SNMP no siempre da.
     """
-    if "Cisco" not in output and "IOS" not in output:
+    if not _CISCO_MARK_RE.search(output):
         return {}
     banner = _CISCO_BANNER_RE.search(output)
     hostname = _CISCO_HOSTNAME_RE.search(output)
@@ -278,12 +281,26 @@ def parse_aruba(output: str) -> dict[str, Any]:
     }
 
 
+def _dotted_value(output: str, label: str) -> str:
+    """«Label........ value» or «Label: value», as Dell and Aruba print them."""
+    found = re.search(rf"^\s*{re.escape(label)}\s*[.:]+\s*(\S.*?)\s*$", output, re.MULTILINE | re.IGNORECASE)
+    return found.group(1) if found else ""
+
+
 def parse_dell(output: str) -> dict[str, Any]:
     """Un Dell Networking (OS10, series N…, PowerConnect): la firma es la marca en el banner."""
     if "Dell" not in output and "PowerConnect" not in output:
         return {}
-    banner = next(
-        (line.strip() for line in output.splitlines() if "Dell" in line or "PowerConnect" in line), "Dell Networking"
+    # OS6 prints «Machine Type............ Dell EMC Networking N1548P»: the
+    # value, never the dotted label (it came out as the device's description).
+    banner = (
+        _dotted_value(output, "Machine Type")
+        or _dotted_value(output, "Machine Description")
+        or _dotted_value(output, "System Description")
+        or next(
+            (line.strip() for line in output.splitlines() if "Dell" in line or "PowerConnect" in line),
+            "Dell Networking",
+        )
     )
     # N-series (OS6) prints "Serial Number....." per unit; the first section is
     # the management unit. OS10 has neither and keeps both empty.
@@ -574,7 +591,7 @@ def parse_session(output: str) -> dict[str, Any]:
     hostname a vendor parser left empty.
     """
     name = sshshell.prompt_name(output)
-    for parse in (parse_show_version, parse_display_version):
+    for parse in (parse_display_version, parse_show_version):
         data = parse(output)
         if data:
             return {**data, "hostname": data.get("hostname") or name}
@@ -592,6 +609,50 @@ def parse_session(output: str) -> dict[str, Any]:
         "model": "",
         "serial": "",
     }
+
+
+#: Where each family keeps its name when its version answer does not say it
+#: (Dell OS6 and Aruba: `show system`; VRP and Comware: the sysname line).
+NAME_COMMANDS: dict[str, str] = {
+    "dell": "show system",
+    "aruba": "show system",
+    "huawei": "display current-configuration | include sysname",
+    "comware": "display current-configuration | include sysname",
+}
+_SYSTEM_NAME_RE = re.compile(r"^\s*System Name\s*[.:]+\s*(\S.*?)\s*$", re.MULTILINE | re.IGNORECASE)
+_SYSNAME_RE = re.compile(r"^\s*sysname\s+(\S+)", re.MULTILINE)
+
+
+def parse_name(output: str) -> str:
+    """The device's name out of `show system` or the sysname line, or empty."""
+    found = _SYSTEM_NAME_RE.search(output) or _SYSNAME_RE.search(output)
+    return found.group(1).strip()[:200] if found else ""
+
+
+def _with_name(host: str, credential: creds.Credential, data: dict[str, Any], logins: tasking.Logins | None) -> dict[str, Any]:
+    """`data` with its hostname asked for, when the family knows where (08-10-2026).
+
+    A second login with the credential that just got in, like the config
+    capture does: a device without a name enters the tray as «Sin nombre», and
+    that is what the person sees first.
+    """
+    command = NAME_COMMANDS.get(str(data.get("family") or ""), "")
+    if data.get("hostname") or not command:
+        return data
+    answer = _login(logins, host, credential, command)
+    if answer is tasking.SKIPPED or not answer.connected:
+        return data
+    output = answer.output or ""
+    if not output.strip() and _wants_session(answer):
+        session = _session(logins, host, credential, commands=(*sshshell.PAGING_OFF, command))
+        if session is tasking.SKIPPED or not session.connected:
+            return data
+        output = sshshell.command_output(session.output, command)
+    name = parse_name(output)
+    if not name:
+        return data
+    described = _dotted_value(output, "System Description")
+    return {**data, "hostname": name, **({"description": described} if described and not data.get("description") else {})}
 
 
 def _wants_session(answer: Any) -> bool:
@@ -642,15 +703,13 @@ def interrogate(
                 # El analizador puede afinar la familia (un `show version`
                 # sirve a cuatro fabricantes); si no lo hace, vale la del
                 # intento.
-                return {**data, "family": data.get("family", family.name)}, credential
-            if not (answer.output or "").strip():
-                # Entró y no dijo nada: no contesta a órdenes sueltas. Repetir
-                # con otra orden son inicios de sesión de más sin aprender nada.
-                break
+                data = {**data, "family": data.get("family", family.name)}
+                return _with_name(host, credential, data, logins), credential
         if _wants_session(answer):
             session = _session(logins, host, credential)
             if session is not tasking.SKIPPED and session.connected:
-                return parse_session(session.output), credential
+                data = parse_session(session.output)
+                return (_with_name(host, credential, data, logins) if data else data), credential
         if connected:
             return {}, credential
     return {}, None

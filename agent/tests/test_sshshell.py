@@ -194,3 +194,85 @@ class ConfigInASessionTests(unittest.TestCase):
 
         self.assertEqual(config, "sysname SW\n")
         self.assertEqual(opened.call_args.kwargs["commands"][-1], "display current-configuration")
+
+
+DELL_OS6_VERSION = """\
+Machine Description............... Dell EMC Networking Switch
+System Model ID................... N1548P
+Machine Type...................... Dell EMC Networking N1548P
+Serial Number..................... CN0ABCDE123456
+Burned In MAC Address............. F8B1.5612.3456
+System Object ID.................. 1.3.6.1.4.1.674.10895.3065
+SOC Version....................... BCM56150_A0
+HW Version........................ 1
+"""
+
+DELL_OS6_SYSTEM = """\
+System Description:                       Dell EMC Networking N1548P, 6.6.0.17, Linux 3.6.5
+System Name:                              PLANTA-BAJA-SW
+System Location:
+System Contact:
+System Object ID:                         1.3.6.1.4.1.674.10895.3065
+"""
+
+HUAWEI_VERSION = """\
+Huawei Versatile Routing Platform Software
+VRP (R) software, Version 5.170 (S5735 V200R021C10SPC600)
+Copyright (C) 2000-2021 HUAWEI TECH Co., Ltd.
+HUAWEI S5735-L48T4S-A1 Routing Switch uptime is 120 days, 3 hours
+BIOS Version:        0.0.0.1
+"""
+
+
+class NamesAndSignaturesTests(unittest.TestCase):
+    def test_a_huawei_with_a_bios_line_is_not_a_cisco(self) -> None:
+        self.assertEqual(collector.parse_cisco(HUAWEI_VERSION), {})
+        data = collector.parse_session("<SW-Huawei-01>display version\r\n" + HUAWEI_VERSION + "<SW-Huawei-01>")
+        self.assertEqual((data["family"], data["manufacturer"], data["hostname"]), ("huawei", "Huawei", "SW-Huawei-01"))
+
+    def test_a_dell_os6_description_is_the_machine_type_not_the_dotted_label(self) -> None:
+        data = collector.parse_dell(DELL_OS6_VERSION)
+
+        self.assertEqual(data["description"], "Dell EMC Networking N1548P")
+        self.assertEqual((data["model"], data["serial"]), ("N1548P", "CN0ABCDE123456"))
+
+    def test_the_name_is_read_from_show_system_and_from_sysname(self) -> None:
+        self.assertEqual(collector.parse_name(DELL_OS6_SYSTEM), "PLANTA-BAJA-SW")
+        self.assertEqual(collector.parse_name("  System Name        : SW-PLANTA\n"), "SW-PLANTA")
+        self.assertEqual(collector.parse_name(" sysname SW-Huawei-01\n"), "SW-Huawei-01")
+        self.assertEqual(collector.parse_name("% Unrecognized command"), "")
+
+    def test_a_dell_without_a_name_in_show_version_asks_show_system(self) -> None:
+        credential = creds._one({"kind": "ssh", "username": "sistemas", "secret": SECRET, "id": "c"}, 0)
+        answers = {
+            "show version": ssh.Answer(connected=True, output=DELL_OS6_VERSION),
+            "show system": ssh.Answer(connected=True, output=DELL_OS6_SYSTEM),
+        }
+        asked: list[str] = []
+
+        def login(logins, host, cred, command):  # noqa: ANN001, ANN202
+            asked.append(command)
+            return answers.get(command, ssh.Answer(connected=True, output=""))
+
+        with mock.patch.object(collector, "_login", side_effect=login):
+            data, used = collector.interrogate("172.20.5.22", [credential])
+
+        self.assertEqual(used, credential)
+        self.assertEqual((data["family"], data["hostname"], data["description"]), ("dell", "PLANTA-BAJA-SW", "Dell EMC Networking N1548P"))
+        self.assertEqual(asked[-1], "show system")
+
+    def test_a_device_that_already_said_its_name_is_not_asked_again(self) -> None:
+        credential = creds._one({"kind": "ssh", "username": "sistemas", "secret": SECRET, "id": "c"}, 0)
+        asked: list[str] = []
+
+        def login(logins, host, cred, command):  # noqa: ANN001, ANN202
+            asked.append(command)
+            if command == "show version":
+                return ssh.Answer(connected=True, output="Cisco IOS Software, C2960 Software\nSW-CORE uptime is 3 days\n")
+            return ssh.Answer(connected=True, output="% Invalid input detected")
+
+        with mock.patch.object(collector, "_login", side_effect=login):
+            data, _used = collector.interrogate("10.0.0.1", [credential])
+
+        self.assertEqual(data["hostname"], "SW-CORE")
+        self.assertNotIn("show system", asked)
