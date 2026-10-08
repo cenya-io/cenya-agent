@@ -38,9 +38,9 @@ class Profile:
     model_oid: str = ""                       # OID de hoja con el modelo
     version_oid: str = ""                     # OID de hoja con la versión del sistema
     os_oid: str = ""                          # OID de hoja con el nombre del sistema (raro; Fortinet no lo tiene, Synology sí)
-    model_from_description: str = ""          # Regex con UN grupo: el modelo, sacado de sysDescr
-    version_from_description: str = ""        # Regex con UN grupo: la versión, sacada de sysDescr
-    os_from_description: str = ""             # Regex con UN grupo: el sistema, sacado de sysDescr
+    model_from_description: str = ""          # Regex, un grupo (por alternativa): el modelo, sacado de sysDescr
+    version_from_description: str = ""        # Regex, un grupo (por alternativa): la versión, sacada de sysDescr
+    os_from_description: str = ""             # Regex, un grupo (por alternativa): el sistema, sacado de sysDescr
     entity_fallback: bool = True              # Si tras todo falta modelo o serie, pedir ENTITY-MIB (chasis)
 ```
 

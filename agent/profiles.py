@@ -35,9 +35,9 @@ class Profile:
     model_oid: str = ""  # Leaf OID with the model
     version_oid: str = ""  # Leaf OID with the OS version
     os_oid: str = ""  # Leaf OID with the OS name (rare)
-    model_from_description: str = ""  # Regex with ONE group: the model, from sysDescr
-    version_from_description: str = ""  # Regex with ONE group: the version, from sysDescr
-    os_from_description: str = ""  # Regex with ONE group: the OS name, from sysDescr
+    model_from_description: str = ""  # Regex, one group (per alternative): the model, from sysDescr
+    version_from_description: str = ""  # Regex, one group (per alternative): the version, from sysDescr
+    os_from_description: str = ""  # Regex, one group (per alternative): the OS name, from sysDescr
     entity_fallback: bool = True  # If model or serial is still missing, ask ENTITY-MIB (chassis)
 
 
@@ -102,12 +102,19 @@ def _search(pattern: str, text: str) -> re.Match[str] | None:
 
 
 def _extract(pattern: str, text: str) -> str:
-    """The first group of *pattern* in *text*, stripped, or ""."""
+    """The first group of *pattern* that matched in *text*, stripped, or "".
+
+    A pattern may carry one group per alternative -- Huawei's model is the
+    first word of some banners and the parenthesised family of others -- so
+    the groups that did not take part in the match are skipped.
+    """
     match = _search(pattern, text)
     if match is None:
         return ""
-    group = match.group(1) if match.groups() else match.group(0)
-    return (group or "").strip()
+    if not match.groups():
+        return (match.group(0) or "").strip()
+    group = next((value for value in match.groups() if value), "")
+    return group.strip()
 
 
 def enterprise_of(object_id: str) -> int | None:

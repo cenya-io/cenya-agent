@@ -353,6 +353,57 @@ class OtherNetworkTests(ProfileTestCase):
         identity = self.identity("huawei")
         self.assertEqual(identity.model, "AR1220")
         self.assertEqual(identity.os_version, "V200R003C01SPC900")
+        self.assertEqual(identity.os, "VRP")
+
+    def test_huawei_banner_that_starts_with_the_model(self) -> None:
+        # LibreNMS tests/snmpsim/vrp_4.snmprec: the full model comes first,
+        # and the old «word after Huawei» regex returned «Versatile».
+        profile = BY_KEY["huawei"]
+        description = (
+            "S2700-9TP-EI-AC Huawei Versatile Routing Platform Software VRP (R) software,"
+            "Version 5.70 (S2700 V100R006C05) Copyright (C) 2003-2013 Huawei Technologies Co., Ltd."
+        )
+        identity = identify(profile, description, {}, {})
+        self.assertEqual(identity.model, "S2700-9TP-EI-AC")
+        self.assertEqual(identity.os_version, "V100R006C05")
+
+    def test_huawei_banner_with_line_breaks(self) -> None:
+        # What a switch answers verbatim: CRLF between the lines.
+        profile = BY_KEY["huawei"]
+        description = (
+            "S5720-28X-SI-AC\r\nHuawei Versatile Routing Platform Software\r\n"
+            "VRP (R) software, Version 5.170 (S5720 V200R019C10SPC500)\r\n"
+            "Copyright (C) 2000-2020 HUAWEI TECH CO., LTD"
+        )
+        identity = identify(profile, description, {}, {})
+        self.assertEqual(identity.model, "S5720-28X-SI-AC")
+        self.assertEqual(identity.os_version, "V200R019C10SPC500")
+
+    def test_huawei_banner_without_a_model_line_falls_back_to_the_family(self) -> None:
+        # CloudEngine / AR: only the family inside the parentheses, never «Versatile».
+        profile = BY_KEY["huawei"]
+        description = (
+            "Huawei Versatile Routing Platform Software\r\nVRP (R) software, Version 8.180 "
+            "(CE6850EI V200R005C10SPC800)\r\nCopyright (C) 2012-2018 Huawei Technologies Co., Ltd."
+        )
+        identity = identify(profile, description, {}, {})
+        self.assertEqual(identity.model, "CE6850EI")
+        self.assertEqual(identity.os_version, "V200R005C10SPC800")
+
+    def test_huawei_oids_and_entity_beat_the_banner(self) -> None:
+        # hwEntitySystemModel / hwDeviceEsn first; the ENTITY-MIB chassis fills
+        # what the OIDs and the banner left empty.
+        profile = BY_KEY["huawei"]
+        description = (
+            "Huawei Versatile Routing Platform Software VRP (R) software, "
+            "Version 5.170 (S5720 V200R019C10SPC500)"
+        )
+        identity = identify(
+            profile, description, {"model": "S5720-28X-SI-AC", "serial": "2102350DLE10J4000123"}, {}
+        )
+        self.assertEqual((identity.model, identity.serial), ("S5720-28X-SI-AC", "2102350DLE10J4000123"))
+        identity = identify(profile, description, {}, {"serial": "2102350DLE10J4000123"})
+        self.assertEqual((identity.model, identity.serial), ("S5720", "2102350DLE10J4000123"))
 
     def test_dlink(self) -> None:
         identity = self.identity("dlink")
@@ -485,7 +536,9 @@ class TableShapeTests(unittest.TestCase):
                 with self.subTest(f"{profile.key}.{name}"):
                     self.assertRegex(oid, r"^1\.3\.6\.1(\.\d+)+\.0$")
 
-    def test_regexes_compile_and_extractors_have_one_group(self) -> None:
+    def test_regexes_compile_and_extractors_have_a_group(self) -> None:
+        # At least one: `_extract` takes the first group that matched, so a
+        # pattern with alternatives carries one group per alternative.
         for profile in PROFILES:
             with self.subTest(profile.key):
                 if profile.description_match:
@@ -493,7 +546,7 @@ class TableShapeTests(unittest.TestCase):
                 for name in ("model_from_description", "version_from_description", "os_from_description"):
                     pattern = getattr(profile, name)
                     if pattern:
-                        self.assertEqual(re.compile(pattern).groups, 1, f"{profile.key}.{name}")
+                        self.assertGreaterEqual(re.compile(pattern).groups, 1, f"{profile.key}.{name}")
 
     def test_description_matches_do_not_cross_samples(self) -> None:
         """No profile's description_match fires on another profile's real sysDescr."""
