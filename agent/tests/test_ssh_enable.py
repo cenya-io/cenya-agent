@@ -45,7 +45,7 @@ DELL = textwrap.dedent(
         return raw.strip()
 
 
-    privileged = mode == "privileged"
+    privileged = mode in ("privileged", "privileged-asks")
     out("\r\n" + name + ("#" if privileged else ">"))
     while True:
         command = read()
@@ -65,7 +65,13 @@ DELL = textwrap.dedent(
                 else:
                     out("% Access denied\r\n")
         elif command == "show running-config":
-            if privileged:
+            if mode in ("privileged-asks", "open-asks") and privileged:
+                # A device that asks something *after* the command: whatever is
+                # typed there is echoed back, as a real one would.
+                out("Password:")
+                typed = read()
+                out("\r\n" + ("LEAKED " + typed if typed else "nothing typed") + "\r\n")
+            elif privileged:
                 out("hostname PLANTA-BAJA-SW\r\nvlan database\r\nvlan 10,20\r\nexit\r\n")
             else:
                 out("show running-config : Command Is Not Authorized\r\n")
@@ -146,6 +152,17 @@ class EnableInASessionTests(unittest.TestCase):
         answer = self.capture("user", enable=False)
 
         self.assertTrue(collector.rejected_by_cli(sshshell.command_output(answer.output, "show running-config")))
+
+    def test_the_account_password_never_answers_a_later_prompt(self) -> None:
+        """A «Password:» after the capture command is the device asking for
+        something else. The login password must not go there: it would be
+        echoed and end up inside the stored copy (seen in review, 09-10-2026,
+        when a privileged prompt marked `enable` as sent without sending it).
+        """
+        for mode in ("privileged-asks", "open-asks"):
+            answer = self.capture(mode)
+            self.assertNotIn(SECRET, answer.output, mode)
+            self.assertNotIn("LEAKED", answer.output, mode)
 
     def test_a_vrp_prompt_is_not_user_mode(self) -> None:
         self.assertFalse(sshshell.unprivileged("Info: hello\n<SW-Huawei-01>"))

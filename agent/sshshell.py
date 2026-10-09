@@ -245,7 +245,8 @@ def _session(
     sent_user = False
     sent_password = False
     rejected = False
-    enable_sent = False
+    enable_checked = False  # the first prompt was read and `enable` decided
+    enable_pending = False  # `enable` was sent and its prompt not seen yet
     enable_answers = 0
     acted_at = 0  # length of the text when we last answered something
     last_length = 0
@@ -283,9 +284,13 @@ def _session(
                 if not send(secret):
                     break
                 sent_password, acted_at = True, len(current)
-            elif fresh and settled and enable_sent and PASSWORD_RE.search(last_line):
-                # The enable password: the login's own the first time, an empty
-                # Enter after that (wrong: give up and stay unprivileged).
+            elif fresh and settled and enable_pending and PASSWORD_RE.search(last_line):
+                # The enable password, only between sending `enable` and its
+                # prompt: the login's own the first time, an empty Enter after
+                # that (wrong: give up and stay unprivileged). Any other
+                # «Password:» in the session is the device asking for
+                # something else, and the account's password never goes there
+                # (it would end up inside the stored copy).
                 if enable_answers >= ENABLE_PASSWORD_TRIES:
                     break
                 if not send(secret if enable_answers == 0 else ""):
@@ -293,12 +298,13 @@ def _session(
                 enable_answers, acted_at = enable_answers + 1, len(current)
             elif fresh and settled and PROMPT_RE.search(current[-300:]):
                 logged_in = True
-                if enable and not enable_sent:
-                    enable_sent = True
+                enable_pending = False
+                if enable and not enable_checked:
+                    enable_checked = True
                     if unprivileged(current):
                         if not send("enable"):
                             break
-                        acted_at = len(current)
+                        enable_pending, acted_at = True, len(current)
                         continue
                 if not pending:
                     break
