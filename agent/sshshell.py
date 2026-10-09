@@ -60,8 +60,29 @@ PAGING_OFF = (
     "disable clipaging",  # Extreme EXOS
     "skip-page-display",  # Ruckus ICX / Brocade FastIron (privileged mode)
     "set terminal length 0",  # Ubiquiti EdgeOS (Vyatta op mode)
+    "terminal pager 0",  # Cisco ASA
+    "set clienv rows 0",  # Check Point Gaia
+    "no cli pager session",  # SonicWall SonicOS
+    # PAN-OS: paging off and the «set» output format, which is what the copy
+    # diffs well (the default format is a brace tree).
+    "set cli pager off",
+    "set cli config-output-format set",
 )
-IDENTIFY = (*PAGING_OFF, "show version", "display version", "show system")
+#: Who it is, asked in every dialect the session may speak. Each line costs
+#: nothing but a «unknown command» on the devices that do not speak it:
+#: `show system info` (PAN-OS), `show system-info` (TP-Link JetStream),
+#: `show switch` (D-Link), `show sysinfo` (WatchGuard), `sysinfo` (LANCOM).
+IDENTIFY = (
+    *PAGING_OFF,
+    "show version",
+    "display version",
+    "show system",
+    "show system info",
+    "show system-info",
+    "show switch",
+    "show sysinfo",
+    "sysinfo",
+)
 
 #: Answers to a second or third «Password:» after `enable`: an empty Enter
 #: gives up on that try. A Cisco asks three times before «% Bad secrets».

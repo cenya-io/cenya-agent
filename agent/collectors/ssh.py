@@ -114,6 +114,12 @@ _LINUX_SECTIONS: tuple[tuple[str, str], ...] = (
     # it apart (see `_is_edgeos`).
     ("vyatta", "test -x /opt/vyatta/bin/vyatta-op-cmd-wrapper && echo yes"),
     ("ubnt", "cat /etc/version 2>/dev/null"),
+    # The firewalls and routers that are a Unix underneath and keep their
+    # configuration in one file: pfSense says so in /etc/platform, OPNsense
+    # has its own version command, OpenWrt its release file.
+    ("platform", "cat /etc/platform 2>/dev/null"),
+    ("opnsense", "opnsense-version 2>/dev/null"),
+    ("openwrt", "cat /etc/openwrt_release 2>/dev/null"),
 )
 
 LINUX_COMMAND = "; ".join(f"echo {MARK}{name}; {command}" for name, command in _LINUX_SECTIONS)
@@ -179,17 +185,43 @@ def parse_linux(output: str) -> dict[str, Any]:
         # Contestó, pero no a esto. Que lo intente la familia siguiente.
         return {}
     edgeos = _is_edgeos(uname, sections)
+    unix_family, unix_description, unix_vendor = _unix_appliance(sections)
+    if unix_family:
+        description = unix_description or description
     return {
-        # Only set for EdgeOS; every other Linux keeps the family of the try.
+        # Only set for EdgeOS and the Unix appliances; every other Linux keeps
+        # the family of the try.
         **({"family": "edgeos"} if edgeos else {}),
+        **({"family": unix_family} if unix_family else {}),
         "hostname": hostname,
         "description": description,
         "os": description or uname,
         "interfaces": interfaces,
-        "manufacturer": _first_line(sections.get("vendor")) or ("Ubiquiti" if edgeos else ""),
+        "manufacturer": _first_line(sections.get("vendor")) or ("Ubiquiti" if edgeos else unix_vendor),
         "model": _first_line(sections.get("model")),
         "serial": _first_line(sections.get("serial")),
     }
+
+
+def _unix_appliance(sections: dict[str, list[str]]) -> tuple[str, str, str]:
+    """pfSense, OPNsense or OpenWrt, from the clues `_LINUX_SECTIONS` asks for.
+
+    ``(family, description, vendor)``, all empty for a plain Linux. Each one
+    keeps its whole configuration in one file (or in `uci`), which is what
+    the copy reads: see `CAPTURE_COMMANDS`.
+    """
+    platform = " ".join(sections.get("platform") or []).strip()
+    if platform.lower() == "pfsense":
+        version = _first_line(sections.get("ubnt"))  # /etc/version: «2.7.2-RELEASE»
+        return "pfsense", f"pfSense {version}".strip(), "Netgate"
+    opnsense = _first_line(sections.get("opnsense"))
+    if "opnsense" in opnsense.lower():
+        return "opnsense", opnsense, "OPNsense"
+    openwrt = "\n".join(sections.get("openwrt") or [])
+    if "openwrt" in openwrt.lower():
+        release = re.search(r"DISTRIB_DESCRIPTION='([^']+)'", openwrt)
+        return "openwrt", release.group(1) if release else "OpenWrt", ""
+    return "", "", ""
 
 
 def _is_edgeos(uname: str, sections: dict[str, list[str]]) -> bool:
@@ -225,6 +257,66 @@ _CISCO_BANNER_RE = re.compile(r"^(Cisco IOS.*|.*Software.*Version.*)$", re.MULTI
 #: «IOS» as a whole word: a Huawei prints «BIOS Version» and was signed as a
 #: Cisco by the plain substring (08-10-2026).
 _CISCO_MARK_RE = re.compile(r"\bCisco\b|\bIOS\b")
+
+
+_ASA_HOST_RE = re.compile(r"^(\S+) up \d+", re.MULTILINE)
+_ASA_SERIAL_RE = re.compile(r"^Serial Number:\s*(\S+)", re.MULTILINE)
+_ASA_HARDWARE_RE = re.compile(r"^Hardware:\s*([^,\n]+)", re.MULTILINE)
+_ASA_VERSION_RE = re.compile(r"Adaptive Security Appliance Software Version\s+(\S+)")
+
+
+def parse_asa(output: str) -> dict[str, Any]:
+    """Un Cisco ASA: `show version` empieza por «Cisco Adaptive Security
+    Appliance Software Version». Va antes que el IOS porque también dice
+    «Cisco», y no es un IOS: entra en modo usuario (`>`), pagina con
+    `terminal pager 0` y su copia completa es `more system:running-config`
+    (`show running-config` oculta las claves precompartidas con asteriscos).
+    Formato de la documentación pública; sin contrastar en un ASA real.
+    """
+    if "Adaptive Security Appliance" not in output:
+        return {}
+    version = _ASA_VERSION_RE.search(output)
+    hostname = _ASA_HOST_RE.search(output)
+    serial = _ASA_SERIAL_RE.search(output)
+    hardware = _ASA_HARDWARE_RE.search(output)
+    description = f"Cisco ASA {version.group(1)}" if version else "Cisco ASA"
+    return {
+        "family": "asa",
+        "hostname": hostname.group(1) if hostname else "",
+        "description": description,
+        "os": description,
+        "interfaces": [],
+        "manufacturer": "Cisco",
+        "model": hardware.group(1).strip() if hardware else "",
+        "serial": serial.group(1) if serial else "",
+    }
+
+
+_EOS_VERSION_RE = re.compile(r"^Software image version:\s*(\S+)", re.MULTILINE)
+_EOS_SERIAL_RE = re.compile(r"^Serial number:\s*(\S+)", re.MULTILINE)
+_EOS_MODEL_RE = re.compile(r"^\s*Arista\s+(\S+)", re.MULTILINE)
+
+
+def parse_eos(output: str) -> dict[str, Any]:
+    """Un Arista EOS: `show version` abre con el modelo («Arista DCS-7050…»)
+    y trae «Software image version». Mandos como el IOS (`terminal length 0`,
+    `enable`, `show running-config`). Formato de la documentación pública."""
+    if "Arista" not in output or not _EOS_VERSION_RE.search(output):
+        return {}
+    version = _EOS_VERSION_RE.search(output)
+    model = _EOS_MODEL_RE.search(output)
+    serial = _EOS_SERIAL_RE.search(output)
+    description = f"Arista EOS {version.group(1)}" if version else "Arista EOS"
+    return {
+        "family": "eos",
+        "hostname": "",
+        "description": description,
+        "os": description,
+        "interfaces": [],
+        "manufacturer": "Arista",
+        "model": model.group(1) if model else "",
+        "serial": serial.group(1) if serial else "",
+    }
 
 
 def parse_cisco(output: str) -> dict[str, Any]:
@@ -376,6 +468,95 @@ def parse_dell(output: str) -> dict[str, Any]:
     }
 
 
+_SB_HEADER_RE = re.compile(r"SW version\s+Boot version", re.IGNORECASE)
+_SB_VERSION_RE = re.compile(r"^\s*Version:\s*(\d[\w.]*)|^\s*\d+\s+(\d[\w.]*)\s+\S+\s+\S+\s*$", re.MULTILINE)
+
+
+def parse_ciscosb(output: str) -> dict[str, Any]:
+    """Un Cisco Small Business (SG/SF/SX 200-550, CBS): `show version` es una
+    tabla corta con «SW version» y «Boot version» y, a menudo, sin la palabra
+    Cisco. Es la CLI que Marvell vende a varios: un Linksys SRW o un Dell
+    PowerConnect 28xx-55xx contestan igual (el Dell, si se nombra, ya es
+    `parse_dell`). Mandos: `terminal datadump`, `enable`, `show running-config`
+    y `show startup-config`. Formato de foros públicos; sin contrastar.
+    """
+    if not _SB_HEADER_RE.search(output):
+        return {}
+    found = _SB_VERSION_RE.search(output)
+    version = (found.group(1) or found.group(2)) if found else ""
+    description = (f"Cisco Small Business {version}" if "Cisco" in output else f"SW version {version}").strip()
+    return {
+        "family": "ciscosb",
+        "hostname": "",
+        "description": description,
+        "os": description,
+        "interfaces": [],
+        "manufacturer": "Cisco" if "Cisco" in output else "",
+        "model": "",
+        "serial": "",
+    }
+
+
+_ZYXEL_MARK_RE = re.compile(r"ZyNOS|Zyxel|ZyXEL|ZyWALL|\bZLD\b")
+_ZYXEL_FW_RE = re.compile(r"ZyNOS F/W Version\s*:?\s*(\S+)", re.IGNORECASE)
+_ZYXEL_MODEL_RE = re.compile(r"Product Model\s*:?\s*(\S+)", re.IGNORECASE)
+_ZYXEL_SERIAL_RE = re.compile(r"Serial Number\s*:?\s*(\S+)", re.IGNORECASE)
+
+
+def parse_zyxel(output: str) -> dict[str, Any]:
+    """Un Zyxel: los switches GS/XGS (ZyNOS) y los cortafuegos USG/ZyWALL
+    (ZLD) se firman en `show version`. Los dos copian con `show running-config`;
+    el switch entra en modo usuario y necesita `enable`. Formato de foros
+    públicos; sin contrastar en un equipo real.
+    """
+    if not _ZYXEL_MARK_RE.search(output):
+        return {}
+    firmware = _ZYXEL_FW_RE.search(output)
+    model = _ZYXEL_MODEL_RE.search(output)
+    serial = _ZYXEL_SERIAL_RE.search(output)
+    description = f"ZyNOS {firmware.group(1)}" if firmware else ("Zyxel ZLD" if "ZLD" in output or "ZyWALL" in output else "Zyxel")
+    return {
+        "family": "zyxel",
+        "hostname": "",
+        "description": description,
+        "os": description,
+        "interfaces": [],
+        "manufacturer": "Zyxel",
+        "model": model.group(1) if model else "",
+        "serial": serial.group(1) if serial else "",
+    }
+
+
+_SONICOS_FW_RE = re.compile(r'^firmware-version\s+"([^"]+)"', re.MULTILINE)
+_SONICOS_MODEL_RE = re.compile(r'^model\s+"([^"]+)"', re.MULTILINE)
+_SONICOS_SERIAL_RE = re.compile(r'^serial-number\s+"?([0-9A-Fa-f]+)"?', re.MULTILINE)
+
+
+def parse_sonicos(output: str) -> dict[str, Any]:
+    """Un SonicWall SonicOS (6.5 y 7): `show version` con valores entre
+    comillas. Copia con `show current-config`, paginación `no cli pager
+    session`. Si el equipo pide aceptar una política al entrar, la sesión no
+    la contesta y la copia no sale: quitar ese aviso para el usuario del
+    agente. Formato de la documentación; sin contrastar.
+    """
+    if "SonicOS" not in output and not _SONICOS_FW_RE.search(output):
+        return {}
+    firmware = _SONICOS_FW_RE.search(output)
+    model = _SONICOS_MODEL_RE.search(output)
+    serial = _SONICOS_SERIAL_RE.search(output)
+    description = firmware.group(1) if firmware else "SonicOS"
+    return {
+        "family": "sonicos",
+        "hostname": "",
+        "description": description,
+        "os": description,
+        "interfaces": [],
+        "manufacturer": "SonicWall",
+        "model": model.group(1) if model else "",
+        "serial": serial.group(1) if serial else "",
+    }
+
+
 _EXOS_IMAGE_RE = re.compile(r"^\s*Image\s*:\s*(ExtremeXOS.*?)\s*$", re.MULTILINE)
 _EXOS_SWITCH_RE = re.compile(r"^\s*Switch\s*:\s*(\S+)\s+(\S+)", re.MULTILINE)
 
@@ -517,6 +698,9 @@ def parse_show_version(output: str) -> dict[str, Any]:
     sus firmas son estrechas y, así, no pueden quitarle un equipo a nadie.
     """
     for parse in (
+        # Before the IOS: an ASA and an Arista also say «Cisco» or look like it.
+        parse_asa,
+        parse_eos,
         parse_cisco,
         parse_junos,
         parse_aruba,
@@ -525,11 +709,184 @@ def parse_show_version(output: str) -> dict[str, Any]:
         parse_icx,
         parse_awplus,
         parse_edgeos,
+        parse_zyxel,
+        parse_sonicos,
+        parse_ciscosb,
     ):
         data = parse(output)
         if data:
             return data
     return {}
+
+
+# --- The ones that only answer inside a session, each to its own command -----------
+
+
+_PANOS_FIELD_RE = re.compile(r"^\s*(hostname|model|serial|sw-version):\s*(\S+)", re.MULTILINE)
+
+
+def parse_panos(output: str) -> dict[str, Any]:
+    """Un Palo Alto PAN-OS: `show system info` con «sw-version:» y «model:».
+    Copia con `show config running` en formato `set` (lo pone la sesión:
+    `sshshell.PAGING_OFF`). Formato de la documentación oficial."""
+    fields = {key: value for key, value in _PANOS_FIELD_RE.findall(output)}
+    if "sw-version" not in fields or "model" not in fields:
+        return {}
+    description = f"PAN-OS {fields['sw-version']}"
+    return {
+        "family": "panos",
+        "hostname": fields.get("hostname", ""),
+        "description": description,
+        "os": description,
+        "interfaces": [],
+        "manufacturer": "Palo Alto Networks",
+        "model": fields["model"],
+        "serial": fields.get("serial", ""),
+    }
+
+
+_TPLINK_MODEL_RE = re.compile(r"^\s*(?:Device Name|Hardware Version)\s*[-:]\s*(\S+)", re.MULTILINE)
+_TPLINK_FW_RE = re.compile(r"^\s*(?:Software|Firmware) Version\s*[-:]\s*(\S+)", re.MULTILINE)
+_TPLINK_SERIAL_RE = re.compile(r"^\s*Serial Number\s*[-:]\s*(\S+)", re.MULTILINE)
+
+
+def parse_tplink(output: str) -> dict[str, Any]:
+    """Un TP-Link JetStream/Omada switch: `show system-info` nombra la serie
+    (JetStream, TL-SG…, T1600G/T2600G/T3700G). `terminal length 0`, `enable` y
+    `show running-config`. Formato de la guía de CLI; sin contrastar."""
+    if not re.search(r"JetStream|\bTL-S[GLF]\d|\bT[123]\d00G|\bTP-?Link", output, re.IGNORECASE):
+        return {}
+    if "show system-info" not in output and "System Description" not in output and "Hardware Version" not in output:
+        return {}
+    model = _TPLINK_MODEL_RE.search(output)
+    firmware = _TPLINK_FW_RE.search(output)
+    serial = _TPLINK_SERIAL_RE.search(output)
+    description = f"TP-Link JetStream {firmware.group(1)}" if firmware else "TP-Link JetStream"
+    return {
+        "family": "tplink",
+        "hostname": "",
+        "description": description,
+        "os": description,
+        "interfaces": [],
+        "manufacturer": "TP-Link",
+        "model": model.group(1) if model else "",
+        "serial": serial.group(1) if serial else "",
+    }
+
+
+_DLINK_TYPE_RE = re.compile(r"^\s*Device Type\s*:\s*(\S+)", re.MULTILINE)
+_DLINK_FW_RE = re.compile(r"^\s*Firmware Version\s*:\s*(?:Build\s+)?(\S+)", re.MULTILINE)
+_DLINK_SERIAL_RE = re.compile(r"^\s*Serial Number\s*:\s*(\S+)", re.MULTILINE)
+
+
+def parse_dlink(output: str) -> dict[str, Any]:
+    """Un D-Link gestionado: `show switch` abre con «Device Type : DGS-…».
+    La CLI clásica copia con `show config current_config` y apaga la
+    paginación con `disable clipaging`; la nueva (DGS-1510, DXS-1210…) con
+    `show running-config` y `terminal length 0`. Se prueba la clásica y, si
+    la rechaza, la nueva (`CAPTURE_FALLBACKS`). Sin contrastar en un equipo."""
+    model = _DLINK_TYPE_RE.search(output)
+    if not model or not re.match(r"D[GXE]S-", model.group(1)):
+        return {}
+    firmware = _DLINK_FW_RE.search(output)
+    serial = _DLINK_SERIAL_RE.search(output)
+    description = f"D-Link {model.group(1)} {firmware.group(1)}" if firmware else f"D-Link {model.group(1)}"
+    return {
+        "family": "dlink",
+        "hostname": "",
+        "description": description,
+        "os": description,
+        "interfaces": [],
+        "manufacturer": "D-Link",
+        "model": model.group(1),
+        "serial": serial.group(1) if serial else "",
+    }
+
+
+_FIREWARE_VERSION_RE = re.compile(r"Fireware(?: OS)? Version\s*:?\s*(\S+)", re.IGNORECASE)
+_FIREWARE_MODEL_RE = re.compile(r"^\s*(?:Model|Product Model)\s*:\s*(\S.*?)\s*$", re.MULTILINE | re.IGNORECASE)
+_FIREWARE_SERIAL_RE = re.compile(r"^\s*Serial Number\s*:\s*(\S+)", re.MULTILINE | re.IGNORECASE)
+
+
+def parse_fireware(output: str) -> dict[str, Any]:
+    """Un WatchGuard Firebox: `show sysinfo` nombra Fireware. La copia es
+    `export config to console` (Fireware 12 y posteriores; sale en XML). El
+    aviso de entrada («logon disclaimer») hay que apagarlo para el usuario del
+    agente: la sesión no lo contesta. Formato de la referencia de CLI; sin
+    contrastar en un Firebox real."""
+    if "Fireware" not in output:
+        return {}
+    version = _FIREWARE_VERSION_RE.search(output)
+    model = _FIREWARE_MODEL_RE.search(output)
+    serial = _FIREWARE_SERIAL_RE.search(output)
+    description = f"Fireware {version.group(1)}" if version else "Fireware"
+    return {
+        "family": "fireware",
+        "hostname": "",
+        "description": description,
+        "os": description,
+        "interfaces": [],
+        "manufacturer": "WatchGuard",
+        "model": model.group(1) if model else "",
+        "serial": serial.group(1) if serial else "",
+    }
+
+
+_LANCOM_DEVICE_RE = re.compile(r"^\s*DEVICE:\s*(\S.*?)\s*$", re.MULTILINE)
+_LANCOM_VERSION_RE = re.compile(r"^\s*VERSION:\s*(\S.*?)\s*$", re.MULTILINE)
+_LANCOM_SERIAL_RE = re.compile(r"^\s*SERIAL-NUMBER:\s*(\S+)", re.MULTILINE)
+
+
+def parse_lancom(output: str) -> dict[str, Any]:
+    """Un LANCOM (LCOS): `sysinfo` contesta «DEVICE: LANCOM …». La copia es
+    `readscript`, el guion que reconstruye la configuración. Formato de la
+    documentación de LCOS; sin contrastar."""
+    device = _LANCOM_DEVICE_RE.search(output)
+    if not device or "LANCOM" not in device.group(1).upper():
+        return {}
+    version = _LANCOM_VERSION_RE.search(output)
+    serial = _LANCOM_SERIAL_RE.search(output)
+    description = f"LCOS {version.group(1)}" if version else "LCOS"
+    return {
+        "family": "lancom",
+        "hostname": "",
+        "description": description,
+        "os": description,
+        "interfaces": [],
+        "manufacturer": "LANCOM",
+        "model": device.group(1).replace("LANCOM", "").strip(),
+        "serial": serial.group(1) if serial else "",
+    }
+
+
+_AOS_DESCRIPTION_RE = re.compile(r"^\s*Description:\s*(\S.*?)\s*,?\s*$", re.MULTILINE)
+_AOS_NAME_RE = re.compile(r"^\s*Name:\s*([\w.\-]+)", re.MULTILINE)
+
+
+def parse_aos(output: str) -> dict[str, Any]:
+    """Un Alcatel-Lucent Enterprise OmniSwitch (AOS 6 y 8): `show system`
+    describe «Alcatel-Lucent Enterprise OS6860…». La copia es `show
+    configuration snapshot`, que reconstruye la configuración en marcha. Sin
+    contrastar en un equipo real."""
+    if "Alcatel" not in output:
+        return {}
+    description = _AOS_DESCRIPTION_RE.search(output)
+    name = _AOS_NAME_RE.search(output)
+    model = re.search(r"\b(OS\d{4}[\w-]*)", description.group(1) if description else output)
+    text = description.group(1) if description else "Alcatel-Lucent OmniSwitch"
+    return {
+        "family": "aos",
+        "hostname": name.group(1) if name else "",
+        "description": text[:200],
+        "os": text[:200],
+        "interfaces": [],
+        "manufacturer": "Alcatel-Lucent Enterprise",
+        "model": model.group(1) if model else "",
+        "serial": "",
+    }
+
+
+SESSION_ONLY_PARSERS = (parse_panos, parse_tplink, parse_dlink, parse_fireware, parse_lancom, parse_aos)
 
 
 # --- Los que comparten «display version» ------------------------------------------
@@ -658,7 +1015,9 @@ CAPTURE_COMMANDS: dict[str, str] = {
     "dell": "show running-config",
     "huawei": "display current-configuration",
     "comware": "display current-configuration",
-    "fortinet": "show full-configuration",
+    # `| grep .` keeps the FortiGate from paging the answer («--More--»)
+    # even in a console set to page; it changes nothing else.
+    "fortinet": "show full-configuration | grep .",
     "gaia": "show configuration",
     # EXOS pages unless `disable clipaging` was sent; the exec channel has no
     # tty and the session fallback switches paging off (`sshshell.PAGING_OFF`).
@@ -669,6 +1028,34 @@ CAPTURE_COMMANDS: dict[str, str] = {
     # An exec channel is a plain shell where `show` does not exist: the Vyatta
     # op-mode wrapper is what runs it (also fine inside an interactive session).
     "edgeos": "/opt/vyatta/bin/vyatta-op-cmd-wrapper show configuration",
+    # --- Added 09-10-2026 (analisis-captura-configuracion-2026-10-09.md) ---
+    # The full copy, pre-shared keys included; `show running-config` stars them out.
+    "asa": "more system:running-config",
+    "eos": "show running-config",
+    "ciscosb": "show running-config",
+    # `set` format comes from the session setup (`sshshell.PAGING_OFF`).
+    "panos": "show config running",
+    "sonicos": "show current-config",
+    "zyxel": "show running-config",
+    "tplink": "show running-config",
+    # Classic D-Link CLI; the new one is in `CAPTURE_FALLBACKS`.
+    "dlink": "show config current_config",
+    "fireware": "export config to console",
+    "lancom": "readscript",
+    "aos": "show configuration snapshot",
+    # The whole configuration is one file. The SSH user needs a shell: on
+    # pfSense the «admin» account gets the menu instead.
+    "pfsense": "cat /cf/conf/config.xml",
+    "opnsense": "cat /conf/config.xml",
+    "openwrt": "uci export",
+}
+
+#: What to ask when the capture command is refused, before deciding the
+#: account lacks the privilege: the same family, another dialect.
+CAPTURE_FALLBACKS: dict[str, tuple[str, ...]] = {
+    "dlink": ("show running-config",),
+    # OS10 names it in full; the abbreviation works on most, not on all.
+    "dell": ("show running-configuration",),
 }
 
 #: La orden que vuelca la configuración **guardada** --la que el equipo carga al
@@ -684,6 +1071,10 @@ SAVED_CONFIG_COMMANDS: dict[str, str] = {
     "dell": "show startup-config",
     "huawei": "display saved-configuration",
     "comware": "display saved-configuration",
+    "asa": "show startup-config",
+    "eos": "show startup-config",
+    "ciscosb": "show startup-config",
+    "zyxel": "show config",
 }
 
 #: Techo por copia. El mismo número que `core.discovery.MAX_CONFIG_BYTES`: el
@@ -727,7 +1118,9 @@ _REJECTION_MAX_LINES = 5
 #: (``SW#``) reached with `enable`, where reading the configuration needs the
 #: second. A capture inside a session asks for `enable` when the prompt says
 #: user mode (`sshshell.unprivileged`).
-ENABLE_FAMILIES: frozenset[str] = frozenset({"cisco", "dell", "aruba", "icx", "awplus"})
+ENABLE_FAMILIES: frozenset[str] = frozenset(
+    {"cisco", "dell", "aruba", "icx", "awplus", "asa", "eos", "ciscosb", "zyxel", "tplink"}
+)
 
 
 #: The extra order that lists the units of a stack, for the families whose
@@ -849,7 +1242,7 @@ def parse_session(output: str) -> dict[str, Any]:
     hostname a vendor parser left empty.
     """
     name = sshshell.prompt_name(output)
-    for parse in (parse_display_version, parse_show_version):
+    for parse in (parse_display_version, parse_show_version, *SESSION_ONLY_PARSERS):
         data = parse(output)
         if data:
             return {**data, "hostname": data.get("hostname") or name}
@@ -1110,6 +1503,15 @@ def fetch_configs(
     running = fetch_config(host, credential, command, logins, enable=enable)
     if not running.strip():
         return {}
+    if rejected_by_cli(running):
+        for other in CAPTURE_FALLBACKS.get(family, ()):
+            # Another dialect of the same family (a D-Link with the new CLI,
+            # an OS10 that wants the whole word): worth one more try before
+            # asking who it is again.
+            attempt = fetch_config(host, credential, other, logins, enable=enable)
+            if attempt.strip() and not rejected_by_cli(attempt):
+                running = attempt
+                break
     if rejected_by_cli(running) and reidentify:
         data, _credential = interrogate(host, [credential], logins)
         actual = str((data or {}).get("family") or "")
