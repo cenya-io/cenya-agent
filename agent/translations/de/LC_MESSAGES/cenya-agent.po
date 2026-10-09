@@ -1,11 +1,11 @@
 # German translation of the NetInventory agent (tray icon).
 # Terms: locale/GLOSARIO.md. Regenerate: see agent/i18n.py.
-#
+# 
 msgid ""
 msgstr ""
 "Project-Id-Version: cenya-agent 0.9.1\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-04 09:51+0000\n"
+"POT-Creation-Date: 2026-10-09 14:05+0200\n"
 "PO-Revision-Date: 2026-09-14 17:00+0200\n"
 "Last-Translator: NetInventory\n"
 "Language-Team: German\n"
@@ -1164,7 +1164,7 @@ msgstr "Der Dienst ist angehalten, und von seinem letzten Lauf gibt es keine Dat
 msgid "Servicio no instalado"
 msgstr "Dienst nicht installiert"
 
-#: agent/status.py:341 agent/app/bridge.py:733
+#: agent/status.py:341 agent/app/bridge.py:726
 msgid "El servicio del agente no está instalado en este equipo."
 msgstr "Der Agent-Dienst ist auf diesem Computer nicht installiert."
 
@@ -1298,86 +1298,91 @@ msgstr ""
 "Das Symbol von Cenya Agent konnte nicht starten:\n"
 "%(error)s"
 
-#: agent/update.py:489
+#: agent/update.py:511
 msgid "la firma del manifiesto no es de ninguna clave conocida"
 msgstr "die Signatur des Manifests stammt von keinem bekannten Schlüssel"
 
-#: agent/update.py:490
+#: agent/update.py:512
 msgid "el fichero descargado no coincide con el manifiesto firmado; se ha borrado"
 msgstr "die heruntergeladene Datei stimmt nicht mit dem signierten Manifest überein; sie wurde gelöscht"
 
-#: agent/update.py:491
+#: agent/update.py:513
 msgid "el manifiesto no es válido"
 msgstr "das Manifest ist ungültig"
 
-#: agent/update.py:492
+#: agent/update.py:514
 msgid "este agente no tiene ninguna clave de publicación configurada"
 msgstr "für diesen Agenten ist kein Veröffentlichungsschlüssel konfiguriert"
 
-#: agent/update.py:493
+#: agent/update.py:515
 msgid "falta la librería cryptography para verificar la firma"
 msgstr "zur Prüfung der Signatur fehlt die Bibliothek cryptography"
 
-#: agent/update.py:494
+#: agent/update.py:516
 msgid "no es más nueva que la instalada"
 msgstr "sie ist nicht neuer als die installierte"
 
-#: agent/update.py:495
+#: agent/update.py:517
 msgid "el manifiesto es de otra versión"
 msgstr "das Manifest gehört zu einer anderen Version"
 
-#: agent/update.py:496
+#: agent/update.py:518
 msgid "no se pudo descargar"
 msgstr "sie konnte nicht heruntergeladen werden"
 
-#: agent/update.py:497
+#: agent/update.py:519
 msgid "el instalador no llegó a sustituir el agente"
 msgstr "das Installationsprogramm hat den Agenten nicht ersetzt"
 
-#: agent/update.py:498
+#: agent/update.py:520
 msgid "no consiguió conectar y se volvió a la versión anterior"
 msgstr "sie konnte keine Verbindung herstellen, die vorherige Version wurde wiederhergestellt"
 
-#: agent/update.py:499
+#: agent/update.py:521
 msgid "este sistema no se actualiza solo"
 msgstr "dieses System aktualisiert sich nicht selbst"
 
-#: agent/update.py:609
+#: agent/update.py:631
 #, python-format
 msgid "[agente] Error inesperado al actualizar: %(error)s"
 msgstr "[Agent] Unerwarteter Fehler beim Update: %(error)s"
 
-#: agent/update.py:645
+#: agent/update.py:667
+#, python-format
+msgid "[agente] El instalador de la versión %(version)s no llegó a sustituir el agente; se intentará una vez más."
+msgstr "[Agent] Das Installationsprogramm der Version %(version)s hat den Agenten nicht ersetzt; es wird noch einmal versucht."
+
+#: agent/update.py:684
 #, python-format
 msgid "[agente] La versión %(version)s no arrancó bien y se volvió a la anterior: no se intentará de nuevo."
 msgstr "[Agent] Version %(version)s ist nicht richtig gestartet, die vorherige wurde wiederhergestellt: Sie wird nicht erneut versucht."
 
-#: agent/update.py:699
+#: agent/update.py:738
 #, python-format
 msgid "[agente] Hay una versión nueva del agente (%(version)s), pero la actualización automática está apagada en esta máquina."
 msgstr "[Agent] Eine neue Agentenversion ist verfügbar (%(version)s), aber automatische Updates sind auf diesem Rechner ausgeschaltet."
 
-#: agent/update.py:731
+#: agent/update.py:770
 #, python-format
 msgid "[agente] Descargando la versión %(version)s del agente."
 msgstr "[Agent] Agentenversion %(version)s wird heruntergeladen."
 
-#: agent/update.py:741
+#: agent/update.py:780
 #, python-format
 msgid "[agente] Versión %(version)s verificada: se instalará en cuanto no haya ninguna tarea en curso."
 msgstr "[Agent] Version %(version)s geprüft: Sie wird installiert, sobald keine Aufgabe mehr läuft."
 
-#: agent/update.py:759
+#: agent/update.py:798
 #, python-format
 msgid "[agente] Instalando la versión %(version)s; el servicio se reiniciará."
 msgstr "[Agent] Version %(version)s wird installiert; der Dienst startet neu."
 
-#: agent/update.py:870
+#: agent/update.py:909
 #, python-format
 msgid "[agente] No se actualiza a la versión %(version)s: %(reason)s."
 msgstr "[Agent] Kein Update auf Version %(version)s: %(reason)s."
 
-#: agent/update.py:1042
+#: agent/update.py:1081
 msgid "Uso: cenya-agent update apply-request <carpeta de estado>"
 msgstr "Verwendung: cenya-agent update apply-request <Statusordner>"
 
@@ -1422,36 +1427,36 @@ msgstr "Der Registrierungsschlüssel des Dienstes ist jetzt nur für SYSTEM und 
 msgid "Estado del agente en %(path)s (lo escribe el servicio; lo lee el icono de bandeja)."
 msgstr "Agentenstatus in %(path)s (vom Dienst geschrieben, vom Symbol im Infobereich gelesen)."
 
-#: agent/app/bridge.py:301
+#: agent/app/bridge.py:302
 msgid "El registro solo lo ven los administradores: abre Cenya Agent como administrador para verlo."
 msgstr "Das Protokoll sehen nur Administratoren: Öffnen Sie Cenya Agent als Administrator, um es zu sehen."
 
-#: agent/app/bridge.py:712
+#: agent/app/bridge.py:711
 msgid "Eso no es una dirección IP."
 msgstr "Das ist keine IP-Adresse."
 
-#: agent/app/bridge.py:718
+#: agent/app/bridge.py:715
 msgid "La dirección del proxy tiene que empezar por http:// o https://."
 msgstr "Die Proxy-Adresse muss mit http:// oder https:// beginnen."
 
-#: agent/app/bridge.py:724 agent/app/view.py:712
+#: agent/app/bridge.py:719 agent/app/view.py:712
 #, python-format
 msgid "Guardado en %(path)s"
 msgstr "Gespeichert unter %(path)s"
 
-#: agent/app/bridge.py:731
+#: agent/app/bridge.py:724
 msgid "Windows no ha dejado hacerlo: hace falta un administrador."
 msgstr "Windows hat es nicht erlaubt: Ein Administrator ist erforderlich."
 
-#: agent/app/bridge.py:735
+#: agent/app/bridge.py:728
 msgid "El servicio no se ha detenido a tiempo. Vuelve a intentarlo en un momento."
 msgstr "Der Dienst wurde nicht rechtzeitig beendet. Versuchen Sie es gleich erneut."
 
-#: agent/app/bridge.py:737 agent/app/view.py:260 agent/app/view.py:956
+#: agent/app/bridge.py:730 agent/app/view.py:260 agent/app/view.py:956
 msgid "Con el canal de desarrollo, el servicio de Windows no se toca desde aquí."
 msgstr "Mit dem Entwicklungskanal wird der Windows-Dienst von hier aus nicht angefasst."
 
-#: agent/app/bridge.py:738
+#: agent/app/bridge.py:731
 #, python-format
 msgid "Windows no ha podido hacerlo: %(detail)s"
 msgstr "Windows konnte es nicht ausführen: %(detail)s"
