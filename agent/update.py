@@ -103,6 +103,9 @@ REQUEST_FILE = "request.json"
 RESULT_FILE = "result.json"
 HEALTHY_PREFIX = "healthy-"
 FAILED_PREFIX = "failed-"
+#: Una versión cuyo instalador no llegó a sustituir nada se reintenta una vez
+#: (casi siempre un fichero en uso en ese instante); esta marca dice que ya se hizo.
+RETRIED_PREFIX = "retried-"
 PARTIAL_PREFIX = ".dl-"
 
 #: Las publicaciones de este repositorio. `CENYA_RELEASES_URL` lo cambia (la
@@ -290,6 +293,25 @@ def startup_state(
     if newer:
         return state(STATE_FAILED, newer[-1], UPDATE_FAILED), None
     return state(STATE_IDLE), None
+
+
+def should_retry_install(
+    *, current: str, pending: Mapping[str, Any] | None, failed: Iterable[str], retried: Iterable[str]
+) -> str | None:
+    """The version whose installer never replaced anything, if it deserves one more go.
+
+    The same case `startup_state` calls `install_failed`, the first time only:
+    a locked file or a service started by hand in the middle says nothing about
+    the version itself. The second failure is final, as it always was.
+    """
+    if not pending:
+        return None
+    target, origin = str(pending.get("to") or ""), str(pending.get("from") or "")
+    if target == current or origin != current or version_tuple(target) is None:
+        return None
+    if target in set(failed) or target in set(retried):
+        return None
+    return target
 
 
 def watchdog_seconds(environ: Mapping[str, str]) -> int | None:
@@ -614,12 +636,18 @@ class Updater:
         if not self.folder.is_dir():
             return
         failed: set[str] = set()
+        retried: set[str] = set()
         for item in list(self.folder.iterdir()):
             name = item.name
             if name.startswith(FAILED_PREFIX):
                 version = name[len(FAILED_PREFIX) :]
                 if is_newer(version, self.current):
                     failed.add(version)
+                    continue
+            elif name.startswith(RETRIED_PREFIX):
+                version = name[len(RETRIED_PREFIX) :]
+                if is_newer(version, self.current):
+                    retried.add(version)
                     continue
             elif name.startswith(HEALTHY_PREFIX) and name == HEALTHY_PREFIX + self.current:
                 continue
@@ -628,6 +656,17 @@ class Updater:
             # Lo demás es de una versión ya pasada o un trozo a medias: fuera.
             self._remove(item)
         pending = self._read_json(self.folder / PENDING_FILE)
+        again = should_retry_install(current=self.current, pending=pending, failed=failed, retried=retried)
+        if again:
+            # Ni «falló» ni nada que contar: el servidor sigue ofreciéndola y la
+            # siguiente vez, si vuelve a fallar, ya es definitivo.
+            self._write_marker(RETRIED_PREFIX + again)
+            (self.folder / PENDING_FILE).unlink(missing_ok=True)
+            pending = None
+            self._say_once(
+                _t("[agente] El instalador de la versión %(version)s no llegó a sustituir el agente; se intentará una vez más.")
+                % {"version": again}
+            )
         current_state, mark = startup_state(current=self.current, pending=pending, failed=failed)
         if mark:
             failed.add(mark)

@@ -569,6 +569,23 @@ class LifecycleTests(UpdaterTestCase):
         self.assertIsNone(updater._thread)
         self.assertEqual(self.github.paths(), [])
 
+    def test_an_installer_that_replaced_nothing_gets_one_more_try_and_then_it_is_final(self) -> None:
+        self.updates().mkdir(parents=True)
+        (self.updates() / "pending.json").write_text(json.dumps({"from": self.current, "to": self.target}))
+
+        first = self.updater()
+        first.startup()
+        self.assertEqual(first.state()["state"], "idle")
+        self.assertTrue((self.updates() / f"retried-{self.target}").exists())
+        self.assertFalse((self.updates() / f"failed-{self.target}").exists())
+        self.assertFalse((self.updates() / "pending.json").exists())
+
+        (self.updates() / "pending.json").write_text(json.dumps({"from": self.current, "to": self.target}))
+        second = self.updater()
+        second.startup()
+        self.assertEqual(second.state()["error"], update.INSTALL_FAILED)
+        self.assertTrue((self.updates() / f"failed-{self.target}").exists())
+
     def test_leftovers_of_older_versions_are_cleaned_at_start(self) -> None:
         self.updates().mkdir(parents=True)
         for name in ("cenya-agent-0.10.0.exe", ".dl-abc.part", "failed-0.10.5", "healthy-0.10.0",
