@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Collection
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -35,6 +35,38 @@ SSH_PORT = 22
 #: Cuántos equipos a la vez. Bajo a propósito: cada uno es un proceso `ssh`, y
 #: cincuenta procesos simultáneos en el servidor de una pyme se notan.
 WORKERS = 10
+#: Tope de todo el paso, no de un equipo: cada orden ya tiene el suyo, pero un
+#: hilo que no vuelve (un proceso `ssh` que no muere) dejaba la tarea en su
+#: 95 % para siempre y bloqueaba las demás. Pasado el tope, lo que falta se
+#: abandona y se anota; lo ya recogido se conserva.
+STEP_DEADLINE_SECONDS = 15 * 60
+
+
+def map_with_deadline(
+    workers: int, fn: Callable[[Any], Any], items: list, default: Any, errors: list, seconds: float | None = None
+) -> list:
+    """`pool.map` con tope global: lo que no acaba a tiempo devuelve `default`."""
+    pool = ThreadPoolExecutor(max_workers=workers)
+    futures = [pool.submit(fn, item) for item in items]
+    done, pending = wait(futures, timeout=STEP_DEADLINE_SECONDS if seconds is None else seconds)
+    # Sin esperar a los atascados: su hilo se queda solo, pero el paso sigue.
+    pool.shutdown(wait=False, cancel_futures=True)
+    if pending:
+        errors.append(
+            collector_note(
+                "ssh",
+                "step_timeout",
+                "se abandonaron %d equipos que no contestaron a tiempo" % len(pending),
+                count=len(pending),
+            )
+        )
+    results = []
+    for future in futures:
+        try:
+            results.append(future.result() if future in done and not future.cancelled() else default)
+        except Exception:  # a visit that raised must not sink the step
+            results.append(default)
+    return results
 
 #: La marca que separa las secciones de la salida de Linux. Sin `#` delante: en
 #: un shell, una palabra que empieza por almohadilla es un comentario y el
@@ -1182,8 +1214,9 @@ class SshCollector:
             finally:
                 progress.tick()
 
-        with ThreadPoolExecutor(max_workers=tasking.workers(ctx, "login", WORKERS)) as pool:
-            answers = list(pool.map(visit, reachable))
+        answers = map_with_deadline(
+            tasking.workers(ctx, "login", WORKERS), visit, list(reachable), ({}, None), errors
+        )
 
         # En la tarea `inventory` se interroga pero no se copia: la copia es
         # de la tarea `configs`, una vez al día, con la credencial que entró hoy.
@@ -1335,8 +1368,7 @@ class SshCollector:
             finally:
                 progress.tick()
 
-        with ThreadPoolExecutor(max_workers=tasking.workers(ctx, "login", WORKERS)) as pool:
-            contents = list(pool.map(fetch, jobs))
+        contents = map_with_deadline(tasking.workers(ctx, "login", WORKERS), fetch, jobs, {}, errors)
 
         findings: list[Finding] = []
         for (ip, mac, entry, _credential, family), copies in zip(jobs, contents):
