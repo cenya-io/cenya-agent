@@ -1010,7 +1010,10 @@ class ConfigCaptureTests(unittest.TestCase):
         guardada captura también la que está en marcha."""
         from agent.collectors.ssh import CAPTURE_COMMANDS, SAVED_CONFIG_COMMANDS
 
-        self.assertEqual(set(SAVED_CONFIG_COMMANDS), {"cisco", "aruba", "dell", "huawei", "comware"})
+        self.assertEqual(
+            set(SAVED_CONFIG_COMMANDS),
+            {"cisco", "aruba", "dell", "huawei", "comware", "asa", "eos", "ciscosb", "zyxel"},
+        )
         self.assertTrue(set(SAVED_CONFIG_COMMANDS) <= set(CAPTURE_COMMANDS))
         for family, command in SAVED_CONFIG_COMMANDS.items():
             self.assertTrue(command.strip())
@@ -1216,7 +1219,10 @@ class NewFamilyCaptureTests(unittest.TestCase):
         self.assertEqual(
             set(CAPTURE_COMMANDS),
             {"cisco", "mikrotik", "aruba", "junos", "dell", "huawei", "comware", "fortinet", "gaia",
-             "exos", "icx", "awplus", "edgeos"},
+             "exos", "icx", "awplus", "edgeos",
+             # 09-10-2026: analisis-captura-configuracion-2026-10-09.md
+             "asa", "eos", "ciscosb", "panos", "sonicos", "zyxel", "tplink", "dlink", "fireware",
+             "lancom", "aos", "pfsense", "opnsense", "openwrt"},
         )
         for command in CAPTURE_COMMANDS.values():
             self.assertTrue(command.strip())
