@@ -992,10 +992,10 @@ class ConfigCaptureTests(unittest.TestCase):
 
         real = module.fetch_config
 
-        def exploding(host: str, credential: Any, command: str, logins: Any = None) -> str:
+        def exploding(host: str, credential: Any, command: str, logins: Any = None, enable: bool = False) -> str:
             if command == "show startup-config":
                 raise RuntimeError("se cayó el transporte")
-            return real(host, credential, command, logins)
+            return real(host, credential, command, logins, enable=enable)
 
         ctx = self._ctx()
         with mock.patch("agent.collectors.ssh.fetch_config", exploding):
@@ -1373,7 +1373,10 @@ class DellAndPrivilegeTests(unittest.TestCase):
     def test_a_refusal_is_no_copy_and_says_why(self) -> None:
         errors: list = []
         refusal = "              ^\n% Invalid input detected at '^' marker.\n"
-        with mock.patch.object(ssh_collector, "fetch_config", return_value=refusal):
+        # Asked again who it is, it is still a Dell: a real lack of privilege.
+        with mock.patch.object(ssh_collector, "fetch_config", return_value=refusal), mock.patch.object(
+            ssh_collector, "interrogate", return_value=({"family": "dell"}, None)
+        ):
             copies = ssh_collector.fetch_configs("10.0.0.2", mock.Mock(), "dell", errors=errors)
 
         self.assertEqual(copies, {})

@@ -705,9 +705,29 @@ _CLI_REJECTION_RE = re.compile(
     re.IGNORECASE | re.MULTILINE,
 )
 
+#: Dell OS6 echoes the command before refusing it, on the same line
+#: (``show running-config : Command Is Not Authorized``, 09-10-2026), so this
+#: one is looked for anywhere in the line, not only at its start.
+_CLI_REFUSAL_ANYWHERE_RE = re.compile(r"command (?:is )?not authori[sz]ed|insufficient privilege", re.IGNORECASE)
+
+#: What surrounds a refusal in a session without being configuration: the
+#: prompt (``<SW-Huawei-01>``, ``SW-1#``), the caret under the bad word, and a
+#: Huawei's login banner (``Info: The max number of VTY users…``, ``The current
+#: login time is…``). Set aside before counting lines: with them, a Huawei's
+#: «Unrecognized command» was nine lines long and passed for a configuration.
+_REFUSAL_SURROUNDINGS_RE = re.compile(
+    r"^(?:<[^<>]+>|\[[^\[\]]+\]|\S+[#>]|\^|info:.*|the current login time is.*)$", re.IGNORECASE
+)
+
 #: Una respuesta de rechazo son una o dos líneas. Una configuración de verdad
 #: son decenas, y así una que cite «Error:» en un banner no se confunde.
 _REJECTION_MAX_LINES = 5
+
+#: The families whose CLI has a user mode (``SW>``) and a privileged one
+#: (``SW#``) reached with `enable`, where reading the configuration needs the
+#: second. A capture inside a session asks for `enable` when the prompt says
+#: user mode (`sshshell.unprivileged`).
+ENABLE_FAMILIES: frozenset[str] = frozenset({"cisco", "dell", "aruba", "icx", "awplus"})
 
 
 #: The extra order that lists the units of a stack, for the families whose
@@ -958,6 +978,7 @@ def _session(
     host: str,
     credential: creds.Credential,
     commands: tuple[str, ...] = sshshell.IDENTIFY,
+    enable: bool = False,
 ) -> Any:
     """Una sesión interactiva (`agent.sshshell`), por el límite de credenciales si lo hay."""
 
@@ -969,6 +990,7 @@ def _session(
             port=credential.port,
             key_file=credential.key_file,
             commands=commands,
+            enable=enable,
         )
 
     if logins is None:
@@ -995,22 +1017,36 @@ def _login(logins: tasking.Logins | None, host: str, credential: creds.Credentia
 
 
 def fetch_config(
-    host: str, credential: creds.Credential, command: str, logins: tasking.Logins | None = None
+    host: str,
+    credential: creds.Credential,
+    command: str,
+    logins: tasking.Logins | None = None,
+    enable: bool = False,
 ) -> str:
     """La configuración del equipo, o "". Nunca truncada en silencio.
 
     Si la orden suelta no contesta (un Huawei, un PowerConnect: ver
     `agent.sshshell`), se pide dentro de una sesión, con la paginación apagada.
+
+    Con ``enable`` (las familias de `ENABLE_FAMILIES`), una orden suelta que el
+    equipo **rechaza** también pasa a la sesión: allí se lee el indicador y, si
+    dice modo usuario (``SW>``), se entra con `enable` antes de pedirla. Por el
+    canal suelto no hay forma de hacerlo: cada orden es una conexión nueva que
+    vuelve a empezar en modo usuario.
     """
     answer = _login(logins, host, credential, command)
     if answer is tasking.SKIPPED:
         return ""
     output = (answer.output or "") if answer.connected else ""
-    if not output.strip() and _wants_session(answer):
-        session = _session(logins, host, credential, commands=(*sshshell.PAGING_OFF, command))
+    needs_session = not output.strip() and _wants_session(answer)
+    refused_here = enable and answer.connected and rejected_by_cli(output)
+    if needs_session or refused_here:
+        session = _session(logins, host, credential, commands=(*sshshell.PAGING_OFF, command), enable=enable)
         if session is tasking.SKIPPED or not session.connected:
-            return ""
-        output = sshshell.command_output(session.output, command)
+            # A refusal stays what it was: the caller notes the missing privilege.
+            return output if refused_here else ""
+        in_session = sshshell.command_output(session.output, command)
+        output = in_session if in_session.strip() or not refused_here else output
     if len(output.encode()) > MAX_CONFIG_BYTES:
         # Una configuración de pyme cabe de sobra en 256 KB; algo mayor es
         # otra cosa (un volcado, un banner infinito) y guardar media copia
@@ -1020,9 +1056,20 @@ def fetch_config(
 
 
 def rejected_by_cli(output: str) -> bool:
-    """Si esa salida es la CLI diciendo «esa orden no existe aquí», no una copia."""
-    lines = [line for line in output.splitlines() if line.strip()]
-    return 0 < len(lines) <= _REJECTION_MAX_LINES and _CLI_REJECTION_RE.search(output) is not None
+    """Si esa salida es la CLI diciendo «esa orden no existe aquí», no una copia.
+
+    Los indicadores, el ``^`` y el banner de entrada no cuentan como líneas:
+    rodean al rechazo sin ser configuración.
+    """
+    lines = [
+        line
+        for line in output.splitlines()
+        if line.strip() and not _REFUSAL_SURROUNDINGS_RE.match(line.strip())
+    ]
+    if not 0 < len(lines) <= _REJECTION_MAX_LINES:
+        return False
+    kept = "\n".join(lines)
+    return _CLI_REJECTION_RE.search(kept) is not None or _CLI_REFUSAL_ANYWHERE_RE.search(kept) is not None
 
 
 def fetch_configs(
@@ -1031,9 +1078,19 @@ def fetch_configs(
     family: str,
     logins: tasking.Logins | None = None,
     errors: list | None = None,
+    reidentify: bool = True,
 ) -> dict[str, str]:
     """Las copias de ese equipo para el hallazgo `config`: ``config`` y, en las
     familias que la distinguen, ``saved_config``.
+
+    **Una familia equivocada se corrige aquí** (09-10-2026): la tarea `configs`
+    usa la familia que la memoria apuntó, y un Huawei apuntado como Cisco por
+    una versión antigua del agente recibía `show running-config` cada noche y
+    contestaba «Unrecognized command». Si el equipo rechaza la orden, se le
+    vuelve a preguntar quién es con la misma credencial; si es otra familia
+    con copia, se pide con la suya y el resultado lleva ``family`` con la
+    buena, para el hallazgo y para la memoria. Una sola vez: si tampoco, es
+    falta de permiso de verdad y se anota.
 
     Vacío si la que está en marcha no sale: sin ella no hay copia. La guardada
     es un extra encima: si la orden falla, vuelve vacía, pasa del tope o la CLI
@@ -1049,9 +1106,16 @@ def fetch_configs(
     command = CAPTURE_COMMANDS.get(family, "")
     if not command:
         return {}
-    running = fetch_config(host, credential, command, logins)
+    enable = family in ENABLE_FAMILIES
+    running = fetch_config(host, credential, command, logins, enable=enable)
     if not running.strip():
         return {}
+    if rejected_by_cli(running) and reidentify:
+        data, _credential = interrogate(host, [credential], logins)
+        actual = str((data or {}).get("family") or "")
+        if actual and actual != family and actual in CAPTURE_COMMANDS:
+            copies = fetch_configs(host, credential, actual, logins, errors, reidentify=False)
+            return {**copies, "family": actual} if copies else {}
     if rejected_by_cli(running):
         # The device refused the order: on Dell OS6 and Cisco that is a user
         # without privilege (level 15) to see the configuration. The refusal
@@ -1072,7 +1136,7 @@ def fetch_configs(
     if not saved_command:
         return copies
     try:
-        saved = fetch_config(host, credential, saved_command, logins)
+        saved = fetch_config(host, credential, saved_command, logins, enable=enable)
     except Exception:  # noqa: BLE001 - la guardada es un extra; nunca se lleva por delante la copia
         saved = ""
     if saved.strip() and not rejected_by_cli(saved):
@@ -1299,6 +1363,7 @@ class SshCollector:
             copies = fetch_configs(ip, credential, family, tasking.Logins(ctx, self.name, "ssh", ip, sweep_mac), errors)
             if not copies:
                 continue
+            family = copies.pop("family", family)
             findings.append(
                 Finding(
                     kind="config",
@@ -1374,6 +1439,11 @@ class SshCollector:
         for (ip, mac, entry, _credential, family), copies in zip(jobs, contents):
             if not copies:
                 continue
+            actual = copies.pop("family", family)
+            if actual != family:
+                # The memory had it wrong: next night, straight with the right one.
+                tasking.flag(ctx, ip, mac, config_family=actual)
+                family = actual
             # La misma identidad con la que el inventario presentó al equipo:
             # el servidor cuelga la copia de esa fila.
             identity_mac = str(entry.get("identity_mac") or "") or mac

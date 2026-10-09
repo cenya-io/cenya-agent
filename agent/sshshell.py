@@ -63,6 +63,22 @@ PAGING_OFF = (
 )
 IDENTIFY = (*PAGING_OFF, "show version", "display version", "show system")
 
+#: Answers to a second or third «Password:» after `enable`: an empty Enter
+#: gives up on that try. A Cisco asks three times before «% Bad secrets».
+ENABLE_PASSWORD_TRIES = 3
+
+
+def unprivileged(screen: str) -> bool:
+    """Whether the last prompt on screen is a user-mode one: ``SW-1>``.
+
+    ``SW-1#`` is already privileged, and ``<SW-Huawei-01>`` (VRP, Comware) is
+    a prompt whose «>» is a bracket, not a mode: neither gets an `enable`.
+    """
+    found = None
+    for found in PROMPT_RE.finditer(screen[-300:]):
+        pass
+    return found is not None and bool(found.group("cli")) and found.group(0).rstrip().endswith(">")
+
 
 _MORE_ANYWHERE = re.compile(r"-+\s*more\s*-+|--more--|<--- more --->", re.IGNORECASE)
 
@@ -74,10 +90,14 @@ def command_output(output: str, command: str) -> str:
     be switched off is taken out.
     """
     text = _clean(output)
-    index = text.rfind(command)
-    if index < 0:
+    # The echo is the line that *ends* in the command (after the prompt): a
+    # Dell repeats the command at the start of its refusal
+    # («show running-config : Command Is Not Authorized»), and that line is
+    # the answer, not the echo.
+    echoes = list(re.finditer(rf"(?m){re.escape(command)}[ \t]*$", text))
+    if not echoes:
         return ""
-    lines = text[index + len(command) :].split("\n")[1:]
+    lines = text[echoes[-1].end() :].split("\n")[1:]
     if lines and PROMPT_RE.search("\n" + lines[-1]):
         lines = lines[:-1]
     body = "\n".join(_MORE_ANYWHERE.sub("", line).rstrip() for line in lines).strip("\n")
@@ -115,15 +135,25 @@ def run(
     key_file: str = "",
     commands: tuple[str, ...] = IDENTIFY,
     timeout: float = SESSION_SECONDS,
+    enable: bool = False,
 ) -> ssh.Answer:
     """A session with those commands. Never raises: returns what happened.
 
     ``connected`` is that a CLI prompt was reached. An old device that only
     speaks SHA-1 is retried with its algorithms, as `ssh.run` does.
+
+    With ``enable``, the first prompt is read before anything is sent: a
+    user-mode one (``SW-1>``, `unprivileged`) gets an `enable` first, and a
+    «Password:» after it gets the same password the login used -- the usual
+    case in a small office; a different one is refused, the session goes on
+    unprivileged and the device's own refusal says so. A privileged prompt
+    (``SW-1#``) gets nothing: it is already there (09-10-2026: a Dell whose
+    account lands in user mode answered «Command Is Not Authorized» to
+    `show running-config` and that was stored as its configuration).
     """
-    answer, stderr = _session(host, username, secret, port, key_file, commands, timeout, legacy=False)
+    answer, stderr = _session(host, username, secret, port, key_file, commands, timeout, legacy=False, enable=enable)
     if not answer.connected and ssh.negotiation_failed(stderr) and ssh.legacy_options():
-        answer, _ = _session(host, username, secret, port, key_file, commands, timeout, legacy=True)
+        answer, _ = _session(host, username, secret, port, key_file, commands, timeout, legacy=True, enable=enable)
     return answer
 
 
@@ -163,6 +193,7 @@ def _session(
     timeout: float,
     *,
     legacy: bool,
+    enable: bool = False,
 ) -> tuple[ssh.Answer, str]:
     mode = ssh.password_mode() if secret else ""
     if secret and ("\n" in secret or "\r" in secret):
@@ -214,6 +245,9 @@ def _session(
     sent_user = False
     sent_password = False
     rejected = False
+    enable_checked = False  # the first prompt was read and `enable` decided
+    enable_pending = False  # `enable` was sent and its prompt not seen yet
+    enable_answers = 0
     acted_at = 0  # length of the text when we last answered something
     last_length = 0
     last_growth = time.monotonic()
@@ -250,8 +284,28 @@ def _session(
                 if not send(secret):
                     break
                 sent_password, acted_at = True, len(current)
+            elif fresh and settled and enable_pending and PASSWORD_RE.search(last_line):
+                # The enable password, only between sending `enable` and its
+                # prompt: the login's own the first time, an empty Enter after
+                # that (wrong: give up and stay unprivileged). Any other
+                # «Password:» in the session is the device asking for
+                # something else, and the account's password never goes there
+                # (it would end up inside the stored copy).
+                if enable_answers >= ENABLE_PASSWORD_TRIES:
+                    break
+                if not send(secret if enable_answers == 0 else ""):
+                    break
+                enable_answers, acted_at = enable_answers + 1, len(current)
             elif fresh and settled and PROMPT_RE.search(current[-300:]):
                 logged_in = True
+                enable_pending = False
+                if enable and not enable_checked:
+                    enable_checked = True
+                    if unprivileged(current):
+                        if not send("enable"):
+                            break
+                        enable_pending, acted_at = True, len(current)
+                        continue
                 if not pending:
                     break
                 if not send(pending.pop(0)):
