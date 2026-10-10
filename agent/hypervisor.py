@@ -217,6 +217,15 @@ class VMwareClient:
     def _get(self, path: str) -> Any:
         return self.rest.request("GET", f"{self.prefix}{path}", headers={"vmware-api-session-id": self.token})
 
+    def _filter(self, name: str) -> str:
+        """El nombre de un filtro de listado según la API que contestó.
+
+        La `/api` (vCenter 7.0 U2 en adelante) lo llama `clusters`; la `/rest`
+        de antes, `filter.clusters`. Con el nombre de la otra, el vCenter no
+        filtra: ningún host salía en su clúster y ninguna máquina en su host.
+        """
+        return name if self.prefix == "/api" else f"filter.{name}"
+
     def hosts(self) -> list[dict[str, Any]]:
         """Los servidores ESXi del vCenter, cada uno con su clúster.
 
@@ -278,7 +287,7 @@ class VMwareClient:
                 continue
             try:
                 members = _values(
-                    self._get(f"/vcenter/host?filter.clusters={urllib.parse.quote(identifier)}")
+                    self._get(f"/vcenter/host?{self._filter('clusters')}={urllib.parse.quote(identifier)}")
                 )
             except HypervisorError:
                 continue
@@ -320,7 +329,7 @@ class VMwareClient:
                 continue
             try:
                 machines = _values(
-                    self._get(f"/vcenter/vm?filter.hosts={urllib.parse.quote(identifier)}")
+                    self._get(f"/vcenter/vm?{self._filter('hosts')}={urllib.parse.quote(identifier)}")
                 )
             except HypervisorError:
                 continue
