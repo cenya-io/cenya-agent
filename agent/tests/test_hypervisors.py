@@ -470,7 +470,7 @@ class VMwareTests(unittest.TestCase):
 
         client.virtual_machines()
 
-        asked = [call for call in rest.calls if "filter.hosts=" in call[1]]
+        asked = [call for call in rest.calls if "hosts=" in call[1]]
         self.assertLessEqual(len(asked), hypervisor.MAX_HOSTS_CROSSED)
 
     def test_a_vm_without_memory_or_cpu_does_not_divide_by_a_none(self) -> None:
@@ -498,8 +498,8 @@ class VMwareTests(unittest.TestCase):
             {
                 "/api/vcenter/host": VMWARE_HOSTS,
                 "/api/vcenter/vm": VMWARE_VMS,
-                "/api/vcenter/vm?filter.hosts=host-16": [{"vm": "vm-101"}],
-                "/api/vcenter/vm?filter.hosts=host-22": [{"vm": "vm-102"}],
+                "/api/vcenter/vm?hosts=host-16": [{"vm": "vm-101"}],
+                "/api/vcenter/vm?hosts=host-22": [{"vm": "vm-102"}],
                 "/api/vcenter/vm/vm-101": VMWARE_VM_DETAIL,
             }
         )
@@ -515,7 +515,7 @@ class VMwareTests(unittest.TestCase):
             {
                 "/api/vcenter/host": VMWARE_HOSTS,
                 "/api/vcenter/vm": VMWARE_VMS,
-                "/api/vcenter/vm?filter.hosts=host-16": [{"vm": "vm-101"}],
+                "/api/vcenter/vm?hosts=host-16": [{"vm": "vm-101"}],
                 # host-22 no está: preguntar por él lanza.
                 "/api/vcenter/vm/vm-101": VMWARE_VM_DETAIL,
             }
@@ -896,10 +896,31 @@ class VMwareClusterTests(unittest.TestCase):
             {
                 "/api/vcenter/host": VMWARE_HOSTS,
                 "/api/vcenter/cluster": self.CLUSTERS,
-                "/api/vcenter/host?filter.clusters=domain-c7": [VMWARE_HOSTS[0]],
-                "/api/vcenter/host?filter.clusters=domain-c9": [VMWARE_HOSTS[1]],
+                "/api/vcenter/host?clusters=domain-c7": [VMWARE_HOSTS[0]],
+                "/api/vcenter/host?clusters=domain-c9": [VMWARE_HOSTS[1]],
             }
         )
+
+        hosts = {host["name"]: host["cluster"] for host in client.hosts()}
+
+        self.assertEqual(hosts, {"esxi01.acme.local": "Producción", "esxi02.acme.local": "Laboratorio"})
+
+    def test_a_67_vcenter_is_asked_with_the_filter_name_of_its_api(self) -> None:
+        """La `/rest` de un vCenter 6.7 llama al filtro `filter.clusters`; la
+        `/api` de uno moderno, `clusters`. Con el nombre cambiado el vCenter
+        no filtra, y ningún host salía en su clúster."""
+        client = VMwareClient("vc.acme.local", "lector@vsphere.local", "s3cr3t")
+        client._soap_cache = {}
+        client.rest = _Rest(  # type: ignore[assignment]
+            {
+                "/rest/com/vmware/cis/session": {"value": VMWARE_TOKEN},
+                "/rest/vcenter/host": {"value": VMWARE_HOSTS},
+                "/rest/vcenter/cluster": {"value": self.CLUSTERS},
+                "/rest/vcenter/host?filter.clusters=domain-c7": {"value": [VMWARE_HOSTS[0]]},
+                "/rest/vcenter/host?filter.clusters=domain-c9": {"value": [VMWARE_HOSTS[1]]},
+            }
+        )
+        client.login()
 
         hosts = {host["name"]: host["cluster"] for host in client.hosts()}
 
@@ -910,10 +931,10 @@ class VMwareClusterTests(unittest.TestCase):
             {
                 "/api/vcenter/host": VMWARE_HOSTS,
                 "/api/vcenter/vm": VMWARE_VMS,
-                "/api/vcenter/vm?filter.hosts=host-16": [{"vm": "vm-101"}],
-                "/api/vcenter/vm?filter.hosts=host-22": [{"vm": "vm-102"}],
+                "/api/vcenter/vm?hosts=host-16": [{"vm": "vm-101"}],
+                "/api/vcenter/vm?hosts=host-22": [{"vm": "vm-102"}],
                 "/api/vcenter/cluster": self.CLUSTERS[:1],
-                "/api/vcenter/host?filter.clusters=domain-c7": VMWARE_HOSTS,
+                "/api/vcenter/host?clusters=domain-c7": VMWARE_HOSTS,
             }
         )
 
@@ -926,7 +947,7 @@ class VMwareClusterTests(unittest.TestCase):
         client, rest = self._logged_in({"/api/vcenter/host": VMWARE_HOSTS, "/api/vcenter/cluster": []})
 
         self.assertEqual({host["cluster"] for host in client.hosts()}, {""})
-        self.assertFalse(any("filter.clusters" in call[1] for call in rest.calls))
+        self.assertFalse(any("clusters=" in call[1] for call in rest.calls))
 
     def test_a_filter_the_vcenter_ignored_puts_nobody_in_the_wrong_cluster(self) -> None:
         """Dos clústeres que contestan con la misma lista entera no son dos
@@ -935,8 +956,8 @@ class VMwareClusterTests(unittest.TestCase):
             {
                 "/api/vcenter/host": VMWARE_HOSTS,
                 "/api/vcenter/cluster": self.CLUSTERS,
-                "/api/vcenter/host?filter.clusters=domain-c7": VMWARE_HOSTS,
-                "/api/vcenter/host?filter.clusters=domain-c9": VMWARE_HOSTS,
+                "/api/vcenter/host?clusters=domain-c7": VMWARE_HOSTS,
+                "/api/vcenter/host?clusters=domain-c9": VMWARE_HOSTS,
             }
         )
 
@@ -947,8 +968,8 @@ class VMwareClusterTests(unittest.TestCase):
             {
                 "/api/vcenter/host": VMWARE_HOSTS,
                 "/api/vcenter/vm": VMWARE_VMS,
-                "/api/vcenter/vm?filter.hosts=host-16": VMWARE_VMS,
-                "/api/vcenter/vm?filter.hosts=host-22": VMWARE_VMS,
+                "/api/vcenter/vm?hosts=host-16": VMWARE_VMS,
+                "/api/vcenter/vm?hosts=host-22": VMWARE_VMS,
             }
         )
 
