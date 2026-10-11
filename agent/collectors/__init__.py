@@ -42,7 +42,9 @@ def register(cls: type[Collector]) -> type[Collector]:
 #: dependen de `ctx["hosts"]` --un vCenter tiene dirección propia-- pero sí
 #: interesa que sus hallazgos lleguen después de los del barrido: así los
 #: enriquecen en vez de estrenar la fila.
-RUN_ORDER: tuple[str, ...] = ("local", "sweep", "fingerprint", "directory", "snmp", "ssh", "winrm", "hypervisors")
+RUN_ORDER: tuple[str, ...] = (
+    "local", "sweep", "fingerprint", "directory", "snmp", "ssh", "winrm", "redfish", "hypervisors"
+)
 
 
 def all_collectors() -> list[Collector]:
@@ -63,6 +65,7 @@ from agent.collectors import (  # noqa: E402,F401
     fingerprint,
     hypervisors,
     local,
+    redfish,
     snmp,
     ssh,
     sweep,

@@ -111,6 +111,7 @@ class SnmpCollector:
         if tasking.task(ctx) is not None:
             return self._planned(ctx, hosts)
         answers = snmp.query_hosts([host["ip"] for host in hosts], _auths(ctx))
+        _mark_cards(ctx, answers)
         return _inventory_findings(hosts, answers)
 
     def _planned(self, ctx: dict, hosts: list[dict]) -> list[Finding]:
@@ -177,6 +178,7 @@ class SnmpCollector:
                 tasking.flag(ctx, ip, mac, ups=True, identity_mac=_device_mac(data))
             else:
                 tasking.flag(ctx, ip, mac, ups=False)
+        _mark_cards(ctx, answers)
         return _inventory_findings(hosts, answers)
 
 
@@ -449,3 +451,14 @@ def _link(
         identity={"local": local, "remote": remote},
         payload=payload,
     )
+
+
+def _mark_cards(ctx: dict, answers: dict[str, dict]) -> None:
+    """Un iDRAC visto por SNMP es una tarjeta: el colector Redfish, que va
+    detrás, solo entra en las IP marcadas así (`agent/collectors/redfish.py`)."""
+    from agent.collectors.redfish import mark_card
+
+    for ip, data in answers.items():
+        recognised = data.get("identity") if isinstance(data, dict) else None
+        if isinstance(recognised, profiles.Identity) and recognised.profile == "dell-idrac":
+            mark_card(ctx, ip, "iDRAC")

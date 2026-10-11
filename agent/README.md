@@ -506,6 +506,13 @@ barrido deja los hosts vivos y los demás solo llaman a esas puertas.
 - **vigilancia de cambios de configuración**: en cada presencia (cada cinco minutos), a los equipos Cisco, Juniper, Huawei y H3C/Comware que ya tienen copia les pregunta por SNMP, en una sola lectura, cuándo cambió por última vez su configuración; si ha cambiado desde la vez anterior pide la copia de ese equipo al momento, sin esperar a la nocturna y sin abrir ningún puerto de escucha. El resto de familias siguen con la copia diaria. Se apaga con el mismo interruptor de copias.
 - **winrm** (L4): lo mismo para Windows, por PowerShell remoto: nombre,
   dominio, fabricante, modelo, serie e interfaces.
+- **redfish**: entra **solo** en las tarjetas de control remoto (iDRAC, iLO,
+  XClarity, iRMC…) que el colector de huella reconoció por su página web o el
+  de SNMP por su perfil, con una credencial Redfish, y lee por HTTPS el
+  modelo, el número de serie, las fuentes de alimentación y las MAC de las
+  tarjetas de red del **servidor** que la lleva. El certificado de cada tarjeta
+  se fija la primera vez, como SSH: si cambia, la contraseña no sale. La
+  contraseña nunca viaja a un equipo que no sea una tarjeta.
 - **hypervisors** (L5): pregunta a los hipervisores que estén configurados:
   vCenter y Proxmox por REST, **Hyper-V** por PowerShell remoto sobre WinRM
   (necesita `pywinrm`, como el colector de Windows) y **XCP-ng / XenServer**
@@ -605,7 +612,7 @@ Se edita en la aplicación, **Ajustes → Agentes → Barrido**:
 
 - **Subredes**, una por línea. Vacío: el agente barre su propia /24.
 - **Comunidades SNMP**. Vacío: prueba con `public`.
-- **Credenciales**, una por protocolo: SSH, WinRM, SNMPv3, y los hipervisores — vCenter, Proxmox, Hyper-V y XCP-ng (estos cuatro con su dirección: no se descubren solos).
+- **Credenciales**, una por protocolo: SSH, WinRM, SNMPv3, Redfish (las tarjetas de control remoto), y los hipervisores — vCenter, Proxmox, Hyper-V y XCP-ng (estos cuatro con su dirección: no se descubren solos).
 
 Todo lo que es un secreto se **sella en el navegador para cada agente** (cifrado
 con la clave pública de ese agente) y el servidor guarda solo el sobre: una fuga
