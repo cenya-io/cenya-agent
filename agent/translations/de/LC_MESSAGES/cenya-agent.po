@@ -2621,3 +2621,33 @@ msgstr "Nach Aktualisierungen suchen"
 #: agent/app/view.py:1000
 msgid "Cerrar este icono"
 msgstr "Dieses Symbol schließen"
+
+#: agent/qnap_dump.py
+#, python-format
+msgid "Uso: %(prog)s DIRECCIÓN USUARIO [--port PUERTO] [--output FICHERO] [--insecure]"
+msgstr "Verwendung: %(prog)s ADRESSE BENUTZER [--port PORT] [--output DATEI] [--insecure]"
+
+#: agent/qnap_dump.py
+#, python-format
+msgid "Falta la contraseña de la QNAP: pásala en la variable %(var)s."
+msgstr "Das QNAP-Passwort fehlt: gib es in der Variablen %(var)s an."
+
+#: agent/qnap_dump.py
+#, python-format
+msgid "Contraseña de %(user)s en la QNAP (no se muestra ni se guarda): "
+msgstr "Passwort von %(user)s auf dem QNAP (wird weder angezeigt noch gespeichert): "
+
+#: agent/qnap_dump.py
+#, python-format
+msgid "La QNAP no aceptó ese usuario y contraseña, o la cuenta pide doble factor."
+msgstr "Das QNAP hat Benutzer und Passwort nicht akzeptiert, oder das Konto verlangt Zwei-Faktor-Authentifizierung."
+
+#: agent/qnap_dump.py
+#, python-format
+msgid "No se pudo hablar con la QNAP: %(reason)s"
+msgstr "Keine Verbindung zum QNAP möglich: %(reason)s"
+
+#: agent/qnap_dump.py
+#, python-format
+msgid "Hecho: %(file)s. No lleva la contraseña ni la sesión; ábrelo antes de enviarlo si quieres revisarlo."
+msgstr "Fertig: %(file)s. Es enthält weder das Passwort noch die Sitzung; öffne es vor dem Senden, wenn du es prüfen willst."

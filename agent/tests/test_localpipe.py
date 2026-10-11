@@ -148,20 +148,46 @@ class TransportTests(unittest.TestCase):
             slow.join(10)
         self.assertEqual(slow_result, [{"slept": True}])
 
-    def test_several_clients_at_once(self) -> None:
-        self.serve()
+    def open_at_once(self, count: int) -> list[Any]:
+        """`count` clients of this same user, every one connected and answered before any leaves.
+
+        Todos son la misma identidad, así que cuentan contra el tope por
+        usuario (`Admission.per_caller`). Antes la prueba abría seis con el
+        tope en cuatro y solo pasaba si se solapaban poco: en una máquina
+        cargada se juntaban cinco y uno recibía ``busy``.
+        """
         results: list[Any] = []
+        all_answered = threading.Barrier(count, timeout=15)
 
         def ask() -> None:
             with Channel(environ=self.environ) as channel:
-                results.append(channel.call("status"))
+                try:
+                    results.append(channel.call("status"))
+                except ChannelError as exc:
+                    results.append(exc.code)
+                all_answered.wait()  # nadie suelta su hueco hasta que todos han contestado
 
-        threads = [threading.Thread(target=ask) for _ in range(6)]
+        threads = [threading.Thread(target=ask) for _ in range(count)]
         for thread in threads:
             thread.start()
         for thread in threads:
-            thread.join(15)
-        self.assertEqual(len(results), 6)
+            thread.join(20)
+        return results
+
+    def test_several_clients_at_once(self) -> None:
+        self.serve()
+        results = self.open_at_once(Admission().per_caller)
+        self.assertEqual(len(results), Admission().per_caller)
+        self.assertTrue(all(isinstance(r, dict) and "admin" in r for r in results), results)
+
+    def test_one_caller_cannot_take_more_than_its_share(self) -> None:
+        self.serve()
+        held = [self.channel() for _ in range(Admission().per_caller)]
+        for channel in held:
+            channel.call("status")  # cada una ocupa un hueco de este usuario
+        with self.assertRaises(ChannelError) as refused:
+            self.channel().call("status", timeout=5)
+        self.assertEqual(refused.exception.code, "busy")
 
     def test_over_the_cap_a_client_is_told_busy(self) -> None:
         self.serve(admission=Admission(total=1))

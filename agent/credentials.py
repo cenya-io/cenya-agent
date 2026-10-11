@@ -38,6 +38,7 @@ XCPNG = "xcpng"
 #: Cabinas con API (`agent.storage_arrays`). TrueNAS entra con una clave y sin usuario.
 SYNOLOGY = "synology"
 TRUENAS = "truenas"
+QNAP = "qnap"
 #: Una comunidad SNMP v2c vista como credencial. No llega así del servidor --las
 #: comunidades viajan como lista de textos en `config["communities"]`--: la
 #: fabrica el colector SNMP para que la memoria las trate igual que a un
