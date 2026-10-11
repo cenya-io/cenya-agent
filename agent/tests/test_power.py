@@ -160,5 +160,45 @@ class ReadingTests(unittest.TestCase):
         self.assertEqual(supplies[0]["name"], "Switch 1 - Power Supply A")
 
 
+class QnapSupplyTests(unittest.TestCase):
+    """QNAP no pone sus fuentes en ENTITY-MIB: las tiene en su tabla
+    `systemPowerTable` (NAS.mib), y una caída es la redundancia que no es."""
+
+    QNAP = "1.3.6.1.4.1.24681.1.4.1"
+
+    def read(self, column: dict[str, str], object_id: str = QNAP) -> tuple[list, list]:
+        walked: list[str] = []
+
+        async def fake_walk(engine, host, auth, oid, context_name=""):  # noqa: ANN001
+            walked.append(oid)
+            return column
+
+        with mock.patch("agent.snmp._walk", fake_walk), mock.patch("agent.snmp._get", fake_get({}, [])):
+            supplies = asyncio.run(snmp._query_power_supplies(None, "192.0.2.50", "public", {}, object_id))
+        return supplies, walked
+
+    def test_each_supply_with_its_state_by_position(self) -> None:
+        supplies, walked = self.read({"1": "0", "2": "-1"})
+
+        self.assertEqual(walked, [power.QNAP_POWER_STATUS_OID])
+        self.assertEqual([(s["name"], s["status"]) for s in supplies], [("PSU1", "ok"), ("PSU2", "failed")])
+
+    def test_the_newer_enterprise_is_a_qnap_too(self) -> None:
+        supplies, _ = self.read({"1": "0"}, object_id="1.3.6.1.4.1.55062.1")
+
+        self.assertEqual(len(supplies), 1)
+
+    def test_a_qnap_without_the_table_has_no_supplies(self) -> None:
+        supplies, _ = self.read({})
+
+        self.assertEqual(supplies, [])
+
+    def test_another_vendor_never_asks_the_qnap_table(self) -> None:
+        _supplies, walked = self.read({"1": "0"}, object_id="1.3.6.1.4.1.9.1.2694")
+
+        self.assertEqual(walked, [])
+
+
+
 if __name__ == "__main__":
     unittest.main()

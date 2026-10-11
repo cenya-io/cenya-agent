@@ -85,6 +85,24 @@ HUAWEI_ENTITY_STATES = {
     "4": ABSENT,  # offline
 }
 
+#: NAS-MIB systemPowerStatus (QNAP's NAS.mib, storageManager branch): QNAP
+#: does not list its supplies in ENTITY-MIB, it keeps them in a table of its
+#: own, indexed by systemPowerIndex. Read only for QNAP and only when
+#: ENTITY-MIB gave no supply.
+QNAP_POWER_STATUS_OID = "1.3.6.1.4.1.24681.1.4.1.1.1.1.3.2.1.4"
+QNAP_POWER_STATES = {
+    "0": OK,  # ok
+    "-1": FAILED,  # fail
+}
+QNAP_ENTERPRISES = ("1.3.6.1.4.1.24681.", "1.3.6.1.4.1.55062.")
+
+
+def is_qnap(object_id: str) -> bool:
+    return object_id.startswith(QNAP_ENTERPRISES) or object_id.rstrip(".") in (
+        prefix.rstrip(".") for prefix in QNAP_ENTERPRISES
+    )
+
+
 #: ENTITY-STATE-MIB entStateOper, the vendor-neutral column (RFC 4268).
 ENTITY_STATE_OPER_OID = "1.3.6.1.2.1.131.1.1.1.3"
 ENTITY_STATE_OPER_STATES = {

@@ -338,13 +338,19 @@ PROFILES: tuple[Profile, ...] = (
     ),
     # --- NAS, hypervisors, generic hosts ---------------------------------
     # LibreNMS qnap.yaml (sysObjectID 24681) and NAS-MIB modelName
-    # { systemInfo 12 } (no sample with a value; serial is tabular there).
+    # { systemInfo 12 }. NAS-MIB has no serial or firmware; QTS-MIB, the one
+    # QTS 5 adds under 55062 (QNAP's own NAS.mib, 2020-02-20), keeps them as
+    # scalars in { qts 12 }: systemModel 3, serialNumber 5, firmwareVersion 6.
+    # A QTS 5 box answers both MIBs whatever its sysObjectID says. No profile
+    # for a 55062 sysObjectID yet: there is no sample of one.
     # QNAP fills ENTITY-MIB (entPhysicalMfgName "QNAP Systems").
     Profile(
         key="qnap",
         vendor="QNAP",
         enterprise=24681,
         model_oid="1.3.6.1.4.1.24681.1.2.12.0",
+        serial_oid="1.3.6.1.4.1.55062.1.12.5.0",
+        version_oid="1.3.6.1.4.1.55062.1.12.6.0",
     ),
     # SNMP::Info Layer3::VMware: vmwProdName (os), vmwProdVersion; values in
     # LibreNMS vmware-esxi.snmprec. Hardware model/serial from ENTITY-MIB.
