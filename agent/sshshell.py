@@ -48,6 +48,11 @@ SESSION_SECONDS = 60
 SETTLE_SECONDS = 0.6
 #: After the last command, with nothing new for this long, it is over.
 QUIET_SECONDS = 5
+#: But only once the device has started answering it. Until then, this long:
+#: a Dell N2048P echoes `show running-config` and then thinks for several
+#: seconds before printing the first line; cutting at the 5 s of silence read
+#: «nothing», and the capture was noted as a lack of privilege (11-10-2026).
+ANSWER_SECONDS = 60
 
 #: Paging off for this session, each vendor its own (the rest answer with a
 #: harmless «unknown command»), then who it is.
@@ -99,6 +104,17 @@ def unprivileged(screen: str) -> bool:
     for found in PROMPT_RE.finditer(screen[-300:]):
         pass
     return found is not None and bool(found.group("cli")) and found.group(0).rstrip().endswith(">")
+
+
+def _answered(after_last_command: str) -> bool:
+    """Whether the device printed anything past the echo of the last command.
+
+    The echo comes back at once; the answer may not. Blank lines do not count:
+    a Dell sends a bare newline and then nothing until the configuration is
+    built.
+    """
+    _echo, _newline, rest = after_last_command.partition("\n")
+    return bool(rest.strip())
 
 
 _MORE_ANYWHERE = re.compile(r"-+\s*more\s*-+|--more--|<--- more --->", re.IGNORECASE)
@@ -270,6 +286,7 @@ def _session(
     enable_pending = False  # `enable` was sent and its prompt not seen yet
     enable_answers = 0
     acted_at = 0  # length of the text when we last answered something
+    last_sent_at = 0  # length of the text when the last command went out
     last_length = 0
     last_growth = time.monotonic()
     deadline = time.monotonic() + timeout
@@ -332,7 +349,11 @@ def _session(
                 if not send(pending.pop(0)):
                     break
                 acted_at = len(current)
-            elif logged_in and not pending and now - last_growth >= QUIET_SECONDS:
+                if not pending:
+                    last_sent_at = len(current)
+            elif logged_in and not pending and now - last_growth >= QUIET_SECONDS and (
+                _answered(current[last_sent_at:]) or now - last_growth >= ANSWER_SECONDS
+            ):
                 break
             time.sleep(0.1)
     finally:

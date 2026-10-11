@@ -28,6 +28,7 @@ SECRET = "Sistemas13$"
 DELL = textwrap.dedent(
     r'''
     import sys
+    import time
 
     mode = sys.argv[1]
     name = "PLANTA-BAJA-SW"
@@ -53,7 +54,7 @@ DELL = textwrap.dedent(
         if command == "enable":
             if privileged:
                 out("ENABLE-SENT-TWICE\r\n")
-            elif mode == "open":
+            elif mode in ("open", "slow"):
                 privileged = True
             else:
                 for _try in range(3):
@@ -72,6 +73,11 @@ DELL = textwrap.dedent(
                 typed = read()
                 out("\r\n" + ("LEAKED " + typed if typed else "nothing typed") + "\r\n")
             elif privileged:
+                if mode == "slow":
+                    # An N2048P: a bare newline, then seconds of silence
+                    # while it builds the configuration.
+                    out("\r\n")
+                    time.sleep(2.5)
                 out("hostname PLANTA-BAJA-SW\r\nvlan database\r\nvlan 10,20\r\nexit\r\n")
             else:
                 out("show running-config : Command Is Not Authorized\r\n")
@@ -133,6 +139,36 @@ class EnableInASessionTests(unittest.TestCase):
         answer = self.capture("open")
 
         self.assertIn("hostname PLANTA-BAJA-SW", sshshell.command_output(answer.output, "show running-config"))
+
+    def test_a_device_that_thinks_before_printing_is_waited_for(self) -> None:
+        """11-10-2026: a Dell N2048P echoed `show running-config` and was silent
+        for longer than the quiet cut-off before the first line; the session
+        ended with nothing and the copy was noted as a lack of privilege."""
+        answer = self.capture("slow")
+
+        self.assertTrue(answer.connected)
+        self.assertEqual(
+            sshshell.command_output(answer.output, "show running-config"),
+            "hostname PLANTA-BAJA-SW\nvlan database\nvlan 10,20\nexit\n",
+        )
+
+    def test_a_device_that_never_answers_is_still_given_up_on(self) -> None:
+        with mock.patch.object(sshshell, "ANSWER_SECONDS", 1):
+            answer = self.capture("slow")
+
+        self.assertTrue(answer.connected)
+        self.assertEqual(sshshell.command_output(answer.output, "show running-config"), "")
+
+    def test_the_capture_session_gets_more_time_than_an_identification(self) -> None:
+        refused = ssh.Answer(connected=True, output=DELL_REFUSAL)
+        session = ssh.Answer(connected=True, output="SW#show running-config\r\nhostname SW\r\nSW#")
+
+        with mock.patch.object(collector, "_login", return_value=refused), mock.patch.object(
+            collector, "_session", return_value=session
+        ) as opened:
+            collector.fetch_config("172.20.5.21", credential(), "show running-config", enable=True)
+
+        self.assertGreater(opened.call_args.kwargs["timeout"], sshshell.SESSION_SECONDS)
 
     def test_a_privileged_prompt_gets_no_enable(self) -> None:
         answer = self.capture("privileged")
