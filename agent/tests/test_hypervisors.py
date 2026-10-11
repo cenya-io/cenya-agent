@@ -1329,6 +1329,15 @@ class HostNetworkFindingTests(unittest.TestCase):
         self.assertEqual(link.payload["remote"]["device_ip"], "10.0.0.2")
         self.assertEqual(link.payload["remote_platform"], "cisco C9300")
 
+    def test_cores_and_memory_travel_only_when_known(self) -> None:
+        with mock.patch.object(hypervisors_collector.net, "resolve", return_value=""):
+            known = hypervisors_collector._host_finding({**self.HOST, "cpu_count": 64, "ram_gb": 512}, "vmware", self._credential())
+            unknown = hypervisors_collector._host_finding({"name": "pve01", "cpu_count": 0}, "proxmox", self._credential())
+
+        self.assertEqual((known.payload["cpu_count"], known.payload["ram_gb"]), (64, 512))
+        self.assertNotIn("cpu_count", unknown.payload)
+        self.assertNotIn("ram_gb", unknown.payload)
+
     def test_a_host_without_neighbours_gives_no_links(self) -> None:
         with mock.patch.object(hypervisors_collector.net, "resolve", return_value=""):
             host = hypervisors_collector._host_finding({"name": "pve01"}, "proxmox", self._credential())

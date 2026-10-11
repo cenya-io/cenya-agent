@@ -445,6 +445,71 @@ class HostNetworkTests(unittest.TestCase):
         self.assertEqual(vsphere_soap.host_network({"name": val("x")}, []), {})
 
 
+VSWITCHES = val(
+    "<HostVirtualSwitch><name>vSwitch0</name><key>key-vim.host.VirtualSwitch-vSwitch0</key>"
+    "<portgroup>key-vim.host.PortGroup-Management Network</portgroup><portgroup>key-vim.host.PortGroup-Servidores</portgroup>"
+    "<pnic>key-vim.host.PhysicalNic-vmnic0</pnic><pnic>key-vim.host.PhysicalNic-vmnic1</pnic></HostVirtualSwitch>"
+    "<HostVirtualSwitch><name>vSwitch1</name><key>key-vim.host.VirtualSwitch-vSwitch1</key>"
+    "<portgroup>key-vim.host.PortGroup-Invitados</portgroup></HostVirtualSwitch>",
+    "ArrayOfHostVirtualSwitch",
+)
+PORTGROUPS = val(
+    "<HostPortGroup><key>key-vim.host.PortGroup-Management Network</key>"
+    "<spec><name>Management Network</name><vlanId>0</vlanId><vswitchName>vSwitch0</vswitchName></spec></HostPortGroup>"
+    "<HostPortGroup><key>key-vim.host.PortGroup-Servidores</key>"
+    "<spec><name>Servidores</name><vlanId>20</vlanId><vswitchName>vSwitch0</vswitchName></spec></HostPortGroup>"
+    "<HostPortGroup><key>key-vim.host.PortGroup-Trunk</key>"
+    "<spec><name>Trunk</name><vlanId>4095</vlanId><vswitchName>vSwitch0</vswitchName></spec></HostPortGroup>"
+    "<HostPortGroup><key>key-vim.host.PortGroup-Voz</key>"
+    "<spec><name>Voz</name><vlanId>10</vlanId><vswitchName>vSwitch0</vswitchName></spec></HostPortGroup>"
+    "<HostPortGroup><key>key-vim.host.PortGroup-Invitados</key>"
+    "<spec><name>Invitados</name><vlanId>99</vlanId><vswitchName>vSwitch1</vswitchName></spec></HostPortGroup>",
+    "ArrayOfHostPortGroup",
+)
+PNICS_WITH_KEYS = val(
+    "<PhysicalNic><key>key-vim.host.PhysicalNic-vmnic0</key><device>vmnic0</device>"
+    "<linkSpeed><speedMb>10000</speedMb></linkSpeed><mac>3c:ec:ef:01:02:03</mac></PhysicalNic>"
+    "<PhysicalNic><key>key-vim.host.PhysicalNic-vmnic1</key><device>vmnic1</device>"
+    "<linkSpeed><speedMb>10000</speedMb></linkSpeed><mac>3c:ec:ef:01:02:04</mac></PhysicalNic>"
+    "<PhysicalNic><key>key-vim.host.PhysicalNic-vmnic2</key><device>vmnic2</device><mac>3c:ec:ef:01:02:05</mac></PhysicalNic>",
+    "ArrayOfPhysicalNic",
+)
+
+
+class HostDetailsTests(unittest.TestCase):
+    """La ficha de un ESXi que el vCenter sabe y la persona no tiene por qué
+    escribir: versión exacta, núcleos y memoria, y las VLAN de cada tarjeta."""
+
+    def test_version_cores_and_memory(self) -> None:
+        props = {
+            "config.product": val(
+                "<name>VMware ESXi</name><fullName>VMware ESXi 8.0.2 build-22380479</fullName><version>8.0.2</version>",
+                "AboutInfo",
+            ),
+            "hardware.cpuInfo": val("<numCpuPackages>2</numCpuPackages><numCpuCores>32</numCpuCores><numCpuThreads>64</numCpuThreads>", "HostCpuInfo"),
+            "hardware.memorySize": val("549755813888", "xsd:long"),
+        }
+
+        self.assertEqual(
+            vsphere_soap.host_details(props),
+            {"os": "VMware ESXi 8.0.2 build-22380479", "cpu_count": 64, "ram_gb": 512},
+        )
+
+    def test_nothing_readable_adds_nothing(self) -> None:
+        self.assertEqual(vsphere_soap.host_details({}), {})
+
+    def test_each_uplink_carries_the_vlans_of_its_vswitch(self) -> None:
+        """Las VLAN de los grupos de su vSwitch: lo que el puerto del switch
+        al otro lado tiene que llevar etiquetado. Ni la 0 ni la 4095."""
+        props = {"config.network.pnic": PNICS_WITH_KEYS, "config.network.vswitch": VSWITCHES, "config.network.portgroup": PORTGROUPS}
+
+        ports = {port["name"]: port for port in vsphere_soap.host_network(props, [])["interfaces"]}
+
+        self.assertEqual(ports["vmnic0"]["vlans"], [10, 20])
+        self.assertEqual(ports["vmnic1"]["vlans"], [10, 20])
+        self.assertNotIn("vlans", ports["vmnic2"])
+
+
 class NetworkInventoryTests(unittest.TestCase):
     def _run(self, network_page: Any, hint: Any) -> dict[str, dict[str, Any]]:
         hosts = obj("host-1", "HostSystem", prop("name", "esxi01.acme.local"))
@@ -494,6 +559,32 @@ class NetworkInventoryTests(unittest.TestCase):
         self.assertEqual(host["interfaces"][0]["name"], "vmnic0")
         self.assertNotIn("neighbors", host)
 
+    def test_the_cluster_comes_from_the_parent_of_the_host(self) -> None:
+        """De respaldo de la REST: el clúster es el padre del host, sin filtros."""
+        network = page(
+            obj(
+                "host-1",
+                "HostSystem",
+                prop("name", "esxi01.acme.local")
+                + '<propSet><name>parent</name><val type="ClusterComputeResource" xsi:type="ManagedObjectReference">domain-c7</val></propSet>',
+            )
+        )
+        clusters = page(obj("domain-c7", "ClusterComputeResource", prop("name", "Producción")))
+        hosts = obj("host-1", "HostSystem", prop("name", "esxi01.acme.local"))
+        opener = _Opener(
+            {
+                "RetrieveServiceContent": SERVICE_CONTENT,
+                "Login": LOGIN,
+                "CreateContainerView": [VIEW, VIEW, VIEW, VIEW],
+                "RetrievePropertiesEx": [page(""), page(hosts), network, clusters],
+                "Logout": LOGOUT,
+            }
+        )
+        with mock.patch.object(vsphere_soap.SoapClient, "__init__", lambda self, *a, **k: _init(self, opener)):
+            found = vsphere_soap.inventory("vc.acme.local", "u", "s")
+
+        self.assertEqual(found["esxi01.acme.local"]["cluster"], "Producción")
+
     def test_a_vcenter_that_refuses_the_network_keeps_hardware_and_datastores(self) -> None:
         fault = envelope("<soapenv:Fault><faultcode>ServerFaultCode</faultcode><faultstring>InvalidProperty</faultstring></soapenv:Fault>")
         error = urllib.error.HTTPError("https://vc/sdk", 500, "Internal", {}, io.BytesIO(fault))
@@ -525,6 +616,25 @@ class VMwareClientMergeTests(unittest.TestCase):
 
         self.assertEqual(host["serial"], "7XK")
         self.assertEqual(host["datastores"], [{"name": "d", "type": "nfs"}])
+
+    def test_the_rest_cluster_wins_and_the_soap_one_fills_the_gap(self) -> None:
+        client = VMwareClient("vc.acme.local", "u", "s")
+        client._soap_cache = {
+            "esxi01.acme.local": {"cluster": "Viejo"},
+            "esxi02.acme.local": {"cluster": "Producción"},
+        }
+        client._cluster_cache = {"esxi01.acme.local": "Producción"}
+        client.prefix, client.token = "/api", "t"
+        client.rest = mock.Mock()  # type: ignore[assignment]
+        client.rest.request.side_effect = lambda method, path, **kw: (
+            [{"host": "host-16", "name": "esxi01.acme.local"}, {"host": "host-22", "name": "esxi02.acme.local"}]
+            if path == "/api/vcenter/host"
+            else []
+        )
+
+        clusters = {host["name"]: host["cluster"] for host in client.hosts()}
+
+        self.assertEqual(clusters, {"esxi01.acme.local": "Producción", "esxi02.acme.local": "Producción"})
 
     def test_without_the_soap_api_hosts_arrive_as_before(self) -> None:
         client = VMwareClient("vc.acme.local", "u", "s")
