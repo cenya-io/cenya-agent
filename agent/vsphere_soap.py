@@ -66,6 +66,19 @@ HOST_PROPERTIES = (
     "datastore",
 )
 DATASTORE_PROPERTIES = ("summary", "info")
+#: La red de cada ESXi, en una petición aparte: un vCenter que no deja leerla
+#: (permiso, versión) no se lleva por delante el hardware ni los datastores.
+NETWORK_PROPERTIES = (
+    "name",
+    "config.network.pnic",
+    "config.network.vnic",
+    "config.virtualNicManagerInfo.netConfig",
+    "configManager.networkSystem",
+)
+#: Hosts a los que se pregunta qué oyen por CDP o LLDP: una llamada por host.
+MAX_HINT_HOSTS = 64
+#: Tope de tarjetas por host: un ESXi de pyme tiene de dos a ocho.
+MAX_INTERFACES = 64
 
 #: Transportes de una ruta que son el propio servidor: un disco local, una
 #: controladora RAID interna, un NVMe en la placa.
@@ -240,7 +253,7 @@ def _fault(raw: bytes) -> str:
 def inventory(
     host: str, username: str, secret: str, *, port: int = 443, ca_file: str = "", tls_pin: str = ""
 ) -> dict[str, dict[str, Any]]:
-    """Hardware y datastores de cada ESXi del vCenter, por nombre de host."""
+    """Hardware, datastores y red de cada ESXi del vCenter, por nombre de host."""
     client = SoapClient(host, port=port, ca_file=ca_file, tls_pin=tls_pin)
     client.login(username, secret)
     try:
@@ -250,6 +263,7 @@ def inventory(
             name = (props.get("name").text or "").strip() if props.get("name") is not None else ""
             if name:
                 found[name] = host_inventory(props, datastores)
+        _add_network(client, found)
         return found
     finally:
         client.logout()
@@ -350,3 +364,148 @@ class _StorageMap:
 def _lun(path: ET.Element | None) -> int | None:
     match = _LUN_NUMBER.search(_text(path, "name"))
     return int(match.group(1)) if match else None
+
+
+# --- Red ----------------------------------------------------------------------------
+
+
+def _add_network(client: SoapClient, found: dict[str, dict[str, Any]]) -> None:
+    """Las tarjetas, las VMkernel y los vecinos de cada host, sobre lo ya leído.
+
+    Si el vCenter no deja leer la red, cada host se queda con su hardware y sus
+    datastores: lo que falta no tumba lo que ya se tiene.
+    """
+    asked = 0
+    try:
+        for _moid, props in client.objects("HostSystem", NETWORK_PROPERTIES):
+            name = (props.get("name").text or "").strip() if props.get("name") is not None else ""
+            if name not in found:
+                continue
+            hints: list[ET.Element] = []
+            if asked < MAX_HINT_HOSTS:
+                asked += 1
+                hints = _hints(client, props)
+            found[name].update(host_network(props, hints))
+    except HypervisorError:
+        return
+
+
+def _hints(client: SoapClient, props: dict[str, ET.Element]) -> list[ET.Element]:
+    """Lo que el ESXi oye por CDP o LLDP en cada tarjeta (`QueryNetworkHint`).
+
+    Es una llamada por host. Una cuenta sin permiso para hacerla, o un host
+    desconectado, deja ese host sin vecinos; los demás siguen.
+    """
+    system = props.get("configManager.networkSystem")
+    moid = (system.text or "").strip() if system is not None else ""
+    if not moid:
+        return []
+    try:
+        answer = client.call("<QueryNetworkHint>" + _moref("HostNetworkSystem", moid) + "</QueryNetworkHint>")
+    except HypervisorError:
+        return []
+    return _children(answer, "returnval")
+
+
+def host_network(props: dict[str, ET.Element], hints: list[ET.Element]) -> dict[str, Any]:
+    """Las tarjetas físicas (vmnic) y las VMkernel (vmk) como puertos del
+    equipo, cuál es la de gestión con su IP y MAC, y los vecinos de cada vmnic.
+
+    Las vmnic tienen la forma de las interfaces que manda SNMP; sin velocidad
+    de enlace, una tarjeta está caída. Solo van las claves con algo dentro.
+    """
+    interfaces: list[dict[str, Any]] = []
+    for nic in _children(props.get("config.network.pnic"))[:MAX_INTERFACES]:
+        name = _text(nic, "device")
+        if not name:
+            continue
+        speed = _text(_child(nic, "linkSpeed"), "speedMb")
+        interfaces.append(
+            {
+                "name": name,
+                "mac": vmnet.mac(_text(nic, "mac")),
+                "status": "up" if speed else "down",
+                "speed_mbps": int(speed) if speed.isdigit() else 0,
+                "type": "ethernet",
+            }
+        )
+    management_keys = _management_keys(props.get("config.virtualNicManagerInfo.netConfig"))
+    management = management_ip = management_mac = ""
+    for vnic in _children(props.get("config.network.vnic"))[:MAX_INTERFACES]:
+        name = _text(vnic, "device")
+        if not name:
+            continue
+        spec = _child(vnic, "spec")
+        mac = vmnet.mac(_text(spec, "mac"))
+        interfaces.append({"name": name, "mac": mac, "status": "up", "speed_mbps": 0, "type": "virtual"})
+        is_management = _text(vnic, "key") in management_keys or (not management_keys and name == "vmk0")
+        if is_management and not management:
+            management = name
+            management_ip = _text(_child(spec, "ip"), "ipAddress")
+            management_mac = mac
+    found: dict[str, Any] = {
+        "interfaces": interfaces,
+        "management_interface": management,
+        "management_ip": management_ip,
+        "mac": management_mac,
+        "neighbors": [n for n in (_neighbor(hint) for hint in hints) if n],
+    }
+    return {key: value for key, value in found.items() if value}
+
+
+def _management_keys(net_config: ET.Element | None) -> set[str]:
+    """Las VMkernel marcadas para gestión: `management.key-vim.host.VirtualNic-vmk0`
+    pasa a la clave de la VMkernel, `key-vim.host.VirtualNic-vmk0`."""
+    keys: set[str] = set()
+    for config in _children(net_config):
+        if _text(config, "nicType") != "management":
+            continue
+        for selected in _children(config, "selectedVnic"):
+            value = (selected.text or "").strip()
+            keys.add(value.split(".", 1)[1] if value.startswith("management.") else value)
+    return keys
+
+
+def _neighbor(hint: ET.Element) -> dict[str, str] | None:
+    """El switch y el puerto al otro lado de una vmnic.
+
+    CDP primero: da el nombre del puerto como lo escribe el switch
+    («GigabitEthernet1/0/12»), que es como se empareja con sus interfaces.
+    LLDP si no hay CDP. Ni uno ni otro: esa tarjeta no tiene vecino conocido.
+    """
+    local = _text(hint, "device")
+    if not local:
+        return None
+    cdp = _child(hint, "connectedSwitchPort")
+    if cdp is not None and (_text(cdp, "devId") or _text(cdp, "systemName")) and _text(cdp, "portId"):
+        found = {
+            "protocol": "cdp",
+            "local_port": local,
+            "remote_name": _text(cdp, "devId") or _text(cdp, "systemName"),
+            "remote_port": _text(cdp, "portId"),
+            "remote_mac": "",
+            "remote_ip": _text(cdp, "mgmtAddr") or _text(cdp, "address"),
+            "remote_platform": _text(cdp, "hardwarePlatform"),
+        }
+        return {key: value[:200] for key, value in found.items()}
+    lldp = _child(hint, "lldpInfo")
+    if lldp is not None and _text(lldp, "portId"):
+        parameters = {_text(p, "key"): _text(p, "value") for p in _children(lldp, "parameter")}
+        port = _text(lldp, "portId")
+        if vmnet.mac(port):
+            # Algunos switches anuncian el puerto por su MAC: el nombre que
+            # se empareja con sus interfaces es entonces la descripción.
+            port = parameters.get("Port Description", "") or port
+        found = {
+            "protocol": "lldp",
+            "local_port": local,
+            "remote_name": parameters.get("System Name", ""),
+            "remote_port": port,
+            "remote_mac": vmnet.mac(_text(lldp, "chassisId")),
+            "remote_ip": parameters.get("Management Address", ""),
+            "remote_sys_descr": parameters.get("System Description", ""),
+        }
+        if not (found["remote_name"] or found["remote_mac"]):
+            return None
+        return {key: value[:200] for key, value in found.items()}
+    return None

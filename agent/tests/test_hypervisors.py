@@ -1269,5 +1269,75 @@ class ProxmoxDatastoreTests(unittest.TestCase):
         self.assertEqual(client.hosts()[0]["datastores"], [])
 
 
+class HostNetworkFindingTests(unittest.TestCase):
+    """Lo que el colector manda de la red de un ESXi: sus puertos, su
+    interfaz de gestión y un enlace por cada vmnic con vecino."""
+
+    HOST = {
+        "name": "esxi01.acme.local",
+        "interfaces": [{"name": "vmnic0", "mac": "3c:ec:ef:01:02:03", "status": "up", "speed_mbps": 10000, "type": "ethernet"}],
+        "management_interface": "vmk0",
+        "management_ip": "10.0.0.11",
+        "mac": "3c:ec:ef:01:02:03",
+        "neighbors": [
+            {
+                "protocol": "cdp",
+                "local_port": "vmnic0",
+                "remote_name": "sw-core-01",
+                "remote_port": "Te1/0/12",
+                "remote_mac": "",
+                "remote_ip": "10.0.0.2",
+                "remote_platform": "cisco C9300",
+            }
+        ],
+    }
+
+    def _credential(self) -> Any:
+        from agent import credentials as creds
+
+        return creds.Credential(kind="vcenter", host="vc.acme.local", username="u", secret="s")
+
+    def test_the_host_carries_its_ports_and_management_interface(self) -> None:
+        with mock.patch.object(hypervisors_collector.net, "resolve", return_value=""):
+            finding = hypervisors_collector._host_finding(self.HOST, "vmware", self._credential())
+
+        self.assertEqual(finding.payload["interfaces"][0]["name"], "vmnic0")
+        self.assertEqual(finding.payload["management_interface"], "vmk0")
+        self.assertEqual(finding.payload["mac"], "3c:ec:ef:01:02:03")
+        self.assertEqual(finding.payload["ip"], "10.0.0.11")
+
+    def test_the_management_ip_never_changes_the_identity(self) -> None:
+        """Un ESXi cuyo nombre no resuelve ya está en la bandeja por su nombre:
+        la IP de la VMkernel no puede partirlo en dos filas."""
+        with mock.patch.object(hypervisors_collector.net, "resolve", return_value=""):
+            finding = hypervisors_collector._host_finding(self.HOST, "vmware", self._credential())
+
+        self.assertEqual(finding.identity, {"hostname": "esxi01.acme.local"})
+
+    def test_each_neighbour_is_a_link_from_the_vmnic_to_the_switch_port(self) -> None:
+        with mock.patch.object(hypervisors_collector.net, "resolve", return_value="10.0.0.11"):
+            host = hypervisors_collector._host_finding(self.HOST, "vmware", self._credential())
+        links = hypervisors_collector._host_links(self.HOST, host)
+
+        self.assertEqual(len(links), 1)
+        link = links[0]
+        self.assertEqual(link.kind, "link")
+        self.assertEqual(link.payload["protocol"], "cdp")
+        self.assertEqual(link.payload["local"]["port"], "vmnic0")
+        self.assertEqual(link.payload["local"]["device_name"], "esxi01.acme.local")
+        self.assertEqual(link.payload["remote"]["port"], "Te1/0/12")
+        self.assertEqual(link.payload["remote"]["device_ip"], "10.0.0.2")
+        self.assertEqual(link.payload["remote_platform"], "cisco C9300")
+
+    def test_a_host_without_neighbours_gives_no_links(self) -> None:
+        with mock.patch.object(hypervisors_collector.net, "resolve", return_value=""):
+            host = hypervisors_collector._host_finding({"name": "pve01"}, "proxmox", self._credential())
+
+        self.assertEqual(hypervisors_collector._host_links({"name": "pve01"}, host), [])
+        self.assertEqual(host.payload["interfaces"], [])
+        self.assertNotIn("management_interface", host.payload)
+
+
+
 if __name__ == "__main__":
     unittest.main()

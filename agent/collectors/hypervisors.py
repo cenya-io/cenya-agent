@@ -22,7 +22,7 @@ from typing import Any
 
 from agent import credentials as creds
 from agent import hyperv, hypervisor, net, storage_arrays, xcpng
-from agent.collectors import register, tasking
+from agent.collectors import register, snmp, tasking
 from agent.collectors.base import Finding
 from agent.notes import collector_note
 
@@ -203,7 +203,11 @@ class HypervisorCollector:
         if error is not None:
             raise error
         platform = KIND_LABELS[credential.kind]
-        findings = [_host_finding(host, platform, credential) for host in client.hosts()]
+        findings: list[Finding] = []
+        for host in client.hosts():
+            finding = _host_finding(host, platform, credential)
+            findings.append(finding)
+            findings.extend(_host_links(host, finding))
         findings.extend(
             _vm_finding(vm, platform, credential) for vm in client.virtual_machines()
         )
@@ -229,13 +233,16 @@ def _host_finding(host: dict[str, Any], platform: str, credential: creds.Credent
     name = host["name"]
     ip = str(host.get("ip") or "") or net.resolve(name)
     identity = {"ip": ip} if ip else {"hostname": name}
+    # La IP de la VMkernel de gestión completa el hallazgo, pero no entra en
+    # la identidad: cambiarla partiría en dos un ESXi que ya está en la bandeja.
+    ip = ip or str(host.get("management_ip") or "")
     return Finding(
         kind="host",
         identity=identity,
         payload={
             "hostname": name,
             "ip": ip,
-            "mac": "",
+            "mac": str(host.get("mac") or ""),
             "description": str(host.get("description") or f"Host de virtualización ({platform})"),
             # Una cabina pasa por aquí también (`agent.storage_arrays`) y no es
             # un host de virtualización: lo dice ella.
@@ -256,10 +263,46 @@ def _host_finding(host: dict[str, Any], platform: str, credential: creds.Credent
             "storage_volumes": host.get("storage_volumes") if isinstance(host.get("storage_volumes"), list) else [],
             "addresses": host.get("addresses") if isinstance(host.get("addresses"), list) else [],
             "platform": platform,
-            "interfaces": [],
+            # Las vmnic y las VMkernel de un ESXi (`agent.vsphere_soap`), con
+            # la forma de las de SNMP; la de gestión, la VMkernel que lo es.
+            "interfaces": host.get("interfaces") if isinstance(host.get("interfaces"), list) else [],
+            **({"management_interface": host["management_interface"]} if host.get("management_interface") else {}),
             "seen_by": "hypervisor",
         },
     )
+
+
+def _host_links(host: dict[str, Any], finding: Finding) -> list[Finding]:
+    """Un enlace por cada vmnic con vecino CDP o LLDP: el cable del ESXi al
+    switch, propuesto en la bandeja igual que los que ve SNMP."""
+    neighbors = host.get("neighbors")
+    if not isinstance(neighbors, list):
+        return []
+    payload = finding.payload
+    local_base = {"device_mac": payload["mac"], "device_name": payload["hostname"], "device_ip": payload["ip"]}
+    links: list[Finding] = []
+    for neighbor in neighbors:
+        if not isinstance(neighbor, dict) or not neighbor.get("local_port"):
+            continue
+        remote = {
+            "device_mac": str(neighbor.get("remote_mac") or ""),
+            "device_name": str(neighbor.get("remote_name") or ""),
+            "device_ip": "",
+            "port": str(neighbor.get("remote_port") or ""),
+        }
+        if not any(remote.values()):
+            continue
+        extras = {key: neighbor[key] for key in snmp.NEIGHBOR_EXTRA_KEYS if neighbor.get(key)}
+        links.append(
+            snmp._link(
+                str(neighbor.get("protocol") or "lldp"),
+                {**local_base, "port": str(neighbor["local_port"])},
+                remote,
+                remote_ip=str(neighbor.get("remote_ip") or ""),
+                extras=extras,
+            )
+        )
+    return links
 
 
 def _vm_finding(vm: dict[str, Any], platform: str, credential: creds.Credential) -> Finding:
