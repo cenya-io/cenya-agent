@@ -75,6 +75,7 @@ NETWORK_PROPERTIES = (
     "config.network.vnic",
     "config.network.vswitch",
     "config.network.portgroup",
+    "config.network.proxySwitch",
     "config.virtualNicManagerInfo.netConfig",
     "configManager.networkSystem",
     "config.product",
@@ -84,6 +85,13 @@ NETWORK_PROPERTIES = (
 )
 #: Hosts a los que se pregunta qué oyen por CDP o LLDP: una llamada por host.
 MAX_HINT_HOSTS = 64
+#: Los grupos de puertos de los switches distribuidos (vDS): su VLAN vive en
+#: el grupo, no en el host. `config.uplink` no se pide: no existe antes de la
+#: 6.5, y una propiedad que no existe tumba la petición entera.
+DVS_PORTGROUP_PROPERTIES = ("config.distributedVirtualSwitch", "config.defaultPortConfig")
+#: Un rango troncal más ancho que esto es «todas las VLAN» (el grupo de
+#: uplinks, o un troncal abierto): no dice qué VLAN pasan de verdad.
+MAX_TRUNK_SPAN = 64
 #: Tope de tarjetas por host: un ESXi de pyme tiene de dos a ocho.
 MAX_INTERFACES = 64
 
@@ -422,6 +430,7 @@ def _add_network(client: SoapClient, found: dict[str, dict[str, Any]]) -> None:
     """
     asked = 0
     parents: dict[str, str] = {}
+    distributed: dict[str, dict[str, str]] = {}
     try:
         for _moid, props in client.objects("HostSystem", NETWORK_PROPERTIES):
             name = (props.get("name").text or "").strip() if props.get("name") is not None else ""
@@ -436,9 +445,94 @@ def _add_network(client: SoapClient, found: dict[str, dict[str, Any]]) -> None:
             parent = props.get("parent")
             if parent is not None and parent.get("type") == "ClusterComputeResource" and (parent.text or "").strip():
                 parents[name] = (parent.text or "").strip()
+            uplinks = _distributed_uplinks(props)
+            if uplinks:
+                distributed[name] = uplinks
     except HypervisorError:
         return
     _add_clusters(client, found, parents)
+    _add_distributed_vlans(client, found, distributed)
+
+
+def _uuid(value: str) -> str:
+    """El uuid de un vDS de una sola forma: el host lo da con espacios
+    («50 2c 1a … ») y el switch con guiones o sin ellos."""
+    return "".join(ch for ch in value.lower() if ch in "0123456789abcdef")
+
+
+def _distributed_uplinks(props: dict[str, ET.Element]) -> dict[str, str]:
+    """`{vmnic: uuid del vDS}` de las tarjetas de un host que sirven a un
+    switch distribuido (`config.network.proxySwitch`)."""
+    devices = {_text(nic, "key"): _text(nic, "device") for nic in _children(props.get("config.network.pnic"))}
+    found: dict[str, str] = {}
+    for proxy in _children(props.get("config.network.proxySwitch")):
+        uuid = _uuid(_text(proxy, "dvsUuid"))
+        if not uuid:
+            continue
+        for uplink in _children(proxy, "pnic"):
+            device = devices.get((uplink.text or "").strip())
+            if device:
+                found[device] = uuid
+    return found
+
+
+def _add_distributed_vlans(
+    client: SoapClient, found: dict[str, dict[str, Any]], distributed: dict[str, dict[str, str]]
+) -> None:
+    """Las VLAN de los grupos de puertos de cada vDS, en las vmnic que le sirven.
+
+    Dos peticiones solo si algún host tiene tarjetas en un vDS: los switches
+    (para su uuid) y sus grupos de puertos (para su VLAN). Si el vCenter no
+    deja leerlos, las tarjetas se quedan como estaban.
+    """
+    if not distributed:
+        return
+    try:
+        uuids = {
+            moid: _uuid((props["uuid"].text or ""))
+            for moid, props in client.objects("DistributedVirtualSwitch", ("uuid",))
+            if props.get("uuid") is not None
+        }
+        by_switch: dict[str, set[int]] = {}
+        for _moid, props in client.objects("DistributedVirtualPortgroup", DVS_PORTGROUP_PROPERTIES):
+            switch = props.get("config.distributedVirtualSwitch")
+            uuid = uuids.get((switch.text or "").strip()) if switch is not None else None
+            if uuid:
+                by_switch.setdefault(uuid, set()).update(portgroup_vlans(props.get("config.defaultPortConfig")))
+    except HypervisorError:
+        return
+    for host, uplinks in distributed.items():
+        for port in found[host].get("interfaces") or []:
+            vlans = by_switch.get(uplinks.get(port.get("name"), ""))
+            if vlans:
+                port["vlans"] = sorted(set(port.get("vlans") or []) | vlans)
+
+
+def portgroup_vlans(config: ET.Element | None) -> set[int]:
+    """Las VLAN de un grupo de puertos distribuido.
+
+    Una VLAN fija (`VmwareDistributedVirtualSwitchVlanIdSpec`) es esa; un
+    troncal (`...TrunkVlanSpec`) son sus rangos, salvo que sean tan anchos que
+    signifiquen «todas» (el grupo de uplinks, `0-4094`). La 0 no es una VLAN y
+    una VLAN privada (PVLAN) se deja fuera: su número no es el de la red.
+    """
+    vlan = _child(config, "vlan")
+    kind = _type(vlan)
+    found: set[int] = set()
+    if kind == "VmwareDistributedVirtualSwitchVlanIdSpec":
+        value = _text(vlan, "vlanId")
+        if value.isdigit() and 1 <= int(value) <= 4094:
+            found.add(int(value))
+    elif kind == "VmwareDistributedVirtualSwitchTrunkVlanSpec":
+        ranges = []
+        for item in _children(vlan, "vlanId"):
+            start, end = _text(item, "start"), _text(item, "end")
+            if start.isdigit() and end.isdigit() and int(start) <= int(end):
+                ranges.append((max(int(start), 1), min(int(end), 4094)))
+        if sum(end - start + 1 for start, end in ranges) <= MAX_TRUNK_SPAN:
+            for start, end in ranges:
+                found.update(range(start, end + 1))
+    return found
 
 
 def _add_clusters(client: SoapClient, found: dict[str, dict[str, Any]], parents: dict[str, str]) -> None:
@@ -485,7 +579,8 @@ def _uplink_vlans(props: dict[str, ET.Element]) -> dict[str, list[int]]:
     Son las de los grupos de puertos de su vSwitch: el puerto del switch al
     otro lado tiene que llevarlas todas etiquetadas. La 0 es «sin etiqueta» y
     la 4095 «la VLAN la pone la máquina»: ninguna es una VLAN que apuntar.
-    Un switch distribuido (vDS) no está aquí: sus grupos viven en otro objeto.
+    Un switch distribuido (vDS) va aparte (`_add_distributed_vlans`): sus
+    grupos viven en otro objeto del vCenter.
     """
     by_switch: dict[str, set[int]] = {}
     for group in _children(props.get("config.network.portgroup")):

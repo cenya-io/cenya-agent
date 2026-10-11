@@ -507,6 +507,114 @@ class WwnTests(unittest.TestCase):
         self.assertEqual(vsphere_soap.wwn("no"), "")
 
 
+class DistributedSwitchTests(unittest.TestCase):
+    """Las VLAN de un switch distribuido (vDS) viven en sus grupos de puertos,
+    no en el host: hay que cruzarlas por el uuid del switch."""
+
+    def test_a_fixed_vlan_is_that_vlan(self) -> None:
+        config = val(
+            '<vlan xsi:type="VmwareDistributedVirtualSwitchVlanIdSpec"><inherited>false</inherited><vlanId>20</vlanId></vlan>',
+            "VMwareDVSPortSetting",
+        )
+
+        self.assertEqual(vsphere_soap.portgroup_vlans(config), {20})
+
+    def test_a_narrow_trunk_is_its_ranges(self) -> None:
+        config = val(
+            '<vlan xsi:type="VmwareDistributedVirtualSwitchTrunkVlanSpec"><inherited>false</inherited>'
+            "<vlanId><start>10</start><end>12</end></vlanId><vlanId><start>30</start><end>30</end></vlanId></vlan>",
+            "VMwareDVSPortSetting",
+        )
+
+        self.assertEqual(vsphere_soap.portgroup_vlans(config), {10, 11, 12, 30})
+
+    def test_the_uplink_group_and_vlan_0_say_nothing(self) -> None:
+        uplinks = val(
+            '<vlan xsi:type="VmwareDistributedVirtualSwitchTrunkVlanSpec"><inherited>false</inherited>'
+            "<vlanId><start>0</start><end>4094</end></vlanId></vlan>",
+            "VMwareDVSPortSetting",
+        )
+        untagged = val(
+            '<vlan xsi:type="VmwareDistributedVirtualSwitchVlanIdSpec"><inherited>false</inherited><vlanId>0</vlanId></vlan>',
+            "VMwareDVSPortSetting",
+        )
+        private = val(
+            '<vlan xsi:type="VmwareDistributedVirtualSwitchPvlanSpec"><inherited>false</inherited><pvlanId>101</pvlanId></vlan>',
+            "VMwareDVSPortSetting",
+        )
+
+        self.assertEqual(vsphere_soap.portgroup_vlans(uplinks), set())
+        self.assertEqual(vsphere_soap.portgroup_vlans(untagged), set())
+        self.assertEqual(vsphere_soap.portgroup_vlans(private), set())
+
+    def _inventory(self, *, portgroups: Any) -> dict[str, dict[str, Any]]:
+        hosts = obj("host-1", "HostSystem", prop("name", "esxi01.acme.local"))
+        network = page(
+            obj(
+                "host-1",
+                "HostSystem",
+                prop("name", "esxi01.acme.local")
+                + prop(
+                    "config.network.pnic",
+                    "<PhysicalNic><key>key-vim.host.PhysicalNic-vmnic0</key><device>vmnic0</device>"
+                    "<linkSpeed><speedMb>10000</speedMb></linkSpeed><mac>3c:ec:ef:01:02:03</mac></PhysicalNic>"
+                    "<PhysicalNic><key>key-vim.host.PhysicalNic-vmnic1</key><device>vmnic1</device>"
+                    "<linkSpeed><speedMb>10000</speedMb></linkSpeed><mac>3c:ec:ef:01:02:04</mac></PhysicalNic>",
+                    "ArrayOfPhysicalNic",
+                )
+                + prop(
+                    "config.network.proxySwitch",
+                    "<HostProxySwitch><dvsUuid>50 2c 1a 7e 00 11 22 33-44 55 66 77 88 99 aa bb</dvsUuid>"
+                    "<dvsName>DSwitch-Produccion</dvsName><key>k</key>"
+                    "<pnic>key-vim.host.PhysicalNic-vmnic1</pnic></HostProxySwitch>",
+                    "ArrayOfHostProxySwitch",
+                ),
+            )
+        )
+        switches = page(obj("dvs-21", "VmwareDistributedVirtualSwitch", prop("uuid", "50 2c 1a 7e 00 11 22 33-44 55 66 77 88 99 aa bb")))
+        opener = _Opener(
+            {
+                "RetrieveServiceContent": SERVICE_CONTENT,
+                "Login": LOGIN,
+                "CreateContainerView": [VIEW, VIEW, VIEW, VIEW, VIEW],
+                "RetrievePropertiesEx": [page(""), page(hosts), network, switches, portgroups],
+                "Logout": LOGOUT,
+            }
+        )
+        with mock.patch.object(vsphere_soap.SoapClient, "__init__", lambda self, *a, **k: _init(self, opener)):
+            return vsphere_soap.inventory("vc.acme.local", "u", "s")
+
+    def test_each_card_of_a_vds_carries_the_vlans_of_its_portgroups(self) -> None:
+        def group(moid: str, vlan: str) -> str:
+            return obj(
+                moid,
+                "DistributedVirtualPortgroup",
+                '<propSet><name>config.distributedVirtualSwitch</name>'
+                '<val type="VmwareDistributedVirtualSwitch" xsi:type="ManagedObjectReference">dvs-21</val></propSet>'
+                + prop(
+                    "config.defaultPortConfig",
+                    '<vlan xsi:type="VmwareDistributedVirtualSwitchVlanIdSpec"><inherited>false</inherited>'
+                    f"<vlanId>{vlan}</vlanId></vlan>",
+                    "VMwareDVSPortSetting",
+                ),
+            )
+
+        found = self._inventory(portgroups=page(group("dvportgroup-31", "20") + group("dvportgroup-32", "40")))
+
+        ports = {port["name"]: port for port in found["esxi01.acme.local"]["interfaces"]}
+        self.assertEqual(ports["vmnic1"]["vlans"], [20, 40])
+        self.assertNotIn("vlans", ports["vmnic0"])
+
+    def test_without_permission_for_the_portgroups_the_cards_stay_as_they_were(self) -> None:
+        fault = envelope("<soapenv:Fault><faultcode>ServerFaultCode</faultcode><faultstring>NoPermission</faultstring></soapenv:Fault>")
+        error = urllib.error.HTTPError("https://vc/sdk", 500, "Internal", {}, io.BytesIO(fault))
+
+        found = self._inventory(portgroups=error)
+
+        ports = {port["name"]: port for port in found["esxi01.acme.local"]["interfaces"]}
+        self.assertNotIn("vlans", ports["vmnic1"])
+
+
 class HostDetailsTests(unittest.TestCase):
     """La ficha de un ESXi que el vCenter sabe y la persona no tiene por qué
     escribir: versión exacta, núcleos y memoria, y las VLAN de cada tarjeta."""
