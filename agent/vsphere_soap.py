@@ -66,14 +66,21 @@ HOST_PROPERTIES = (
     "datastore",
 )
 DATASTORE_PROPERTIES = ("summary", "info")
-#: La red de cada ESXi, en una petición aparte: un vCenter que no deja leerla
-#: (permiso, versión) no se lleva por delante el hardware ni los datastores.
+#: La red y el resto de la ficha de cada ESXi, en una petición aparte: un
+#: vCenter que no deja leerla (permiso, versión) no se lleva por delante el
+#: hardware ni los datastores.
 NETWORK_PROPERTIES = (
     "name",
     "config.network.pnic",
     "config.network.vnic",
+    "config.network.vswitch",
+    "config.network.portgroup",
     "config.virtualNicManagerInfo.netConfig",
     "configManager.networkSystem",
+    "config.product",
+    "hardware.cpuInfo",
+    "hardware.memorySize",
+    "parent",
 )
 #: Hosts a los que se pregunta qué oyen por CDP o LLDP: una llamada por host.
 MAX_HINT_HOSTS = 64
@@ -376,6 +383,7 @@ def _add_network(client: SoapClient, found: dict[str, dict[str, Any]]) -> None:
     datastores: lo que falta no tumba lo que ya se tiene.
     """
     asked = 0
+    parents: dict[str, str] = {}
     try:
         for _moid, props in client.objects("HostSystem", NETWORK_PROPERTIES):
             name = (props.get("name").text or "").strip() if props.get("name") is not None else ""
@@ -386,8 +394,78 @@ def _add_network(client: SoapClient, found: dict[str, dict[str, Any]]) -> None:
                 asked += 1
                 hints = _hints(client, props)
             found[name].update(host_network(props, hints))
+            found[name].update(host_details(props))
+            parent = props.get("parent")
+            if parent is not None and parent.get("type") == "ClusterComputeResource" and (parent.text or "").strip():
+                parents[name] = (parent.text or "").strip()
     except HypervisorError:
         return
+    _add_clusters(client, found, parents)
+
+
+def _add_clusters(client: SoapClient, found: dict[str, dict[str, Any]], parents: dict[str, str]) -> None:
+    """El clúster de cada host por la API SOAP, de respaldo de la REST.
+
+    La REST pregunta clúster por clúster con un filtro que ya falló una vez
+    (el nombre cambia entre `/api` y `/rest`). Aquí el clúster es el padre del
+    host, sin filtros. Solo se pide si algún host está en un clúster.
+    """
+    if not parents:
+        return
+    try:
+        names = {
+            moid: (props.get("name").text or "").strip()
+            for moid, props in client.objects("ClusterComputeResource", ("name",))
+            if props.get("name") is not None
+        }
+    except HypervisorError:
+        return
+    for host, moid in parents.items():
+        if names.get(moid):
+            found[host]["cluster"] = names[moid][:200]
+
+
+def host_details(props: dict[str, ET.Element]) -> dict[str, Any]:
+    """Lo que la ficha de un ESXi tiene sitio para guardar: la versión exacta
+    («VMware ESXi 8.0.2 build-22380479»), los núcleos lógicos (con hilos, que
+    es contra lo que se comparan las vCPU repartidas) y la memoria en GB."""
+    product = _text(props.get("config.product"), "fullName")
+    threads = _text(props.get("hardware.cpuInfo"), "numCpuThreads")
+    memory = props.get("hardware.memorySize")
+    memory_text = (memory.text or "").strip() if memory is not None else ""
+    found: dict[str, Any] = {
+        "os": product[:200],
+        "cpu_count": int(threads) if threads.isdigit() else 0,
+        "ram_gb": round(int(memory_text) / 1024**3) if memory_text.isdigit() else 0,
+    }
+    return {key: value for key, value in found.items() if value}
+
+
+def _uplink_vlans(props: dict[str, ET.Element]) -> dict[str, list[int]]:
+    """Las VLAN que pasan por cada vmnic de un vSwitch estándar.
+
+    Son las de los grupos de puertos de su vSwitch: el puerto del switch al
+    otro lado tiene que llevarlas todas etiquetadas. La 0 es «sin etiqueta» y
+    la 4095 «la VLAN la pone la máquina»: ninguna es una VLAN que apuntar.
+    Un switch distribuido (vDS) no está aquí: sus grupos viven en otro objeto.
+    """
+    by_switch: dict[str, set[int]] = {}
+    for group in _children(props.get("config.network.portgroup")):
+        spec = _child(group, "spec")
+        vlan = _text(spec, "vlanId")
+        if vlan.isdigit() and 1 <= int(vlan) <= 4094:
+            by_switch.setdefault(_text(spec, "vswitchName"), set()).add(int(vlan))
+    devices = {_text(nic, "key"): _text(nic, "device") for nic in _children(props.get("config.network.pnic"))}
+    found: dict[str, list[int]] = {}
+    for switch in _children(props.get("config.network.vswitch")):
+        vlans = by_switch.get(_text(switch, "name"))
+        if not vlans:
+            continue
+        for uplink in _children(switch, "pnic"):
+            device = devices.get((uplink.text or "").strip())
+            if device:
+                found[device] = sorted(vlans)
+    return found
 
 
 def _hints(client: SoapClient, props: dict[str, ET.Element]) -> list[ET.Element]:
@@ -415,20 +493,22 @@ def host_network(props: dict[str, ET.Element], hints: list[ET.Element]) -> dict[
     de enlace, una tarjeta está caída. Solo van las claves con algo dentro.
     """
     interfaces: list[dict[str, Any]] = []
+    vlans = _uplink_vlans(props)
     for nic in _children(props.get("config.network.pnic"))[:MAX_INTERFACES]:
         name = _text(nic, "device")
         if not name:
             continue
         speed = _text(_child(nic, "linkSpeed"), "speedMb")
-        interfaces.append(
-            {
-                "name": name,
-                "mac": vmnet.mac(_text(nic, "mac")),
-                "status": "up" if speed else "down",
-                "speed_mbps": int(speed) if speed.isdigit() else 0,
-                "type": "ethernet",
-            }
-        )
+        port: dict[str, Any] = {
+            "name": name,
+            "mac": vmnet.mac(_text(nic, "mac")),
+            "status": "up" if speed else "down",
+            "speed_mbps": int(speed) if speed.isdigit() else 0,
+            "type": "ethernet",
+        }
+        if vlans.get(name):
+            port["vlans"] = vlans[name]
+        interfaces.append(port)
     management_keys = _management_keys(props.get("config.virtualNicManagerInfo.netConfig"))
     management = management_ip = management_mac = ""
     for vnic in _children(props.get("config.network.vnic"))[:MAX_INTERFACES]:

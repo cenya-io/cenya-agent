@@ -267,6 +267,9 @@ def _host_finding(host: dict[str, Any], platform: str, credential: creds.Credent
             # la forma de las de SNMP; la de gestión, la VMkernel que lo es.
             "interfaces": host.get("interfaces") if isinstance(host.get("interfaces"), list) else [],
             **({"management_interface": host["management_interface"]} if host.get("management_interface") else {}),
+            # Núcleos lógicos y memoria del servidor: el denominador de «vCPU
+            # y RAM repartidas frente a las que tiene».
+            **{key: host[key] for key in ("cpu_count", "ram_gb") if isinstance(host.get(key), int) and host[key] > 0},
             "seen_by": "hypervisor",
         },
     )
