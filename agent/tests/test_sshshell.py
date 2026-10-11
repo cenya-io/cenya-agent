@@ -172,6 +172,11 @@ if __name__ == "__main__":
 
 
 class ConfigInASessionTests(unittest.TestCase):
+    def test_only_text_past_the_echo_counts_as_an_answer(self) -> None:
+        self.assertFalse(sshshell._answered("show running-config\n"))
+        self.assertFalse(sshshell._answered("show running-config\n\n  \n"))
+        self.assertTrue(sshshell._answered("show running-config\n\n!Current Configuration:\n"))
+
     def test_the_command_output_is_cut_between_its_echo_and_the_next_prompt(self) -> None:
         output = (
             "<SW-Huawei-01>screen-length 0 temporary\r\nInfo: The configuration takes effect on the current user terminal interface only.\r\n"

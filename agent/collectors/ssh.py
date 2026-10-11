@@ -1077,6 +1077,12 @@ SAVED_CONFIG_COMMANDS: dict[str, str] = {
     "zyxel": "show config",
 }
 
+#: The whole capture session, from connecting to the prompt after the copy.
+#: More than an identification gets: the paging-off orders of every vendor go
+#: first (a PowerConnect spent half a minute answering «Invalid input» to the
+#: others), and a switch may think for seconds before the first line.
+CAPTURE_SESSION_SECONDS = 180
+
 #: Techo por copia. El mismo número que `core.discovery.MAX_CONFIG_BYTES`: el
 #: agente no puede importarlo --no tiene Django-- así que se repite aquí. Se
 #: aplica por separado a la que está en marcha y a la guardada.
@@ -1372,6 +1378,7 @@ def _session(
     credential: creds.Credential,
     commands: tuple[str, ...] = sshshell.IDENTIFY,
     enable: bool = False,
+    timeout: float = sshshell.SESSION_SECONDS,
 ) -> Any:
     """Una sesión interactiva (`agent.sshshell`), por el límite de credenciales si lo hay."""
 
@@ -1384,6 +1391,7 @@ def _session(
             key_file=credential.key_file,
             commands=commands,
             enable=enable,
+            timeout=timeout,
         )
 
     if logins is None:
@@ -1434,7 +1442,14 @@ def fetch_config(
     needs_session = not output.strip() and _wants_session(answer)
     refused_here = enable and answer.connected and rejected_by_cli(output)
     if needs_session or refused_here:
-        session = _session(logins, host, credential, commands=(*sshshell.PAGING_OFF, command), enable=enable)
+        session = _session(
+            logins,
+            host,
+            credential,
+            commands=(*sshshell.PAGING_OFF, command),
+            enable=enable,
+            timeout=CAPTURE_SESSION_SECONDS,
+        )
         if session is tasking.SKIPPED or not session.connected:
             # A refusal stays what it was: the caller notes the missing privilege.
             return output if refused_here else ""
