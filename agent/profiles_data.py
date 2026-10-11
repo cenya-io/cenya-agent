@@ -124,6 +124,22 @@ PROFILES: tuple[Profile, ...] = (
         model_from_description=r"System Type: ([\w-]+)",
         version_from_description=r"OS Version: (\d[\d.]*?)\.?(?:\s|$)",
     ),
+    # The iDRAC (7, 8, 9) of a PowerEdge server: LibreNMS drac.yaml detects it
+    # by sysObjectID .674.10892.5 and reads, from IDRAC-MIB-SMIv2,
+    # systemModelName.0 (hardware), systemServiceTag.0 (serial) and
+    # racFirmwareVersion.0 (version); tests/snmpsim/drac_r640.snmprec answers
+    # "PowerEdge R640" with an empty sysDescr. Model and serial are the
+    # *server's*: that is what lets the server hang the card off the right
+    # device as its management port instead of adding a second box.
+    Profile(
+        key="dell-idrac",
+        vendor="Dell",
+        object_id_prefix="1.3.6.1.4.1.674.10892.5",
+        os="iDRAC",
+        serial_oid="1.3.6.1.4.1.674.10892.5.1.3.2.0",
+        model_oid="1.3.6.1.4.1.674.10892.5.1.3.12.0",
+        version_oid="1.3.6.1.4.1.674.10892.5.1.1.8.0",
+    ),
     # --- Netgear, TP-Link, Ubiquiti ---------------------------------------
     # SNMP::Info Layer2::Netgear: ng_gsmserial .10.1.1.1.4.0 and ng_gsmosver
     # .10.1.1.1.13.0 (GSM/FSM only); LibreNMS netgear.yaml regex

@@ -69,6 +69,9 @@ SAMPLES: dict[str, tuple[str, str]] = {
         "Dell SmartFabric OS10 Enterprise.\nCopyright (c) 1999-2025 by Dell Inc. All Rights Reserved.\r\n"
         "System Description: OS10 Enterprise.\r\nOS Version: 10.6.1.0.\r\nSystem Type: S4128T-ON",
     ),
+    # LibreNMS tests/snmpsim/drac_r640.snmprec: an iDRAC9 answers with an
+    # empty sysDescr; drac_m1000e.snmprec carries the classic banner.
+    "dell-idrac": ("1.3.6.1.4.1.674.10892.5", "Dell Out-of-band SNMP Agent for Remote Access Controller"),
     # LibreNMS tests/snmpsim/netgear.snmprec
     "netgear": (
         "1.3.6.1.4.1.4526.100.4.32",
@@ -274,6 +277,21 @@ class DellTests(ProfileTestCase):
         self.assertEqual(identity.model, "S4128T-ON")
         self.assertEqual(identity.os_version, "10.6.1.0")
         self.assertEqual(identity.os, "OS10")
+
+
+    def test_dell_idrac_reads_the_servers_model_and_service_tag(self) -> None:
+        profile = self.resolved("dell-idrac")
+        answers = {"model": "PowerEdge R640", "serial": "1234ABC", "version": "5.10.10.00"}
+
+        identity = identify(profile, "", answers, {})
+
+        self.assertEqual(identity.manufacturer, "Dell")
+        self.assertEqual(identity.model, "PowerEdge R640")
+        self.assertEqual(identity.serial, "1234ABC")
+        self.assertEqual(identity.payload_fields()["os"], "iDRAC 5.10.10.00")
+
+    def test_dell_idrac_is_not_taken_for_a_switch(self) -> None:
+        self.assertEqual(resolve("1.3.6.1.4.1.674.10892.5", "").key, "dell-idrac")
 
 
 class SmallVendorSwitchTests(ProfileTestCase):
