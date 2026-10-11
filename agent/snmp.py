@@ -711,6 +711,8 @@ async def _query_power_supplies(
     """
     indexes = power.supply_indexes(classes)
     if not indexes:
+        if power.is_qnap(object_id):
+            return await _query_qnap_power_supplies(engine, host, auth)
         return []
     status_oid, states = power.status_column(object_id)
     supplies: list[dict[str, str]] = []
@@ -731,6 +733,18 @@ async def _query_power_supplies(
             answer = {}
         supplies.append(power.supply(index, position, row, power.status_of(answer.get("status", ""), states)))
     return supplies
+
+
+async def _query_qnap_power_supplies(engine, host: str, auth: Auth) -> list[dict[str, str]]:
+    """The supplies of a QNAP, from its own table (``power.QNAP_POWER_STATUS_OID``):
+    one walk of one short column, a row per supply with its state. QNAP names
+    none, so they go by position."""
+    column = await _walk(engine, host, auth, power.QNAP_POWER_STATUS_OID)
+    rows = sorted(column.items(), key=lambda item: power._index_key(item[0]))[: power.MAX_POWER_SUPPLIES]
+    return [
+        power.supply(index, position, {}, power.status_of(value, power.QNAP_POWER_STATES))
+        for position, (index, value) in enumerate(rows, start=1)
+    ]
 
 
 async def _query_fdb(engine, host: str, auth: Auth, object_id: str) -> list[dict[str, str]]:
