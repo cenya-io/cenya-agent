@@ -1,4 +1,4 @@
-"""Cabinas de discos con API: Synology DSM y TrueNAS.
+"""Cabinas de discos con API: Synology DSM, TrueNAS y QNAP.
 
 Lo que los hipervisores no pueden saber de una cabina lo dice ella: con qué
 RAID y qué discos está hecho cada volumen, cuánto mide de verdad y a quién deja
@@ -19,13 +19,21 @@ como en los hipervisores (`agent.tlspin`: su CA o el certificado en el que se
 confió desde la web). Una llamada auxiliar que falla deja ese dato vacío; nunca
 se queda sin la cabina por ello.
 
-QNAP no está: su información de LUN va por SNMP con su propia MIB, y esa tabla
-no se escribe de memoria; hace falta un volcado de un equipo real.
+QNAP (QTS y QuTS hero) no publica una API documentada: sus CGI son los que
+usa su propia web y los que conocen `qnapstats` o el paquete de QNAP para
+VMware. La ficha y las direcciones salen de llamadas conocidas; el inventario
+iSCSI se lee sin dar por hechos los nombres de sus campos (`qnap_volumes`), y
+`cenya-agent qnap-dump` (`agent/qnap_dump.py`) vuelca lo que contesta una QNAP
+real para afinarlo.
 """
 
 from __future__ import annotations
 
+import base64
 import json
+import re
+import urllib.parse
+import xml.etree.ElementTree as ET
 from typing import Any
 
 from agent.hypervisor import HypervisorError, RestClient
@@ -344,3 +352,211 @@ def truenas_addresses(interfaces: list[dict[str, Any]]) -> list[str]:
             if address and alias.get("type", "INET") in ("INET", "INET6") and address not in found:
                 found.append(address)
     return found[:64]
+
+
+# --- QNAP ---------------------------------------------------------------------------
+
+
+#: Las llamadas que se le hacen a una QNAP, en orden. La de volúmenes no la usa
+#: el cliente (no dice protocolo ni RAID), pero el volcado la lleva: es la que
+#: dirá cómo cruzar un LUN con su volumen.
+QNAP_CALLS = {
+    "sysinfo": "/cgi-bin/management/manaRequest.cgi?subfunc=sysinfo&hd=no&multicpu=1",
+    "volumes": "/cgi-bin/management/chartReq.cgi?chart_func=disk_usage&disk_select=all&include=all",
+    "iscsi": "/cgi-bin/disk/iscsi_portal_setting.cgi?func=get_all",
+}
+
+
+def _qnap_root(text: str) -> ET.Element | None:
+    try:
+        return ET.fromstring(text)
+    except ET.ParseError:
+        return None
+
+
+def _local(tag: Any) -> str:
+    return str(tag).rsplit("}", 1)[-1]
+
+
+def _first(root: ET.Element | None, *names: str) -> str:
+    """El texto del primer elemento con alguno de esos nombres, en cualquier nivel."""
+    if root is None:
+        return ""
+    wanted = {name.lower() for name in names}
+    for element in root.iter():
+        if _local(element.tag).lower() in wanted and (element.text or "").strip():
+            return (element.text or "").strip()
+    return ""
+
+
+class QNAPClient:
+    """Los CGI de QTS, con usuario y contraseña de un administrador.
+
+    QTS no tiene un rol de solo lectura que vea el iSCSI: el inventario de
+    destinos pide «Administración del sistema». Sin él la cabina entra igual,
+    con su ficha y sus direcciones, y sin volúmenes. Una cuenta con doble
+    factor no puede entrar sin una persona delante: se dice, no se reintenta.
+    """
+
+    def __init__(
+        self, host: str, username: str, secret: str, *, port: int = 0, ca_file: str = "", tls_pin: str = ""
+    ) -> None:
+        self.host = host
+        self.rest = RestClient(f"https://{host}:{port or 443}", ca_file=ca_file, tls_pin=tls_pin)
+        self.username = username
+        self.secret = secret
+        self.sid = ""
+
+    def login(self) -> None:
+        text = self.rest.text(
+            "POST",
+            "/cgi-bin/authLogin.cgi",
+            body={
+                "user": self.username,
+                # QTS espera la contraseña en base64: no es cifrado, va por TLS.
+                "pwd": base64.b64encode(self.secret.encode("utf-8")).decode("ascii"),
+                "serviceKey": "1",
+            },
+        )
+        root = _qnap_root(text)
+        if root is None:
+            raise HypervisorError("la respuesta de la QNAP no era XML")
+        if _first(root, "need2SV") == "1":
+            raise HypervisorError("la cuenta de la QNAP pide doble factor", status=401)
+        sid = _first(root, "authSid")
+        if _first(root, "authPassed") != "1" or not sid:
+            raise HypervisorError("la QNAP rechazó el inicio de sesión", status=401)
+        self.sid = sid
+
+    def call(self, path: str) -> str:
+        """Una llamada con la sesión; vacía si la QNAP dice que no."""
+        joiner = "&" if "?" in path else "?"
+        try:
+            return self.rest.text("GET", f"{path}{joiner}sid={urllib.parse.quote(self.sid)}")
+        except HypervisorError:
+            return ""
+
+    def hosts(self) -> list[dict[str, Any]]:
+        info = _qnap_root(self.call(QNAP_CALLS["sysinfo"]))
+        iscsi = _qnap_root(self.call(QNAP_CALLS["iscsi"]))
+        self.logout()
+        firmware = " ".join(part for part in (_first(info, "version"), _first(info, "build")) if part)
+        return [
+            _array_host(
+                _first(info, "server_name") or self.host,
+                "QNAP",
+                model=(_first(info, "displayModelName") or _first(info, "modelName"))[:200],
+                serial=_first(info, "serial_number")[:200],
+                os=f"QTS {firmware}".strip() if firmware else "",
+                storage_volumes=qnap_volumes(iscsi),
+                addresses=qnap_addresses(info),
+            )
+        ]
+
+    def virtual_machines(self) -> list[dict[str, Any]]:
+        return []
+
+    def logout(self) -> None:
+        if not self.sid:
+            return
+        try:
+            self.rest.text("GET", f"/cgi-bin/authLogout.cgi?logout=1&sid={urllib.parse.quote(self.sid)}")
+        except HypervisorError:
+            pass
+
+
+def qnap_addresses(info: ET.Element | None) -> list[str]:
+    """Las IP de sus tarjetas (`eth_ip1`, `eth_ip2`…): las que un ESXi pudo
+    ver como portal iSCSI y con las que el servidor funde la cabina provisional."""
+    found: list[str] = []
+    if info is None:
+        return found
+    for element in info.iter():
+        if re.fullmatch(r"eth_ip\d+", _local(element.tag).lower()):
+            address = (element.text or "").strip()
+            if address and address != "0.0.0.0" and address not in found:
+                found.append(address)
+    return found[:64]
+
+
+_IQN = re.compile(r"^iqn\.", re.IGNORECASE)
+
+
+def _row(element: ET.Element) -> dict[str, str]:
+    """Los hijos directos con texto, por su nombre en minúsculas."""
+    return {_local(child.tag).lower(): (child.text or "").strip() for child in element if (child.text or "").strip()}
+
+
+def qnap_volumes(iscsi: ET.Element | None) -> list[dict[str, Any]]:
+    """Los destinos iSCSI de una QNAP, y sus LUN, sin dar por hechos los nombres.
+
+    Un destino es cualquier elemento con un hijo `target…` y un IQN que empieza
+    por `iqn.`; sus iniciadores, los IQN que cuelgan de él en elementos
+    `initiator…`. Un LUN es cualquier elemento con un hijo `lun…name`; su
+    destino, el índice de destino que lleve dentro. Cada LUN sale con su
+    destino; un destino del que no se lee ningún LUN sale él solo, con su
+    nombre: basta para fundir con esta la cabina que un ESXi creó por ese IQN.
+    """
+    if iscsi is None:
+        return []
+    targets: dict[str, dict[str, Any]] = {}
+    luns: list[dict[str, Any]] = []
+    for element in iscsi.iter():
+        row = _row(element)
+        if not row:
+            continue
+        iqn = next((value for key, value in row.items() if "iqn" in key and _IQN.match(value)), "")
+        if iqn and any(key.startswith("target") for key in row):
+            index = row.get("targetindex") or row.get("targetid") or row.get("index") or iqn
+            initiators = sorted(
+                {
+                    (node.text or "").strip()
+                    for node in element.iter()
+                    if "initiator" in _local(node.tag).lower() and _IQN.match((node.text or "").strip())
+                }
+            )
+            targets[index] = {
+                "iqn": iqn,
+                "name": row.get("targetname") or row.get("targetalias") or iqn.rsplit(":", 1)[-1],
+                "initiators": initiators,
+            }
+            continue
+        name = next((value for key, value in row.items() if re.fullmatch(r"lun\w*name", key)), "")
+        if not name:
+            continue
+        size = next((value for key, value in row.items() if re.fullmatch(r"lun\w*(capacity|size)", key)), "")
+        number = next((value for key, value in row.items() if re.fullmatch(r"lun(number|no|id|nr)", key)), "")
+        target = next(
+            (
+                (node.text or "").strip()
+                for node in element.iter()
+                if _local(node.tag).lower() in ("targetindex", "targetid") and (node.text or "").strip()
+            ),
+            "",
+        )
+        luns.append({"name": name, "size": size, "number": number, "target": target})
+    found: list[dict[str, Any]] = []
+    used: set[str] = set()
+    for lun in luns[:MAX_VOLUMES]:
+        target = targets.get(lun["target"], {})
+        if target:
+            used.add(lun["target"])
+        found.append(_qnap_volume(lun["name"], target, size=lun["size"], number=lun["number"]))
+    for index, target in targets.items():
+        if index not in used and len(found) < MAX_VOLUMES:
+            found.append(_qnap_volume(target["name"], target))
+    return found
+
+
+def _qnap_volume(name: str, target: dict[str, Any], *, size: str = "", number: str = "") -> dict[str, Any]:
+    # El tamaño solo se cree en bytes (lo que hace la web de QTS); en otra
+    # unidad saldría absurdo, y vacío es mejor que absurdo.
+    gb = round(int(size) / (1024**3)) if size.isdigit() and int(size) >= 1024**3 else 0
+    return {
+        "name": name[:200],
+        "protocol": "iscsi",
+        "gb": gb,
+        "target_iqn": str(target.get("iqn") or "")[:255],
+        "lun": int(number) if number.isdigit() else None,
+        "initiators": list(target.get("initiators") or []),
+    }
