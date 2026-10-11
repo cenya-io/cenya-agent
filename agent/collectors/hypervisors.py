@@ -38,6 +38,7 @@ CLIENTS = {
     # cabina con sus volúmenes, y no tienen máquinas virtuales.
     creds.SYNOLOGY: storage_arrays.SynologyClient,
     creds.TRUENAS: storage_arrays.TrueNASClient,
+    creds.QNAP: storage_arrays.QNAPClient,
 }
 
 KIND_LABELS = {
@@ -47,6 +48,7 @@ KIND_LABELS = {
     creds.XCPNG: "xcpng",
     creds.SYNOLOGY: "synology",
     creds.TRUENAS: "truenas",
+    creds.QNAP: "qnap",
 }
 
 

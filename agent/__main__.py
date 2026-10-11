@@ -239,6 +239,12 @@ def main(argv: list[str] | None = None, stop_event: StopSignal | None = None) ->
         from agent import selftest
 
         raise SystemExit(selftest.run())
+    if args[:1] == ["qnap-dump"]:
+        # Tampoco necesita estar enrolado: lee una QNAP y deja un fichero con
+        # lo que contesta, para afinar el lector de su inventario.
+        from agent import qnap_dump
+
+        raise SystemExit(qnap_dump.run(args[1:]))
     if args[:1] == ["export-netbox"]:
         # No necesita estar enrolado: lee un NetBox y deja un fichero, sin
         # hablar con el servidor de Cenya.

@@ -50,7 +50,7 @@ def _crashed(collector: str, exc: BaseException) -> Note:
 # --- test_credential -------------------------------------------------------------------
 
 #: Lo que se prueba contra su servidor (hipervisores y cabinas con API).
-HYPERVISOR_KINDS = (creds.VMWARE, creds.PROXMOX, creds.HYPERV, creds.XCPNG, creds.SYNOLOGY, creds.TRUENAS)
+HYPERVISOR_KINDS = (creds.VMWARE, creds.PROXMOX, creds.HYPERV, creds.XCPNG, creds.SYNOLOGY, creds.TRUENAS, creds.QNAP)
 
 
 def test_credential(params: Mapping[str, Any], ctx: dict) -> Outcome:

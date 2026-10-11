@@ -111,11 +111,31 @@ class RestClient:
         headers: dict[str, str] | None = None,
         body: dict[str, Any] | None = None,
     ) -> Any:
+        raw = self.text(method, path, headers={"Accept": "application/json", **(headers or {})}, body=body)
+        if not raw:
+            return None
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError as exc:
+            # Un portal cautivo, un proxy o el propio hipervisor devolviendo su
+            # página de error en HTML. Sin esto, el `for` de más arriba recorre
+            # una cadena y saca hallazgos de una letra cada uno.
+            raise HypervisorError("la respuesta no era JSON") from exc
+
+    def text(
+        self,
+        method: str,
+        path: str,
+        *,
+        headers: dict[str, str] | None = None,
+        body: dict[str, Any] | None = None,
+    ) -> str:
+        """La respuesta tal cual, para las API que contestan XML (QNAP)."""
         data = urllib.parse.urlencode(body).encode() if body else None
         request = urllib.request.Request(
             f"{self.base_url}{path}",
             data=data,
-            headers={"Accept": "application/json", **(headers or {})},
+            headers=headers or {},
             method=method,
         )
         try:
@@ -132,15 +152,7 @@ class RestClient:
         except (TimeoutError, ssl.SSLError) as exc:
             # Esperando la respuesta, con la petición ya enviada: cuenta.
             raise HypervisorError(str(getattr(exc, "reason", exc))) from exc
-        if not raw:
-            return None
-        try:
-            return json.loads(raw)
-        except json.JSONDecodeError as exc:
-            # Un portal cautivo, un proxy o el propio hipervisor devolviendo su
-            # página de error en HTML. Sin esto, el `for` de más arriba recorre
-            # una cadena y saca hallazgos de una letra cada uno.
-            raise HypervisorError("la respuesta no era JSON") from exc
+        return raw
 
 
 class _NoRedirects(urllib.request.HTTPRedirectHandler):
