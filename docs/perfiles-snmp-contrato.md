@@ -85,7 +85,7 @@ Por lo que hay en una pyme española, en este orden de importancia. Para cada un
 5. HP ProCurve / Aruba switches (`1.3.6.1.4.1.11.2.3.7.11`; serie en `1.3.6.1.4.1.11.2.36.1.1.2.9.0`)
 6. Aruba CX (`47196`)
 7. HPE Comware / H3C (`25506`; sysDescr `Comware`)
-8. Dell Networking N-series / OS6 (`674.10895`), Dell OS10 (`674.11000.5000.100`)
+8. Dell Networking N-series / OS6 (`674.10895`), Dell OS10 (`674.11000.5000.100`), iDRAC 7/8/9 (`674.10892.5`: modelo y número de serie del servidor)
 9. Netgear (`4526`; sysDescr suele traer el modelo)
 10. TP-Link (`11863`)
 11. Ubiquiti EdgeSwitch / EdgeRouter / UniFi (`4413`, `41112`, `10002`)
