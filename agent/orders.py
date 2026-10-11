@@ -16,7 +16,7 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from agent import credentials as creds
-from agent import net, probe, sealing
+from agent import net, probe, redfish, sealing
 from agent.collectors import tasking
 from agent.notes import Note, collector_note, probe_note
 
@@ -83,7 +83,7 @@ def _test_credential(params: Mapping[str, Any], ctx: dict) -> Outcome:
 
     if credential.kind in HYPERVISOR_KINDS:
         return _test_hypervisor(credential, ctx)
-    if credential.kind not in probe.TESTABLE:
+    if credential.kind not in probe.TESTABLE and credential.kind != creds.REDFISH:
         return _refused("unsupported", "esta clase de credencial no se puede probar", kind=credential.kind[:40])
 
     raw_ip = params.get("ip")
@@ -98,8 +98,53 @@ def _test_credential(params: Mapping[str, Any], ctx: dict) -> Outcome:
         return FAILED, {"ok": False, "line": _line(note)}, [note]
     if not credential.covers(ip):
         return _refused("out_of_scope", "la dirección está fuera del alcance de la credencial")
+    if credential.kind == creds.REDFISH:
+        return _test_redfish(credential, ip, ctx)
     ok, note = probe.test_line(ip, ctx, credential)
     return DONE, {"ok": ok, "line": _line(note)}, []
+
+
+#: La frase de cada fallo de «Probar» contra una tarjeta (en castellano de
+#: respaldo: la web la escribe en el idioma de quien mira por su código).
+_REDFISH_TEXTS = {
+    redfish.AUTH_FAILED: "no entra con ese usuario y contraseña",
+    redfish.UNREACHABLE: "no contesta por HTTPS",
+    redfish.NOT_REDFISH: "contesta, pero no habla Redfish",
+    redfish.CERTIFICATE_CHANGED: "presenta otro certificado que la última vez; la contraseña no se ha enviado",
+}
+
+
+def _test_redfish(credential: creds.Credential, ip: str, ctx: dict) -> Outcome:
+    """«Probar» una credencial Redfish contra la tarjeta de esa IP.
+
+    El certificado se fija igual que en un barrido (la primera vez), y un
+    acierto se apunta en la memoria como cualquier otro.
+    """
+    mem = tasking.memory(ctx)
+    key = tasking.host_key(ctx, ip, "") if mem is not None else ""
+    pin = ""
+    if mem is not None:
+        try:
+            pin = mem.pin_for(key, credential.kind)
+        except Exception:  # noqa: BLE001 - la memoria es prescindible
+            pin = ""
+    answer = redfish.read(ip, credential.username, credential.secret, pin=pin)
+    if mem is not None:
+        try:
+            if answer.pin and not pin:
+                mem.remember_pin(key, credential.kind, answer.pin)
+            if answer.connected:
+                mem.record_success(key, credential.kind, credential, tasking.now())
+        except Exception:  # noqa: BLE001
+            pass
+    if answer.connected:
+        note = probe_note(
+            "redfish", "logged_in", f"{ip}: entró con «{credential.username}»", host=ip, username=credential.username
+        )
+        return DONE, {"ok": True, "line": _line(note)}, []
+    code = answer.code if answer.code in _REDFISH_TEXTS else redfish.UNREACHABLE
+    note = probe_note("redfish", code, f"{ip}: {_REDFISH_TEXTS[code]}", host=ip)
+    return DONE, {"ok": False, "line": _line(note)}, []
 
 
 def _test_hypervisor(credential: creds.Credential, ctx: dict) -> Outcome:

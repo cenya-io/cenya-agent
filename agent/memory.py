@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import re
 import threading
 import time
 from dataclasses import dataclass
@@ -106,6 +107,10 @@ def _text(value: Any) -> str:
     return value if isinstance(value, str) else ""
 
 
+#: La huella SHA-256 de un certificado, en hexadecimal en minúsculas.
+_PIN_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
 def _blank() -> dict[str, Any]:
     return {
         "ip": "",
@@ -116,6 +121,7 @@ def _blank() -> dict[str, Any]:
         "config_family": "",
         "confwatch": {},
         "creds": {},
+        "pins": {},
     }
 
 
@@ -135,6 +141,13 @@ def _clean_entry(raw: Any) -> dict[str, Any] | None:
     entry["identity_mac"] = _mac(_text(raw.get("identity_mac")))
     entry["config_family"] = _text(raw.get("config_family"))
     entry["confwatch"] = _clean_confwatch(raw.get("confwatch"))
+    pins = raw.get("pins")
+    if isinstance(pins, dict):
+        entry["pins"] = {
+            protocol: pin
+            for protocol, pin in pins.items()
+            if isinstance(protocol, str) and isinstance(pin, str) and _PIN_RE.match(pin)
+        }
     creds = raw.get("creds")
     if isinstance(creds, dict):
         for protocol, record in creds.items():
@@ -440,6 +453,24 @@ class Memory:
             return
         with self._lock:
             self._entry(host_key)["confwatch"] = cleaned
+
+    # --- certificados fijados (Redfish) ----------------------------------------------
+
+    def pin_for(self, host_key: str, protocol: str) -> str:
+        """La huella del certificado que ese equipo presentó la primera vez, o ""."""
+        with self._lock:
+            entry = self._hosts.get(host_key) or {}
+            return (entry.get("pins") or {}).get(protocol, "")
+
+    def remember_pin(self, host_key: str, protocol: str, pin: str) -> None:
+        """Fija el certificado de ese equipo, como `accept-new` en SSH. Solo la
+        primera vez: uno ya fijado no lo cambia nadie desde aquí (borrar la
+        memoria lo olvida, y eso lo decide una persona)."""
+        if not host_key or not _PIN_RE.match(pin or ""):
+            return
+        with self._lock:
+            entry = self._entry(host_key)
+            entry.setdefault("pins", {}).setdefault(protocol, pin)
 
     # --- credenciales -------------------------------------------------------------
 

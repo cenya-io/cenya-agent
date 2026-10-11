@@ -280,6 +280,9 @@ PANELS: tuple[tuple[str, str], ...] = (
     ("unifi", "UniFi"),
 )
 
+#: Los paneles que son una tarjeta de control remoto (`agent/collectors/redfish.py`).
+CARD_PANELS = ("iDRAC", "iLO")
+
 _TITLE = re.compile(rb"<title[^>]*>(.*?)</title>", re.I | re.S)
 
 
@@ -951,6 +954,12 @@ class FingerprintCollector:
             fingerprint, hostname, os_hint = assemble(answers.get(ip, {}))
             if not fingerprint:
                 continue
+            if fingerprint.get("panel") in CARD_PANELS:
+                # La página de una tarjeta de control remoto: el colector
+                # Redfish, que va detrás, solo entra en las IP marcadas así.
+                from agent.collectors.redfish import mark_card
+
+                mark_card(ctx, ip, fingerprint["panel"])
             payload: dict[str, Any] = {"ip": ip, "seen_by": "fingerprint", "fingerprint": fingerprint}
             for key, value in (("mac", mac), ("hostname", hostname), ("os", os_hint)):
                 if value:
