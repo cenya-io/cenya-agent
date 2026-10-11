@@ -322,6 +322,13 @@ class _StorageMap:
             for hba in _children(props.get("config.storageDevice.hostBusAdapter"))
             if _type(hba) == "HostInternetScsiHba"
         }
+        # La WWPN de cada tarjeta de fibra: el «iniciador» de Fibre Channel,
+        # lo que la cabina tiene en su zona y en su lista de hosts.
+        self.fc_initiators = {
+            _text(hba, "key"): wwn(_text(hba, "portWorldWideName"))
+            for hba in _children(props.get("config.storageDevice.hostBusAdapter"))
+            if _type(hba) == "HostFibreChannelHba"
+        }
         self.paths_by_lun: dict[str, list[ET.Element]] = {}
         for lun in _children(props.get("config.storageDevice.multipathInfo"), "lun"):
             self.paths_by_lun[_text(lun, "lun")] = _children(lun, "path")
@@ -359,13 +366,44 @@ class _StorageMap:
                 lun=_lun(first),
                 paths=len(alive) or None,
             )
-        if any(_type(t) == "HostFibreChannelTargetTransport" for t in transports):
-            return vmnet.datastore(name, "fc", gb=size, lun=_lun(paths[0]), paths=len(alive) or None)
+        fibre = [p for p in paths if _type(_child(p, "transport")) == "HostFibreChannelTargetTransport"]
+        if fibre:
+            # La WWNN de destino es la cabina (una por cabina, sea cual sea el
+            # puerto por el que se entra); la WWPN de la tarjeta del host es el
+            # iniciador. Se toma la primera ruta viva, y si no hay, la primera.
+            first = next((p for p in fibre if p in alive), fibre[0])
+            transport = _child(first, "transport")
+            return vmnet.datastore(
+                name,
+                "fc",
+                gb=size,
+                target_wwn=wwn(_text(transport, "nodeWorldWideName")),
+                initiator_wwn=self.fc_initiators.get(_text(first, "adapter"), ""),
+                lun=_lun(first),
+                paths=len(alive) or None,
+            )
         if transports and all(_type(t) in _LOCAL_TRANSPORTS for t in transports):
             return vmnet.datastore(name, "vmfs", gb=size, local=True)
         # Sin rutas conocidas no se sabe de dónde viene: el servidor no lo
         # escribe, y eso es mejor que adivinar.
         return vmnet.datastore(name, "vmfs", gb=size)
+
+
+def wwn(value: str) -> str:
+    """Un World Wide Name como lo escribe todo el mundo: `50:06:01:60:3e:a0:12:34`.
+
+    vSphere lo da como un entero de 64 bits **con signo**: los que empiezan
+    por 8 o más llegan negativos. Cero o nada no es un WWN.
+    """
+    try:
+        number = int(value.strip())
+    except (AttributeError, ValueError):
+        return ""
+    number &= 2**64 - 1
+    if not number:
+        return ""
+    text = f"{number:016x}"
+    return ":".join(text[index : index + 2] for index in range(0, 16, 2))
 
 
 def _lun(path: ET.Element | None) -> int | None:

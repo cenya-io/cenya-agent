@@ -33,7 +33,11 @@ SYSTEM_INFO = val(
 HBAS = val(
     '<HostHostBusAdapter xsi:type="HostInternetScsiHba"><key>key-vim.host.InternetScsiHba-vmhba64</key>'
     "<device>vmhba64</device><iScsiName>iqn.1998-01.com.vmware:esxi01-1a2b</iScsiName></HostHostBusAdapter>"
-    '<HostHostBusAdapter xsi:type="HostBlockHba"><key>key-vim.host.BlockHba-vmhba0</key><device>vmhba0</device></HostHostBusAdapter>',
+    '<HostHostBusAdapter xsi:type="HostBlockHba"><key>key-vim.host.BlockHba-vmhba0</key><device>vmhba0</device></HostHostBusAdapter>'
+    '<HostHostBusAdapter xsi:type="HostFibreChannelHba"><key>key-vim.host.FibreChannelHba-vmhba2</key><device>vmhba2</device>'
+    "<portWorldWideName>2377900762148634625</portWorldWideName><nodeWorldWideName>2305843168110706689</nodeWorldWideName></HostHostBusAdapter>"
+    '<HostHostBusAdapter xsi:type="HostFibreChannelHba"><key>key-vim.host.FibreChannelHba-vmhba3</key><device>vmhba3</device>'
+    "<portWorldWideName>2377900762148634626</portWorldWideName></HostHostBusAdapter>",
     "ArrayOfHostHostBusAdapter",
 )
 LUNS = val(
@@ -55,10 +59,12 @@ MULTIPATH = val(
     + "</lun>"
     "<lun><key>m2</key><id>y</id><lun>key-lun-local</lun><path><key>p3</key><name>vmhba0:C0:T0:L0</name>"
     '<state>active</state><adapter>key-vim.host.BlockHba-vmhba0</adapter><transport xsi:type="HostBlockAdapterTargetTransport"/></path></lun>'
-    "<lun><key>m3</key><id>z</id><lun>key-lun-fc</lun><path><key>p4</key><name>vmhba2:C0:T3:L7</name>"
-    '<state>active</state><adapter>a</adapter><transport xsi:type="HostFibreChannelTargetTransport"/></path>'
-    "<path><key>p5</key><name>vmhba3:C0:T3:L7</name>"
-    '<state>dead</state><adapter>b</adapter><transport xsi:type="HostFibreChannelTargetTransport"/></path></lun>',
+    "<lun><key>m3</key><id>z</id><lun>key-lun-fc</lun><path><key>p5</key><name>vmhba3:C0:T3:L7</name>"
+    '<state>dead</state><adapter>key-vim.host.FibreChannelHba-vmhba3</adapter><transport xsi:type="HostFibreChannelTargetTransport">'
+    "<portWorldWideName>5766297921370718209</portWorldWideName><nodeWorldWideName>5766297887010979840</nodeWorldWideName></transport></path>"
+    "<path><key>p4</key><name>vmhba2:C0:T3:L7</name>"
+    '<state>active</state><adapter>key-vim.host.FibreChannelHba-vmhba2</adapter><transport xsi:type="HostFibreChannelTargetTransport">'
+    "<portWorldWideName>5766297887010979841</portWorldWideName><nodeWorldWideName>5766297887010979840</nodeWorldWideName></transport></path></lun>",
     "HostMultipathInfo",
 )
 HOST_DATASTORES = val(
@@ -138,6 +144,16 @@ class HostInventoryTests(unittest.TestCase):
     def test_a_fibre_channel_lun_counts_only_live_paths(self) -> None:
         self.assertEqual(self.stores["FC-LUN"]["type"], "fc")
         self.assertEqual(self.stores["FC-LUN"]["lun"], 7)
+        self.assertEqual(self.stores["FC-LUN"]["paths"], 1)
+
+    def test_a_fibre_channel_lun_says_which_array_and_which_card(self) -> None:
+        """La WWNN de destino es la cabina; la WWPN de la tarjeta por la que
+        sale la ruta viva, el iniciador. Sin esto un datastore de fibra no
+        tenía de dónde colgar y no entraba en el inventario."""
+        store = self.stores["FC-LUN"]
+
+        self.assertEqual(store["target_wwn"], "50:06:01:60:88:60:00:00")
+        self.assertEqual(store["initiator_wwn"], "21:00:00:24:ff:00:00:01")
         self.assertEqual(self.stores["FC-LUN"]["paths"], 1)
 
     def test_vsan_travels_with_its_own_word(self) -> None:
@@ -474,6 +490,21 @@ PNICS_WITH_KEYS = val(
     "<PhysicalNic><key>key-vim.host.PhysicalNic-vmnic2</key><device>vmnic2</device><mac>3c:ec:ef:01:02:05</mac></PhysicalNic>",
     "ArrayOfPhysicalNic",
 )
+
+
+class WwnTests(unittest.TestCase):
+    def test_a_positive_long_is_written_in_pairs(self) -> None:
+        self.assertEqual(vsphere_soap.wwn("5764607523034234880"), "50:00:00:00:00:00:00:00")
+
+    def test_a_negative_long_is_the_same_64_bits(self) -> None:
+        """vSphere da el WWN como entero con signo: los que empiezan por 8 o
+        más llegan negativos."""
+        self.assertEqual(vsphere_soap.wwn("-8070450532247928832"), "90:00:00:00:00:00:00:00")
+
+    def test_nothing_or_zero_is_no_wwn(self) -> None:
+        self.assertEqual(vsphere_soap.wwn(""), "")
+        self.assertEqual(vsphere_soap.wwn("0"), "")
+        self.assertEqual(vsphere_soap.wwn("no"), "")
 
 
 class HostDetailsTests(unittest.TestCase):
