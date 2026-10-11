@@ -66,6 +66,34 @@ HOST_PROPERTIES = (
     "datastore",
 )
 DATASTORE_PROPERTIES = ("summary", "info")
+#: La red y el resto de la ficha de cada ESXi, en una petición aparte: un
+#: vCenter que no deja leerla (permiso, versión) no se lleva por delante el
+#: hardware ni los datastores.
+NETWORK_PROPERTIES = (
+    "name",
+    "config.network.pnic",
+    "config.network.vnic",
+    "config.network.vswitch",
+    "config.network.portgroup",
+    "config.network.proxySwitch",
+    "config.virtualNicManagerInfo.netConfig",
+    "configManager.networkSystem",
+    "config.product",
+    "hardware.cpuInfo",
+    "hardware.memorySize",
+    "parent",
+)
+#: Hosts a los que se pregunta qué oyen por CDP o LLDP: una llamada por host.
+MAX_HINT_HOSTS = 64
+#: Los grupos de puertos de los switches distribuidos (vDS): su VLAN vive en
+#: el grupo, no en el host. `config.uplink` no se pide: no existe antes de la
+#: 6.5, y una propiedad que no existe tumba la petición entera.
+DVS_PORTGROUP_PROPERTIES = ("config.distributedVirtualSwitch", "config.defaultPortConfig")
+#: Un rango troncal más ancho que esto es «todas las VLAN» (el grupo de
+#: uplinks, o un troncal abierto): no dice qué VLAN pasan de verdad.
+MAX_TRUNK_SPAN = 64
+#: Tope de tarjetas por host: un ESXi de pyme tiene de dos a ocho.
+MAX_INTERFACES = 64
 
 #: Transportes de una ruta que son el propio servidor: un disco local, una
 #: controladora RAID interna, un NVMe en la placa.
@@ -240,7 +268,7 @@ def _fault(raw: bytes) -> str:
 def inventory(
     host: str, username: str, secret: str, *, port: int = 443, ca_file: str = "", tls_pin: str = ""
 ) -> dict[str, dict[str, Any]]:
-    """Hardware y datastores de cada ESXi del vCenter, por nombre de host."""
+    """Hardware, datastores y red de cada ESXi del vCenter, por nombre de host."""
     client = SoapClient(host, port=port, ca_file=ca_file, tls_pin=tls_pin)
     client.login(username, secret)
     try:
@@ -250,6 +278,7 @@ def inventory(
             name = (props.get("name").text or "").strip() if props.get("name") is not None else ""
             if name:
                 found[name] = host_inventory(props, datastores)
+        _add_network(client, found)
         return found
     finally:
         client.logout()
@@ -301,6 +330,13 @@ class _StorageMap:
             for hba in _children(props.get("config.storageDevice.hostBusAdapter"))
             if _type(hba) == "HostInternetScsiHba"
         }
+        # La WWPN de cada tarjeta de fibra: el «iniciador» de Fibre Channel,
+        # lo que la cabina tiene en su zona y en su lista de hosts.
+        self.fc_initiators = {
+            _text(hba, "key"): wwn(_text(hba, "portWorldWideName"))
+            for hba in _children(props.get("config.storageDevice.hostBusAdapter"))
+            if _type(hba) == "HostFibreChannelHba"
+        }
         self.paths_by_lun: dict[str, list[ET.Element]] = {}
         for lun in _children(props.get("config.storageDevice.multipathInfo"), "lun"):
             self.paths_by_lun[_text(lun, "lun")] = _children(lun, "path")
@@ -338,8 +374,22 @@ class _StorageMap:
                 lun=_lun(first),
                 paths=len(alive) or None,
             )
-        if any(_type(t) == "HostFibreChannelTargetTransport" for t in transports):
-            return vmnet.datastore(name, "fc", gb=size, lun=_lun(paths[0]), paths=len(alive) or None)
+        fibre = [p for p in paths if _type(_child(p, "transport")) == "HostFibreChannelTargetTransport"]
+        if fibre:
+            # La WWNN de destino es la cabina (una por cabina, sea cual sea el
+            # puerto por el que se entra); la WWPN de la tarjeta del host es el
+            # iniciador. Se toma la primera ruta viva, y si no hay, la primera.
+            first = next((p for p in fibre if p in alive), fibre[0])
+            transport = _child(first, "transport")
+            return vmnet.datastore(
+                name,
+                "fc",
+                gb=size,
+                target_wwn=wwn(_text(transport, "nodeWorldWideName")),
+                initiator_wwn=self.fc_initiators.get(_text(first, "adapter"), ""),
+                lun=_lun(first),
+                paths=len(alive) or None,
+            )
         if transports and all(_type(t) in _LOCAL_TRANSPORTS for t in transports):
             return vmnet.datastore(name, "vmfs", gb=size, local=True)
         # Sin rutas conocidas no se sabe de dónde viene: el servidor no lo
@@ -347,6 +397,328 @@ class _StorageMap:
         return vmnet.datastore(name, "vmfs", gb=size)
 
 
+def wwn(value: str) -> str:
+    """Un World Wide Name como lo escribe todo el mundo: `50:06:01:60:3e:a0:12:34`.
+
+    vSphere lo da como un entero de 64 bits **con signo**: los que empiezan
+    por 8 o más llegan negativos. Cero o nada no es un WWN.
+    """
+    try:
+        number = int(value.strip())
+    except (AttributeError, ValueError):
+        return ""
+    number &= 2**64 - 1
+    if not number:
+        return ""
+    text = f"{number:016x}"
+    return ":".join(text[index : index + 2] for index in range(0, 16, 2))
+
+
 def _lun(path: ET.Element | None) -> int | None:
     match = _LUN_NUMBER.search(_text(path, "name"))
     return int(match.group(1)) if match else None
+
+
+# --- Red ----------------------------------------------------------------------------
+
+
+def _add_network(client: SoapClient, found: dict[str, dict[str, Any]]) -> None:
+    """Las tarjetas, las VMkernel y los vecinos de cada host, sobre lo ya leído.
+
+    Si el vCenter no deja leer la red, cada host se queda con su hardware y sus
+    datastores: lo que falta no tumba lo que ya se tiene.
+    """
+    asked = 0
+    parents: dict[str, str] = {}
+    distributed: dict[str, dict[str, str]] = {}
+    try:
+        for _moid, props in client.objects("HostSystem", NETWORK_PROPERTIES):
+            name = (props.get("name").text or "").strip() if props.get("name") is not None else ""
+            if name not in found:
+                continue
+            hints: list[ET.Element] = []
+            if asked < MAX_HINT_HOSTS:
+                asked += 1
+                hints = _hints(client, props)
+            found[name].update(host_network(props, hints))
+            found[name].update(host_details(props))
+            parent = props.get("parent")
+            if parent is not None and parent.get("type") == "ClusterComputeResource" and (parent.text or "").strip():
+                parents[name] = (parent.text or "").strip()
+            uplinks = _distributed_uplinks(props)
+            if uplinks:
+                distributed[name] = uplinks
+    except HypervisorError:
+        return
+    _add_clusters(client, found, parents)
+    _add_distributed_vlans(client, found, distributed)
+
+
+def _uuid(value: str) -> str:
+    """El uuid de un vDS de una sola forma: el host lo da con espacios
+    («50 2c 1a … ») y el switch con guiones o sin ellos."""
+    return "".join(ch for ch in value.lower() if ch in "0123456789abcdef")
+
+
+def _distributed_uplinks(props: dict[str, ET.Element]) -> dict[str, str]:
+    """`{vmnic: uuid del vDS}` de las tarjetas de un host que sirven a un
+    switch distribuido (`config.network.proxySwitch`)."""
+    devices = {_text(nic, "key"): _text(nic, "device") for nic in _children(props.get("config.network.pnic"))}
+    found: dict[str, str] = {}
+    for proxy in _children(props.get("config.network.proxySwitch")):
+        uuid = _uuid(_text(proxy, "dvsUuid"))
+        if not uuid:
+            continue
+        for uplink in _children(proxy, "pnic"):
+            device = devices.get((uplink.text or "").strip())
+            if device:
+                found[device] = uuid
+    return found
+
+
+def _add_distributed_vlans(
+    client: SoapClient, found: dict[str, dict[str, Any]], distributed: dict[str, dict[str, str]]
+) -> None:
+    """Las VLAN de los grupos de puertos de cada vDS, en las vmnic que le sirven.
+
+    Dos peticiones solo si algún host tiene tarjetas en un vDS: los switches
+    (para su uuid) y sus grupos de puertos (para su VLAN). Si el vCenter no
+    deja leerlos, las tarjetas se quedan como estaban.
+    """
+    if not distributed:
+        return
+    try:
+        uuids = {
+            moid: _uuid((props["uuid"].text or ""))
+            for moid, props in client.objects("DistributedVirtualSwitch", ("uuid",))
+            if props.get("uuid") is not None
+        }
+        by_switch: dict[str, set[int]] = {}
+        for _moid, props in client.objects("DistributedVirtualPortgroup", DVS_PORTGROUP_PROPERTIES):
+            switch = props.get("config.distributedVirtualSwitch")
+            uuid = uuids.get((switch.text or "").strip()) if switch is not None else None
+            if uuid:
+                by_switch.setdefault(uuid, set()).update(portgroup_vlans(props.get("config.defaultPortConfig")))
+    except HypervisorError:
+        return
+    for host, uplinks in distributed.items():
+        for port in found[host].get("interfaces") or []:
+            vlans = by_switch.get(uplinks.get(port.get("name"), ""))
+            if vlans:
+                port["vlans"] = sorted(set(port.get("vlans") or []) | vlans)
+
+
+def portgroup_vlans(config: ET.Element | None) -> set[int]:
+    """Las VLAN de un grupo de puertos distribuido.
+
+    Una VLAN fija (`VmwareDistributedVirtualSwitchVlanIdSpec`) es esa; un
+    troncal (`...TrunkVlanSpec`) son sus rangos, salvo que sean tan anchos que
+    signifiquen «todas» (el grupo de uplinks, `0-4094`). La 0 no es una VLAN y
+    una VLAN privada (PVLAN) se deja fuera: su número no es el de la red.
+    """
+    vlan = _child(config, "vlan")
+    kind = _type(vlan)
+    found: set[int] = set()
+    if kind == "VmwareDistributedVirtualSwitchVlanIdSpec":
+        value = _text(vlan, "vlanId")
+        if value.isdigit() and 1 <= int(value) <= 4094:
+            found.add(int(value))
+    elif kind == "VmwareDistributedVirtualSwitchTrunkVlanSpec":
+        ranges = []
+        for item in _children(vlan, "vlanId"):
+            start, end = _text(item, "start"), _text(item, "end")
+            if start.isdigit() and end.isdigit() and int(start) <= int(end):
+                ranges.append((max(int(start), 1), min(int(end), 4094)))
+        if sum(end - start + 1 for start, end in ranges) <= MAX_TRUNK_SPAN:
+            for start, end in ranges:
+                found.update(range(start, end + 1))
+    return found
+
+
+def _add_clusters(client: SoapClient, found: dict[str, dict[str, Any]], parents: dict[str, str]) -> None:
+    """El clúster de cada host por la API SOAP, de respaldo de la REST.
+
+    La REST pregunta clúster por clúster con un filtro que ya falló una vez
+    (el nombre cambia entre `/api` y `/rest`). Aquí el clúster es el padre del
+    host, sin filtros. Solo se pide si algún host está en un clúster.
+    """
+    if not parents:
+        return
+    try:
+        names = {
+            moid: (props.get("name").text or "").strip()
+            for moid, props in client.objects("ClusterComputeResource", ("name",))
+            if props.get("name") is not None
+        }
+    except HypervisorError:
+        return
+    for host, moid in parents.items():
+        if names.get(moid):
+            found[host]["cluster"] = names[moid][:200]
+
+
+def host_details(props: dict[str, ET.Element]) -> dict[str, Any]:
+    """Lo que la ficha de un ESXi tiene sitio para guardar: la versión exacta
+    («VMware ESXi 8.0.2 build-22380479»), los núcleos lógicos (con hilos, que
+    es contra lo que se comparan las vCPU repartidas) y la memoria en GB."""
+    product = _text(props.get("config.product"), "fullName")
+    threads = _text(props.get("hardware.cpuInfo"), "numCpuThreads")
+    memory = props.get("hardware.memorySize")
+    memory_text = (memory.text or "").strip() if memory is not None else ""
+    found: dict[str, Any] = {
+        "os": product[:200],
+        "cpu_count": int(threads) if threads.isdigit() else 0,
+        "ram_gb": round(int(memory_text) / 1024**3) if memory_text.isdigit() else 0,
+    }
+    return {key: value for key, value in found.items() if value}
+
+
+def _uplink_vlans(props: dict[str, ET.Element]) -> dict[str, list[int]]:
+    """Las VLAN que pasan por cada vmnic de un vSwitch estándar.
+
+    Son las de los grupos de puertos de su vSwitch: el puerto del switch al
+    otro lado tiene que llevarlas todas etiquetadas. La 0 es «sin etiqueta» y
+    la 4095 «la VLAN la pone la máquina»: ninguna es una VLAN que apuntar.
+    Un switch distribuido (vDS) va aparte (`_add_distributed_vlans`): sus
+    grupos viven en otro objeto del vCenter.
+    """
+    by_switch: dict[str, set[int]] = {}
+    for group in _children(props.get("config.network.portgroup")):
+        spec = _child(group, "spec")
+        vlan = _text(spec, "vlanId")
+        if vlan.isdigit() and 1 <= int(vlan) <= 4094:
+            by_switch.setdefault(_text(spec, "vswitchName"), set()).add(int(vlan))
+    devices = {_text(nic, "key"): _text(nic, "device") for nic in _children(props.get("config.network.pnic"))}
+    found: dict[str, list[int]] = {}
+    for switch in _children(props.get("config.network.vswitch")):
+        vlans = by_switch.get(_text(switch, "name"))
+        if not vlans:
+            continue
+        for uplink in _children(switch, "pnic"):
+            device = devices.get((uplink.text or "").strip())
+            if device:
+                found[device] = sorted(vlans)
+    return found
+
+
+def _hints(client: SoapClient, props: dict[str, ET.Element]) -> list[ET.Element]:
+    """Lo que el ESXi oye por CDP o LLDP en cada tarjeta (`QueryNetworkHint`).
+
+    Es una llamada por host. Una cuenta sin permiso para hacerla, o un host
+    desconectado, deja ese host sin vecinos; los demás siguen.
+    """
+    system = props.get("configManager.networkSystem")
+    moid = (system.text or "").strip() if system is not None else ""
+    if not moid:
+        return []
+    try:
+        answer = client.call("<QueryNetworkHint>" + _moref("HostNetworkSystem", moid) + "</QueryNetworkHint>")
+    except HypervisorError:
+        return []
+    return _children(answer, "returnval")
+
+
+def host_network(props: dict[str, ET.Element], hints: list[ET.Element]) -> dict[str, Any]:
+    """Las tarjetas físicas (vmnic) y las VMkernel (vmk) como puertos del
+    equipo, cuál es la de gestión con su IP y MAC, y los vecinos de cada vmnic.
+
+    Las vmnic tienen la forma de las interfaces que manda SNMP; sin velocidad
+    de enlace, una tarjeta está caída. Solo van las claves con algo dentro.
+    """
+    interfaces: list[dict[str, Any]] = []
+    vlans = _uplink_vlans(props)
+    for nic in _children(props.get("config.network.pnic"))[:MAX_INTERFACES]:
+        name = _text(nic, "device")
+        if not name:
+            continue
+        speed = _text(_child(nic, "linkSpeed"), "speedMb")
+        port: dict[str, Any] = {
+            "name": name,
+            "mac": vmnet.mac(_text(nic, "mac")),
+            "status": "up" if speed else "down",
+            "speed_mbps": int(speed) if speed.isdigit() else 0,
+            "type": "ethernet",
+        }
+        if vlans.get(name):
+            port["vlans"] = vlans[name]
+        interfaces.append(port)
+    management_keys = _management_keys(props.get("config.virtualNicManagerInfo.netConfig"))
+    management = management_ip = management_mac = ""
+    for vnic in _children(props.get("config.network.vnic"))[:MAX_INTERFACES]:
+        name = _text(vnic, "device")
+        if not name:
+            continue
+        spec = _child(vnic, "spec")
+        mac = vmnet.mac(_text(spec, "mac"))
+        interfaces.append({"name": name, "mac": mac, "status": "up", "speed_mbps": 0, "type": "virtual"})
+        is_management = _text(vnic, "key") in management_keys or (not management_keys and name == "vmk0")
+        if is_management and not management:
+            management = name
+            management_ip = _text(_child(spec, "ip"), "ipAddress")
+            management_mac = mac
+    found: dict[str, Any] = {
+        "interfaces": interfaces,
+        "management_interface": management,
+        "management_ip": management_ip,
+        "mac": management_mac,
+        "neighbors": [n for n in (_neighbor(hint) for hint in hints) if n],
+    }
+    return {key: value for key, value in found.items() if value}
+
+
+def _management_keys(net_config: ET.Element | None) -> set[str]:
+    """Las VMkernel marcadas para gestión: `management.key-vim.host.VirtualNic-vmk0`
+    pasa a la clave de la VMkernel, `key-vim.host.VirtualNic-vmk0`."""
+    keys: set[str] = set()
+    for config in _children(net_config):
+        if _text(config, "nicType") != "management":
+            continue
+        for selected in _children(config, "selectedVnic"):
+            value = (selected.text or "").strip()
+            keys.add(value.split(".", 1)[1] if value.startswith("management.") else value)
+    return keys
+
+
+def _neighbor(hint: ET.Element) -> dict[str, str] | None:
+    """El switch y el puerto al otro lado de una vmnic.
+
+    CDP primero: da el nombre del puerto como lo escribe el switch
+    («GigabitEthernet1/0/12»), que es como se empareja con sus interfaces.
+    LLDP si no hay CDP. Ni uno ni otro: esa tarjeta no tiene vecino conocido.
+    """
+    local = _text(hint, "device")
+    if not local:
+        return None
+    cdp = _child(hint, "connectedSwitchPort")
+    if cdp is not None and (_text(cdp, "devId") or _text(cdp, "systemName")) and _text(cdp, "portId"):
+        found = {
+            "protocol": "cdp",
+            "local_port": local,
+            "remote_name": _text(cdp, "devId") or _text(cdp, "systemName"),
+            "remote_port": _text(cdp, "portId"),
+            "remote_mac": "",
+            "remote_ip": _text(cdp, "mgmtAddr") or _text(cdp, "address"),
+            "remote_platform": _text(cdp, "hardwarePlatform"),
+        }
+        return {key: value[:200] for key, value in found.items()}
+    lldp = _child(hint, "lldpInfo")
+    if lldp is not None and _text(lldp, "portId"):
+        parameters = {_text(p, "key"): _text(p, "value") for p in _children(lldp, "parameter")}
+        port = _text(lldp, "portId")
+        if vmnet.mac(port):
+            # Algunos switches anuncian el puerto por su MAC: el nombre que
+            # se empareja con sus interfaces es entonces la descripción.
+            port = parameters.get("Port Description", "") or port
+        found = {
+            "protocol": "lldp",
+            "local_port": local,
+            "remote_name": parameters.get("System Name", ""),
+            "remote_port": port,
+            "remote_mac": vmnet.mac(_text(lldp, "chassisId")),
+            "remote_ip": parameters.get("Management Address", ""),
+            "remote_sys_descr": parameters.get("System Description", ""),
+        }
+        if not (found["remote_name"] or found["remote_mac"]):
+            return None
+        return {key: value[:200] for key, value in found.items()}
+    return None

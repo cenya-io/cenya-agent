@@ -240,8 +240,11 @@ class VMwareClient:
                 "name": str(host.get("name") or ""),
                 "power_state": str(host.get("power_state") or ""),
                 "connection_state": str(host.get("connection_state") or ""),
-                "cluster": clusters.get(str(host.get("name") or ""), ""),
                 **physical.get(str(host.get("name") or ""), {}),
+                # El de la REST manda; el de la SOAP (el padre del host) es el
+                # respaldo para cuando el filtro por clúster no contesta.
+                "cluster": clusters.get(str(host.get("name") or ""), "")
+                or str(physical.get(str(host.get("name") or ""), {}).get("cluster") or ""),
             }
             for host in hosts
             if host.get("name")
@@ -368,7 +371,8 @@ class VMwareClient:
                     "id": identifier,
                     "name": str(vm.get("name") or identifier),
                     "host": hosts_by_vm.get(identifier, ""),
-                    "cluster": clusters.get(hosts_by_vm.get(identifier, ""), ""),
+                    "cluster": clusters.get(hosts_by_vm.get(identifier, ""), "")
+                    or str(self._physical().get(hosts_by_vm.get(identifier, ""), {}).get("cluster") or ""),
                     "status": _vmware_status(str(vm.get("power_state") or "")),
                     "vcpus": int(
                         _number(vm.get("cpu_count")) or _number((detail.get("cpu") or {}).get("count"))
