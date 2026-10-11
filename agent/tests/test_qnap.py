@@ -86,6 +86,7 @@ ROUTES = {
     "/cgi-bin/authLogin.cgi": LOGIN_OK,
     "/cgi-bin/management/manaRequest.cgi": SYSINFO,
     "/cgi-bin/disk/iscsi_portal_setting.cgi": ISCSI_ROWS,
+    "/cgi-bin/management/chartReq.cgi": "<QDocRoot/>",
     "/cgi-bin/authLogout.cgi": "<QDocRoot/>",
 }
 
@@ -193,6 +194,95 @@ class ReaderTests(unittest.TestCase):
     def test_the_qnap_is_one_more_array_for_the_collector(self) -> None:
         self.assertIs(CLIENTS[creds.QNAP], storage_arrays.QNAPClient)
         self.assertEqual(KIND_LABELS[creds.QNAP], "qnap")
+
+
+# Lo que contestó una TS-364 real con QTS 5.2.10 (11-10-2026), con el nombre,
+# la serie, la IP y la MAC cambiados: sin destinos ni LUN, con el prefijo de sus
+# IQN anunciado aparte, la política por defecto como único iniciador y un
+# volumen en espejo con sus carpetas.
+REAL_SYSINFO = (
+    '<?xml version="1.0" encoding="UTF-8" ?><QDocRoot version="1.0"><authPassed><![CDATA[1]]></authPassed>'
+    "<model><modelName><![CDATA[TS-X64]]></modelName><displayModelName><![CDATA[TS-364]]></displayModelName></model>"
+    "<firmware><name><![CDATA[QTS]]></name><version><![CDATA[5.2.10]]></version><number><![CDATA[3577]]></number>"
+    "<build><![CDATA[20260731]]></build><patch><![CDATA[0]]></patch></firmware>"
+    "<hostname><![CDATA[NAS-PRUEBA]]></hostname><func><name><![CDATA[S_MENU_40]]></name><ownContent><root>"
+    "<nic_cnt><![CDATA[1]]></nic_cnt><ifname1>eth0</ifname1><eth_status1>1</eth_status1><eth_max_speed1>2500</eth_max_speed1>"
+    "<eth_ip1>192.0.2.50</eth_ip1><eth_mask1>255.255.255.0</eth_mask1><eth_mac1>00:00:5e:00:53:23</eth_mac1>"
+    "<serial_number>Q000X00000X</serial_number><server_name><![CDATA[NAS-PRUEBA]]></server_name>"
+    "<bios_version>Q08EAR03</bios_version></root></ownContent></func></QDocRoot>"
+)
+REAL_USAGE = (
+    '<QDocRoot version="1.0"><authPassed><![CDATA[1]]></authPassed><volumeList><volume>'
+    "<volumeStat><![CDATA[mirror]]></volumeStat><volumeDisks><![CDATA[ 1,2]]></volumeDisks><volumeStatus><![CDATA[0]]></volumeStatus>"
+    "<volumeType><![CDATA[1]]></volumeType><volumeValue><![CDATA[1]]></volumeValue><freeSize><![CDATA[929]]></freeSize>"
+    "<volumeLabel><![CDATA[Datos]]></volumeLabel><is_default_volume><![CDATA[1]]></is_default_volume></volume></volumeList>"
+    "<volumeUseList><volumeUse><volumeValue><![CDATA[1]]></volumeValue><total_size><![CDATA[3194201767936]]></total_size>"
+    "<free_size><![CDATA[1000083337216]]></free_size><folder_element><sharename><![CDATA[Public]]></sharename>"
+    "<used_size><![CDATA[9408729088]]></used_size></folder_element></volumeUse></volumeUseList></QDocRoot>"
+)
+REAL_ISCSI = (
+    '<QDocRoot version="1.0"><authPassed><![CDATA[1]]></authPassed><iSCSIModel>Ver2.0</iSCSIModel><iSCSIPortal>'
+    "<maxTargetCnt>256</maxTargetCnt><bServiceEnable>1</bServiceEnable><servicePort>3260</servicePort>"
+    "<targetIQNPrefix>iqn.2004-04.com.qnap:ts-364:iscsi.</targetIQNPrefix><targetIQNPostfix>.605a23</targetIQNPostfix>"
+    "<VolumeList><volumeInfo><vol_no>1</vol_no><volumeName><![CDATA[Datos]]></volumeName>"
+    "<volumePath>/share/CACHEDEV1_DATA</volumePath><volumeSize>931.40 GB</volumeSize></volumeInfo></VolumeList></iSCSIPortal>"
+    "<iSCSITargetList><targetListCnt>0</targetListCnt></iSCSITargetList><iSCSILUNList><LUNListCnt>0</LUNListCnt></iSCSILUNList>"
+    "<iSCSIInitiatorList><initiatorListCnt>1</initiatorListCnt><initiatorInfo><initiatorIndex>0</initiatorIndex>"
+    "<initiatorIQN>iqn.2004-04.com.qnap:all:iscsi.default.ffffff</initiatorIQN><initiatorAlias>Default Policy</initiatorAlias>"
+    "</initiatorInfo></iSCSIInitiatorList><targetACL></targetACL><errorcode>0</errorcode><result>0</result></QDocRoot>"
+)
+
+
+class RealDeviceTests(unittest.TestCase):
+    """La forma de una QNAP real: lo que el volcado enseñó que había que cambiar."""
+
+    def setUp(self) -> None:
+        qnap, _ = client(
+            {
+                **ROUTES,
+                "/cgi-bin/management/manaRequest.cgi": REAL_SYSINFO,
+                "/cgi-bin/management/chartReq.cgi": REAL_USAGE,
+                "/cgi-bin/disk/iscsi_portal_setting.cgi": REAL_ISCSI,
+            }
+        )
+        qnap.login()
+        self.host = qnap.hosts()[0]
+
+    def test_the_card_of_a_real_ts364(self) -> None:
+        self.assertEqual(self.host["name"], "NAS-PRUEBA")
+        self.assertEqual((self.host["model"], self.host["serial"]), ("TS-364", "Q000X00000X"))
+        self.assertEqual(self.host["os"], "QTS 5.2.10 20260731")
+        self.assertEqual(self.host["addresses"], ["192.0.2.50"])
+
+    def test_the_iqn_prefix_is_not_a_target_and_the_default_policy_is_not_a_host(self) -> None:
+        """Sin destinos ni LUN, el único volumen es el de verdad."""
+        self.assertEqual([v["protocol"] for v in self.host["storage_volumes"]], ["smb"])
+
+    def test_the_volume_with_its_real_size_and_its_mirror(self) -> None:
+        self.assertEqual(
+            self.host["storage_volumes"],
+            [{"name": "Datos", "protocol": "smb", "gb": 2975, "raid": "mirror"}],
+        )
+
+    def test_the_default_policy_never_counts_as_an_initiator(self) -> None:
+        xml = REAL_ISCSI.replace(
+            "<targetListCnt>0</targetListCnt>",
+            "<targetInfo><targetIndex>0</targetIndex><targetName>vmfs</targetName>"
+            "<targetIQN>iqn.2004-04.com.qnap:ts-364:iscsi.vmfs.605a23</targetIQN>"
+            "<initiatorIQN>iqn.2004-04.com.qnap:all:iscsi.default.ffffff</initiatorIQN>"
+            "<initiatorIQN>iqn.1998-01.com.vmware:esxi01-1234</initiatorIQN></targetInfo>",
+        )
+
+        volumes = storage_arrays.qnap_volumes(ET.fromstring(xml))
+
+        self.assertEqual(len(volumes), 1)
+        self.assertEqual(volumes[0]["target_iqn"], "iqn.2004-04.com.qnap:ts-364:iscsi.vmfs.605a23")
+        self.assertEqual(volumes[0]["initiators"], ["iqn.1998-01.com.vmware:esxi01-1234"])
+
+    def test_a_single_disk_volume_has_no_raid_word(self) -> None:
+        xml = REAL_USAGE.replace("mirror", "single")
+
+        self.assertEqual(storage_arrays.qnap_nas_volumes(ET.fromstring(xml))[0]["raid"], "")
 
 
 class DumpTests(unittest.TestCase):

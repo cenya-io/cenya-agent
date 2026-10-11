@@ -438,17 +438,21 @@ class QNAPClient:
 
     def hosts(self) -> list[dict[str, Any]]:
         info = _qnap_root(self.call(QNAP_CALLS["sysinfo"]))
+        usage = _qnap_root(self.call(QNAP_CALLS["volumes"]))
         iscsi = _qnap_root(self.call(QNAP_CALLS["iscsi"]))
         self.logout()
-        firmware = " ".join(part for part in (_first(info, "version"), _first(info, "build")) if part)
+        # «QTS» o «QuTS hero»: lo dice ella (`firmware/name`).
+        firmware = " ".join(
+            part for part in (_first(info, "name") or "QTS", _first(info, "version"), _first(info, "build")) if part
+        )
         return [
             _array_host(
                 _first(info, "server_name") or self.host,
                 "QNAP",
                 model=(_first(info, "displayModelName") or _first(info, "modelName"))[:200],
                 serial=_first(info, "serial_number")[:200],
-                os=f"QTS {firmware}".strip() if firmware else "",
-                storage_volumes=qnap_volumes(iscsi),
+                os=firmware if _first(info, "version") else "",
+                storage_volumes=qnap_volumes(iscsi) + qnap_nas_volumes(usage),
                 addresses=qnap_addresses(info),
             )
         ]
@@ -490,9 +494,13 @@ def _row(element: ET.Element) -> dict[str, str]:
 def qnap_volumes(iscsi: ET.Element | None) -> list[dict[str, Any]]:
     """Los destinos iSCSI de una QNAP, y sus LUN, sin dar por hechos los nombres.
 
-    Un destino es cualquier elemento con un hijo `target…` y un IQN que empieza
-    por `iqn.`; sus iniciadores, los IQN que cuelgan de él en elementos
-    `initiator…`. Un LUN es cualquier elemento con un hijo `lun…name`; su
+    Un destino es cualquier elemento con un hijo `targetIQN` (o `iqn`) que
+    empieza por `iqn.` y no acaba en punto: la QNAP anuncia también el prefijo
+    de sus IQN (`targetIQNPrefix`, «iqn.2004-04.com.qnap:ts-364:iscsi.»), que
+    no es un destino (visto en una TS-364 con QTS 5.2.10). Sus iniciadores, los
+    IQN que cuelgan de él en elementos `initiator…`, sin la política por
+    defecto de la QNAP («Default Policy», `…:all:iscsi.default…`), que no es un
+    host. Un LUN es cualquier elemento con un hijo `lun…name`; su
     destino, el índice de destino que lleve dentro. Cada LUN sale con su
     destino; un destino del que no se lee ningún LUN sale él solo, con su
     nombre: basta para fundir con esta la cabina que un ESXi creó por ese IQN.
@@ -505,14 +513,23 @@ def qnap_volumes(iscsi: ET.Element | None) -> list[dict[str, Any]]:
         row = _row(element)
         if not row:
             continue
-        iqn = next((value for key, value in row.items() if "iqn" in key and _IQN.match(value)), "")
+        iqn = next(
+            (
+                value
+                for key, value in row.items()
+                if key in ("targetiqn", "iqn") and _IQN.match(value) and not value.endswith(".")
+            ),
+            "",
+        )
         if iqn and any(key.startswith("target") for key in row):
             index = row.get("targetindex") or row.get("targetid") or row.get("index") or iqn
             initiators = sorted(
                 {
                     (node.text or "").strip()
                     for node in element.iter()
-                    if "initiator" in _local(node.tag).lower() and _IQN.match((node.text or "").strip())
+                    if "initiator" in _local(node.tag).lower()
+                    and _IQN.match((node.text or "").strip())
+                    and not _qnap_default_policy((node.text or "").strip())
                 }
             )
             targets[index] = {
@@ -546,6 +563,55 @@ def qnap_volumes(iscsi: ET.Element | None) -> list[dict[str, Any]]:
         if index not in used and len(found) < MAX_VOLUMES:
             found.append(_qnap_volume(target["name"], target))
     return found
+
+
+def _qnap_default_policy(iqn: str) -> bool:
+    """La política de acceso por defecto de la QNAP: vale para todos, no es un host."""
+    return ":all:" in iqn.lower() or ".default." in iqn.lower()
+
+
+#: Lo que la QNAP llama a cada RAID en `volumeStat` (visto: «mirror»); el
+#: servidor traduce el resto (`raid_of`).
+_QNAP_RAID = {"single": "", "jbod": "", "static": ""}
+
+
+def qnap_nas_volumes(usage: ET.Element | None) -> list[dict[str, Any]]:
+    """Los volúmenes de la QNAP (`chartReq.cgi?chart_func=disk_usage`), con su
+    tamaño de verdad y su RAID.
+
+    Es lo que interesa de una QNAP que solo sirve carpetas compartidas, que es
+    la mayoría en una pyme: «Datos, 2,9 TB, en espejo». Sale como SMB, el
+    protocolo con el que QTS sirve sus carpetas de fábrica. El tamaño está en
+    `volumeUseList` (`total_size`, en bytes) unido por `volumeValue`.
+    """
+    if usage is None:
+        return []
+    sizes: dict[str, str] = {}
+    for use in usage.iter():
+        if _local(use.tag).lower() == "volumeuse":
+            row = _row(use)
+            if row.get("volumevalue"):
+                sizes[row["volumevalue"]] = row.get("total_size", "")
+    found: list[dict[str, Any]] = []
+    for volume in usage.iter():
+        if _local(volume.tag).lower() != "volume":
+            continue
+        row = _row(volume)
+        value = row.get("volumevalue", "")
+        name = row.get("volumelabel") or (f"Volume {value}" if value else "")
+        if not name:
+            continue
+        size = sizes.get(value, "")
+        stat = row.get("volumestat", "").strip().lower()
+        found.append(
+            {
+                "name": name[:200],
+                "protocol": "smb",
+                "gb": round(int(size) / (1024**3)) if size.isdigit() else 0,
+                "raid": _QNAP_RAID.get(stat, stat),
+            }
+        )
+    return found[:MAX_VOLUMES]
 
 
 def _qnap_volume(name: str, target: dict[str, Any], *, size: str = "", number: str = "") -> dict[str, Any]:
