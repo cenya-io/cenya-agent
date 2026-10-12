@@ -53,6 +53,12 @@ UNPROVEN_FAILURES = 3
 CHANGED_PASSWORD_HOSTS = 3
 #: Cuánto dura una suspensión si nadie toca las credenciales.
 SUSPENSION = timedelta(hours=24)
+#: Rechazos de una credencial en UN equipo antes de dejar de probarla en él
+#: (12-10-2026). Los demás equipos la siguen probando: tres switches sin esa
+#: cuenta no pueden dejar fuera a los otros cincuenta. Solo «Reintentar» en la
+#: web (el encargo `forget_rejection`), entrar con ella o «Analizar» la vuelven
+#: a probar allí.
+HOST_REJECTIONS = 3
 #: Una credencial que entró hace menos de esto no se frena en los equipos donde
 #: es la recordada. Pasado este tiempo, mientras no vuelva a entrar, solo
 #: `CHANGED_PASSWORD_HOSTS` intentos a la vez en esos equipos: si le cambiaron
@@ -116,6 +122,8 @@ def _blank() -> dict[str, Any]:
         "config_family": "",
         "confwatch": {},
         "creds": {},
+        #: `{ident: rechazos}` de cada credencial en este equipo.
+        "rejected": {},
     }
 
 
@@ -144,6 +152,11 @@ def _clean_entry(raw: Any) -> dict[str, Any] | None:
                     "ok_at": _text(record.get("ok_at")),
                     "failed_at": _text(record.get("failed_at")),
                 }
+    rejected = raw.get("rejected")
+    if isinstance(rejected, dict):
+        for ident, count in rejected.items():
+            if isinstance(ident, str) and ident and isinstance(count, int) and not isinstance(count, bool) and count > 0:
+                entry["rejected"][ident] = count
     return entry
 
 
@@ -201,6 +214,13 @@ class Attempt:
     budget: bool = False
     #: Ocupa uno de los intentos a la vez en equipos donde es la recordada.
     throttled: bool = False
+    #: Cuenta para el freno global (cuentas de Windows e hipervisores). Para
+    #: SSH solo cuenta el límite por equipo (`HOST_REJECTIONS`).
+    brake: bool = True
+    #: Cuenta para el límite por equipo (`HOST_REJECTIONS`): SSH y WinRM, que
+    #: entran en equipos con IP. Un hipervisor se nombra por su servidor y la
+    #: web no podría ofrecer «Reintentar»; se queda con el freno global.
+    per_host: bool = False
 
 
 class Memory:
@@ -568,6 +588,8 @@ class Memory:
         host_key: str = "",
         remembered: bool = False,
         explicit: bool = False,
+        brake: bool = True,
+        per_host: bool = False,
         wait: float = MAX_WAIT_SECONDS,
     ) -> Attempt | None:
         """Ask before trying a credential. `None`: do not try it now.
@@ -581,6 +603,9 @@ class Memory:
 
         `explicit` es una persona que lo pide (`probe`, `test_credential`):
         puede probar una suspendida, una vez, y si entra la levanta.
+
+        Sin `brake` (SSH) no hay límite global: lo que frena es el límite por
+        equipo, que se mira antes con `discarded`.
         """
         now = _utc(now)
         deadline = time.monotonic() + max(0.0, wait)
@@ -588,8 +613,8 @@ class Memory:
             while True:
                 record = self._credential(ident, now)
                 pending = self._in_flight(ident)
-                attempt = Attempt(ident, host_key, remembered, explicit)
-                if explicit:
+                attempt = Attempt(ident, host_key, remembered, explicit, brake=brake, per_host=per_host)
+                if explicit or not brake:
                     return attempt
                 if record["suspended_at"]:
                     return None
@@ -629,21 +654,53 @@ class Memory:
             if attempt.throttled:
                 pending[1] = max(0, pending[1] - 1)
             suspended_now = False
+            host = self._hosts.get(attempt.host_key) if attempt.host_key else None
             if outcome == OK:
                 record.update(proven=True, failures=0, hosts=[], suspended_at="", ok_at=_iso(now))
+                if host is not None:
+                    host["rejected"].pop(attempt.ident, None)
             elif outcome == AUTH_FAILED:
-                if not record["proven"]:
-                    record["failures"] += 1
-                    limit_reached = record["failures"] >= UNPROVEN_FAILURES
-                else:
-                    if attempt.remembered and attempt.host_key and attempt.host_key not in record["hosts"]:
-                        record["hosts"] = sorted([*record["hosts"], attempt.host_key])
-                    limit_reached = len(record["hosts"]) >= CHANGED_PASSWORD_HOSTS
-                if limit_reached and not record["suspended_at"]:
-                    record["suspended_at"] = _iso(now)
-                    suspended_now = True
+                # El límite por equipo, para todos los protocolos. Lo que pide
+                # una persona («Analizar», «Probar») no suma: es una prueba.
+                if attempt.per_host and attempt.host_key and not attempt.explicit:
+                    rejected = self._entry(attempt.host_key)["rejected"]
+                    rejected[attempt.ident] = rejected.get(attempt.ident, 0) + 1
+                # El freno global, solo donde hay una cuenta que bloquear.
+                if attempt.brake:
+                    if not record["proven"]:
+                        record["failures"] += 1
+                        limit_reached = record["failures"] >= UNPROVEN_FAILURES
+                    else:
+                        if attempt.remembered and attempt.host_key and attempt.host_key not in record["hosts"]:
+                            record["hosts"] = sorted([*record["hosts"], attempt.host_key])
+                        limit_reached = len(record["hosts"]) >= CHANGED_PASSWORD_HOSTS
+                    if limit_reached and not record["suspended_at"]:
+                        record["suspended_at"] = _iso(now)
+                        suspended_now = True
             self._turns.notify_all()
             return suspended_now
+
+    def discarded(self, host_key: str, ident: str) -> bool:
+        """Whether that credential was refused `HOST_REJECTIONS` times on that device."""
+        if not host_key:
+            return False
+        with self._lock:
+            entry = self._hosts.get(host_key)
+            return bool(entry) and entry["rejected"].get(ident, 0) >= HOST_REJECTIONS
+
+    def forget_rejection(self, ident: str, ip: str = "") -> int:
+        """«Reintentar» (el encargo `forget_rejection`): esa credencial vuelve a
+        contar desde cero en el equipo de esa IP, o en todos sin IP. Devuelve
+        en cuántos equipos estaba apuntada."""
+        ip = (ip or "").strip()
+        forgotten = 0
+        with self._lock:
+            for entry in self._hosts.values():
+                if ip and entry["ip"] != ip:
+                    continue
+                if entry["rejected"].pop(ident, None) is not None:
+                    forgotten += 1
+        return forgotten
 
 
 class Excluded:

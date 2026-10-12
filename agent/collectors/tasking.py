@@ -213,6 +213,16 @@ OLD_SSH = "old_ssh"
 UNTRUSTED = "tls_untrusted"
 #: La credencial está suspendida por fallar demasiado (límite global).
 SUSPENDED = "suspended"
+#: Ese equipo la rechazó `HOST_REJECTIONS` veces: ya no se prueba en él.
+DISCARDED = "discarded"
+#: Los protocolos sin freno global: una cuenta de un switch no se bloquea en
+#: ningún directorio, y tres switches sin ella no pueden dejar fuera al resto
+#: (12-10-2026). WinRM, DCOM y los hipervisores siguen con él: ahí una cuenta
+#: de dominio equivocada probada en todos los servidores acaba bloqueada.
+NO_GLOBAL_BRAKE = frozenset({"ssh"})
+#: Los protocolos con límite por equipo: los que entran en equipos con IP, que
+#: es como la web los encuentra para ofrecer «Reintentar».
+PER_HOST_LIMIT = frozenset({"ssh", "winrm"})
 #: Falló una ronda entera hace menos de 24 h; hoy no se insiste.
 RESTING = "resting"
 #: Escucha, pero ninguna credencial de ese protocolo lo cubre.
@@ -313,6 +323,18 @@ class Logins:
             result = call()
             self._record(credential, outcome, result)
             return result
+        per_host = self.protocol in PER_HOST_LIMIT
+        if (
+            per_host
+            and not self.explicit
+            and self._key
+            and hasattr(mem, "discarded")
+            and _guarded(mem.discarded, self._key, credential.ident, default=False)
+        ):
+            # Este equipo ya la rechazó tres veces: se sigue con la siguiente
+            # credencial, y la web lo dice en su ficha («Reintentar»).
+            record(self.ctx, self.ip, self.protocol, DISCARDED, credential)
+            return SKIPPED
         remembered = bool(self._key) and _guarded(mem.remembered, self._key, self.protocol, default="") == credential.ident
         attempt = _guarded(
             mem.reserve,
@@ -321,6 +343,8 @@ class Logins:
             host_key=self._key,
             remembered=remembered,
             explicit=self.explicit,
+            brake=self.protocol not in NO_GLOBAL_BRAKE,
+            per_host=per_host,
             default=False,
         )
         if attempt is False:

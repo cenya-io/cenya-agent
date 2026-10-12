@@ -82,6 +82,9 @@ KIND_PROBE = "probe"
 KIND_TEST_CREDENTIAL = "test_credential"
 KIND_RESEAL = "reseal"
 KIND_NETBOX_EXPORT = "netbox_export"
+#: «Reintentar» en la ficha de un equipo: esa credencial vuelve a probarse en
+#: él (12-10-2026). Sin IP, en todos.
+KIND_FORGET_REJECTION = "forget_rejection"
 
 DONE = "done"
 FAILED = "failed"
@@ -210,6 +213,9 @@ class Hooks:
     test_credential: Callable[[str, dict[str, Any]], tuple[str, dict[str, Any], list[Note]]] | None = None
     reseal: Callable[[str, dict[str, Any]], tuple[str, dict[str, Any], list[Note]]] | None = None
     netbox_export: Callable[[str, dict[str, Any]], tuple[str, dict[str, Any], list[Note]]] | None = None
+    #: `forget_rejection`: recibe `(credencial, ip)` y devuelve en cuántos
+    #: equipos estaba descartada. Sin él, el encargo es `unsupported`.
+    forget_rejection: Callable[[str, str], int] | None = None
     #: Un checkin bueno, con su `update` (o `None`): decide `agent/update.py`.
     update_offered: Callable[[Any], None] = lambda _update: None
     #: La clave pública de este agente (PEM) o "" (spec 1.2, `public_key`): se
@@ -530,7 +536,30 @@ class Control:
         if kind in (KIND_TEST_CREDENTIAL, KIND_RESEAL, KIND_NETBOX_EXPORT):
             self._start_sealed(order_id, str(kind), params)
             return
+        if kind == KIND_FORGET_REJECTION and self.hooks.forget_rejection is not None:
+            self._forget_rejection(order_id, params)
+            return
         self.answer(order_id, UNSUPPORTED)
+
+    def _forget_rejection(self, order_id: str, params: dict[str, Any]) -> None:
+        """Solo apunta en la memoria: no entra en ningún equipo, así que va aquí
+        mismo, sin hilo ni turno."""
+        credential = params.get("credential")
+        raw_ip = str(params.get("ip") or "").strip()
+        try:
+            ip = str(ipaddress.ip_address(raw_ip)) if raw_ip else ""
+        except ValueError:
+            ip = None
+        if not isinstance(credential, str) or not credential.strip() or len(credential) > 64 or ip is None:
+            note = collector_note("forget_rejection", "bad_params", "faltan la credencial o una IP válida")
+            self.answer(order_id, FAILED, {}, [note])
+            return
+        hook = self.hooks.forget_rejection
+        forgotten = self._safely(lambda: hook(credential.strip(), ip))
+        if forgotten is None:
+            self.answer(order_id, FAILED)
+            return
+        self.answer(order_id, DONE, {"forgotten": int(forgotten)})
 
     def _start_sealed(self, order_id: str, kind: str, params: dict[str, Any]) -> None:
         """Un encargo de la fase 3 en su propio hilo, con el mismo turno que «Analizar».
