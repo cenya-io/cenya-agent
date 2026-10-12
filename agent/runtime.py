@@ -223,6 +223,7 @@ class Runtime:
                 test_credential=self._test_credential,
                 reseal=self._reseal,
                 netbox_export=self._netbox_export,
+                forget_rejection=self._forget_rejection,
                 update_offered=self.updater.offer,
                 update_state=self.updater.state,
                 public_key=lambda: identity.public_key(self._environ),
@@ -301,6 +302,14 @@ class Runtime:
         return orders.FAILED, {}, [
             collector_note(kind, "agent_refused", "el servidor no acepta ahora a este agente; no se hace nada")
         ]
+
+    def _forget_rejection(self, credential: str, ip: str) -> int:
+        """«Reintentar»: esa credencial vuelve a contar desde cero en ese equipo."""
+        if self.memory is None:
+            return 0
+        forgotten = self.memory.forget_rejection(credential, ip)
+        self.memory.save()
+        return forgotten
 
     def _test_credential(self, order_id: str, params: dict[str, Any]) -> tuple[str, dict[str, Any], list[notes.Note]]:
         ctx = self._order_ctx()

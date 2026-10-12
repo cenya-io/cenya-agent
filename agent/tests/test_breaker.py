@@ -12,6 +12,9 @@ count every authentication attempt a fake login receives:
 * a *proven* credential that fails on 3 hosts where it was the remembered one
   is suspended too: its password has probably changed;
 * the suspension is said once per run, by name, never by secret.
+
+Since 12-10-2026 that brake is for Windows accounts and hypervisors only: SSH
+counts per device instead (`test_host_rejections`).
 """
 
 from __future__ import annotations
@@ -264,7 +267,10 @@ class CollectorBreakerTests(unittest.TestCase):
 
 
 class SshBreakerTests(unittest.TestCase):
-    def test_a_wrong_ssh_credential_is_tried_three_times_in_total(self) -> None:
+    def test_a_wrong_ssh_credential_has_no_global_brake(self) -> None:
+        """SSH no bloquea ninguna cuenta de dominio: sin freno global, una
+        credencial que nunca entra se prueba en cada equipo, y lo que la para
+        es el límite por equipo (`test_host_rejections`)."""
         attempts = Counter()
         lock = threading.Lock()
 
@@ -287,8 +293,8 @@ class SshBreakerTests(unittest.TestCase):
              mock.patch("agent.collectors.ssh.ssh.run", fake_run):
             SshCollector().collect(ctx)
 
-        self.assertEqual(attempts["root"], 3)
-        self.assertEqual([n.code for n in ctx["errors"] if n.code == "credential_suspended"], ["credential_suspended"])
+        self.assertEqual(attempts["root"], len(HOSTS))
+        self.assertEqual([n.code for n in ctx["errors"] if n.code == "credential_suspended"], [])
 
     def test_what_ssh_says_decides_whether_it_counts(self) -> None:
         cases = {
